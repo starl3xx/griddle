@@ -34,6 +34,12 @@ interface UseGriddleOptions {
   devTargetWord: string;
   onSolve?: (payload: SolvePayload & { unassisted: boolean }) => void;
   unassisted?: boolean;
+  /**
+   * When true, all input (keyboard, tap, backspace) is a no-op. Used while
+   * a blocking modal (tutorial, future settings) is open so stray keystrokes
+   * don’t silently fill the grid behind the modal.
+   */
+  disabled?: boolean;
 }
 
 export function useGriddle({
@@ -41,6 +47,7 @@ export function useGriddle({
   devTargetWord,
   onSolve,
   unassisted = false,
+  disabled = false,
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
   const [path, setPath] = useState<number[]>([]);
   const [shakeSignal, setShakeSignal] = useState(0);
@@ -120,7 +127,7 @@ export function useGriddle({
 
   const typeLetter = useCallback(
     (letter: string) => {
-      if (solved) return;
+      if (solved || disabled) return;
       const lc = letter.toLowerCase();
       if (!/^[a-z]$/.test(lc)) return;
       // find the cell in grid that matches AND is not yet used AND is not blocked
@@ -141,12 +148,12 @@ export function useGriddle({
       telemetryRef.current?.recordKeystroke();
       setPath((p) => [...p, foundCell!]);
     },
-    [grid, path, solved, triggerShake],
+    [grid, path, solved, disabled, triggerShake],
   );
 
   const tapCell = useCallback(
     (cellIdx: number) => {
-      if (solved) return;
+      if (solved || disabled) return;
       if (cellIdx < 0 || cellIdx > 8) return;
       const used = new Set(path);
       const current = path[path.length - 1] ?? null;
@@ -158,17 +165,20 @@ export function useGriddle({
       telemetryRef.current?.recordKeystroke();
       setPath((p) => [...p, cellIdx]);
     },
-    [path, solved, triggerShake],
+    [path, solved, disabled, triggerShake],
   );
 
   const backspace = useCallback(() => {
-    if (solved) return;
+    if (solved || disabled) return;
     setPath((p) => (p.length === 0 ? p : p.slice(0, -1)));
     lastFlashedWordRef.current = null;
-  }, [solved]);
+  }, [solved, disabled]);
 
-  // Global keyboard listener
+  // Global keyboard listener. When disabled, we skip attaching the listener
+  // entirely so the browser handles key events normally while a modal is
+  // open — no preventDefault on keys we’re about to ignore anyway.
   useEffect(() => {
+    if (disabled) return;
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Backspace') {
@@ -183,7 +193,7 @@ export function useGriddle({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [typeLetter, backspace]);
+  }, [typeLetter, backspace, disabled]);
 
   return [
     { letters, path, cellStates, sequenceByCell, shakeSignal, flashWord, flashKey, solved },

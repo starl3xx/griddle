@@ -61,6 +61,20 @@
   * {
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Prevent iOS double-tap zoom on interactive game elements + disable the
+   * browser’s native text selection on letter tiles (the game owns all input).
+   */
+  button {
+    touch-action: manipulation;
+  }
+}
+
+@layer components {
+  .modal-sheet {
+    @apply bg-white rounded-t-card sm:rounded-card shadow-modal p-6 w-full max-w-md
+           max-h-[90vh] overflow-y-auto;
+  }
 }
 
 @layer components {
