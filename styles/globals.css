@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Soehne';
+  src: url('/fonts/soehne-buch.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Soehne';
+  src: url('/fonts/soehne-kraftig.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Soehne';
+  src: url('/fonts/soehne-halbfett.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Soehne';
+  src: url('/fonts/soehne-dreiviertelfett.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Soehne';
+  src: url('/fonts/soehne-fett.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Soehne';
+  src: url('/fonts/soehne-extrafett.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  body {
+    @apply font-sans text-gray-900 antialiased bg-white;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply py-3 px-6 rounded-btn font-semibold text-white bg-brand
+           hover:bg-brand-600 active:scale-95
+           transition-all duration-fast shadow-btn
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+
+  .btn-secondary {
+    @apply py-3 px-4 rounded-btn font-semibold text-gray-700 bg-gray-100
+           hover:bg-gray-200 active:scale-95
+           transition-all duration-fast
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+
+  .btn-accent {
+    @apply py-4 px-6 rounded-btn font-bold text-white bg-accent
+           hover:bg-accent-700 active:scale-95
+           transition-all duration-fast shadow-btn
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
