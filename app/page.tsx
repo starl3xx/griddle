@@ -10,6 +10,7 @@ import { HowToPlayCard } from '@/components/HowToPlayCard';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle } from '@/lib/useGriddle';
 import { getPuzzleForDay } from '@/lib/scheduler';
+import { useFarcaster } from '@/lib/farcaster';
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
 const HOWTOPLAY_STORAGE_KEY = 'griddle_howtoplay_dismissed_v1';
@@ -19,6 +20,14 @@ export default function Page() {
   // server-fetched puzzle where the `word` is never sent to the client and
   // solve verification happens via /api/solve.
   const puzzle = getPuzzleForDay(1);
+
+  // Single source of truth for Farcaster context: this hook fires
+  // sdk.actions.ready() on mount so the container can hide its splash,
+  // and races sdk.context against a 2s timeout to decide inMiniApp.
+  // The result is passed down to SolveModal as a prop so the modal
+  // doesn’t re-run the async detection on its own mount (which would
+  // leave inMiniApp=false for the first ~2s after solving).
+  const { inMiniApp } = useFarcaster();
 
   // Tutorial state is hoisted here (not inside TutorialModal) so we can pass
   // `disabled={showTutorial}` into useGriddle — otherwise stray keystrokes
@@ -130,6 +139,7 @@ export default function Page() {
           grid={puzzle.grid}
           solveMs={solveResult.solveMs}
           unassisted={solveResult.unassisted}
+          inMiniApp={inMiniApp}
           onPlayAgain={handlePlayAgain}
           onClose={() => setSolveResult(null)}
         />

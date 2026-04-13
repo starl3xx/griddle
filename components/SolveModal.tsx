@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
+import { composeCast } from '@/lib/farcaster';
+import { SITE_URL } from '@/lib/site';
 
 interface SolveModalProps {
   dayNumber: number;
@@ -10,6 +12,14 @@ interface SolveModalProps {
   grid: string;
   solveMs: number;
   unassisted?: boolean;
+  /**
+   * True when the app is running inside a Farcaster mini-app container.
+   * Passed down from page.tsx’s single `useFarcaster()` call so we don’t
+   * re-run the async detection cycle on modal mount (which would leave
+   * `inMiniApp=false` for the first ~2s after solving — exactly when the
+   * user hits Share).
+   */
+  inMiniApp: boolean;
   onPlayAgain: () => void;
   onClose: () => void;
 }
@@ -20,6 +30,7 @@ export function SolveModal({
   grid,
   solveMs,
   unassisted = false,
+  inMiniApp,
   onPlayAgain,
   onClose,
 }: SolveModalProps) {
@@ -40,10 +51,23 @@ export function SolveModal({
       timeMs: solveMs,
       unassisted,
     });
-    // Prefer Web Share API when available — OS handles the UX, no status needed.
+    const embedUrl = `${SITE_URL}/?puzzle=${dayNumber}`;
+
+    // Priority 1: Farcaster cast composer when we’re inside a Farcaster
+    // mini-app container. The embed becomes a playable Griddle frame in
+    // the cast, so recipients can tap and play without leaving Farcaster.
+    if (inMiniApp) {
+      const result = await composeCast(text, embedUrl);
+      if (result === 'cast') return;
+      if (result === 'cancelled') return;
+      // result === 'failed' → SDK threw or unavailable. Fall through to
+      // the Web Share / clipboard chain so there’s still a share surface.
+    }
+
+    // Priority 2: Web Share API — OS handles the UX, no status needed.
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: `Griddle #${dayNumber}`, text });
+        await navigator.share({ title: `Griddle #${dayNumber}`, text, url: embedUrl });
         return;
       } catch (err) {
         // AbortError = user cancelled the native sheet, not a failure
