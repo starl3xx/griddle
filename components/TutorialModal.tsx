@@ -1,33 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+interface TutorialModalProps {
+  open: boolean;
+  onDismiss: () => void;
+}
 
-const STORAGE_KEY = 'griddle_tutorial_seen_v1';
-
-export function TutorialModal() {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      if (!window.localStorage.getItem(STORAGE_KEY)) {
-        setOpen(true);
-      }
-    } catch {
-      // storage unavailable (private mode, etc) — just show the tutorial
-      setOpen(true);
-    }
-  }, []);
-
-  const dismiss = () => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, '1');
-    } catch {
-      // noop
-    }
-    setOpen(false);
-  };
-
+export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
   if (!open) return null;
 
   return (
@@ -62,7 +40,7 @@ export function TutorialModal() {
           </li>
         </ul>
 
-        <button type="button" onClick={dismiss} className="btn-primary w-full mt-6">
+        <button type="button" onClick={onDismiss} className="btn-primary w-full mt-6">
           Got it
         </button>
       </div>

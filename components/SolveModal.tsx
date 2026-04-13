@@ -23,13 +23,14 @@ export function SolveModal({
   onPlayAgain,
   onClose,
 }: SolveModalProps) {
-  const [copied, setCopied] = useState(false);
+  type ShareStatus = 'idle' | 'copied' | 'error';
+  const [shareStatus, setShareStatus] = useState<ShareStatus>('idle');
 
   useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1800);
+    if (shareStatus === 'idle') return;
+    const t = setTimeout(() => setShareStatus('idle'), 1800);
     return () => clearTimeout(t);
-  }, [copied]);
+  }, [shareStatus]);
 
   const handleShare = async () => {
     const text = formatShareText({
@@ -39,21 +40,36 @@ export function SolveModal({
       timeMs: solveMs,
       unassisted,
     });
-    try {
-      if (typeof navigator !== 'undefined' && 'share' in navigator) {
+    // Prefer Web Share API when available — OS handles the UX, no status needed.
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
         await navigator.share({ title: `Griddle #${dayNumber}`, text });
         return;
+      } catch (err) {
+        // AbortError = user cancelled the native sheet, not a failure
+        if (err instanceof Error && err.name === 'AbortError') return;
+        // Any other error → fall through to clipboard fallback
       }
-    } catch {
-      // user cancelled or share unsupported — fall through to clipboard
     }
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      setCopied(true);
+    // Clipboard fallback. Only claim success if writeText actually resolved.
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === 'function'
+    ) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setShareStatus('copied');
+        return;
+      } catch {
+        // clipboard denied (insecure context, permissions, Firefox default) → error
+      }
     }
+    setShareStatus('error');
   };
+
+  const shareLabel =
+    shareStatus === 'copied' ? 'Copied!' : shareStatus === 'error' ? 'Copy failed' : 'Share';
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in">
@@ -95,8 +111,9 @@ export function SolveModal({
             type="button"
             onClick={handleShare}
             className="btn-accent flex-1 relative"
+            aria-live="polite"
           >
-            {copied ? 'Copied!' : 'Share'}
+            {shareLabel}
           </button>
           <button
             type="button"

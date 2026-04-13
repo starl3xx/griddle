@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
 import { FlashBadge } from '@/components/FlashBadge';
@@ -10,11 +10,39 @@ import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle } from '@/lib/useGriddle';
 import { getPuzzleForDay } from '@/lib/scheduler';
 
+const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
+
 export default function Page() {
   // DEV: puzzle #1 hardcoded client-side for M1/M2. In M4 this becomes a
   // server-fetched puzzle where the `word` is never sent to the client and
   // solve verification happens via /api/solve.
   const puzzle = getPuzzleForDay(1);
+
+  // Tutorial state is hoisted here (not inside TutorialModal) so we can pass
+  // `disabled={showTutorial}` into useGriddle — otherwise stray keystrokes
+  // while the tutorial is open would silently fill the grid behind it.
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (!window.localStorage.getItem(TUTORIAL_STORAGE_KEY)) {
+        setShowTutorial(true);
+      }
+    } catch {
+      // storage unavailable (private mode, etc) — show the tutorial anyway
+      setShowTutorial(true);
+    }
+  }, []);
+
+  const dismissTutorial = useCallback(() => {
+    try {
+      window.localStorage.setItem(TUTORIAL_STORAGE_KEY, '1');
+    } catch {
+      // noop
+    }
+    setShowTutorial(false);
+  }, []);
 
   const [solveResult, setSolveResult] = useState<{
     solveMs: number;
@@ -32,6 +60,7 @@ export default function Page() {
     grid: puzzle.grid,
     devTargetWord: puzzle.word,
     onSolve: handleSolve,
+    disabled: showTutorial,
   });
 
   const handlePlayAgain = useCallback(() => {
@@ -76,7 +105,7 @@ export default function Page() {
         <NextPuzzleCountdown />
       </main>
 
-      <TutorialModal />
+      <TutorialModal open={showTutorial} onDismiss={dismissTutorial} />
 
       {solveResult && (
         <SolveModal

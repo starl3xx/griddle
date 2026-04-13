@@ -1,4 +1,14 @@
-import { formatSeconds } from './format';
+import { formatMs } from './format';
+
+/**
+ * Display host for the share-text footer. Driven by NEXT_PUBLIC_SITE_URL so
+ * we can point at the current deployment (e.g. a Vercel preview) until the
+ * permanent domain is live. Falls back to the target production domain.
+ */
+export const SHARE_URL_HOST: string = (() => {
+  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle.fun';
+  return raw.replace(/^https?:\/\//, '').replace(/\/$/, '');
+})();
 
 export interface ShareInput {
   dayNumber: number;
@@ -43,13 +53,12 @@ export function formatShareText({
 
   let result: string;
   if (solved && timeMs !== undefined) {
-    const time = formatSeconds(Math.round(timeMs / 1000));
-    result = `Solved in ${time}${unassisted ? ' ◆ unassisted' : ''}`;
+    result = `Solved in ${formatMs(timeMs)}${unassisted ? ' ◆ unassisted' : ''}`;
   } else if (bestWord) {
     result = `Best: ${bestWord.toUpperCase()} (${bestWord.length} letters)`;
   } else {
     result = 'Unsolved';
   }
 
-  return `Griddle #${paddedDay}\n\n${gridBlock}\n\n${result}\ngriddle.fun`;
+  return `Griddle #${paddedDay}\n\n${gridBlock}\n\n${result}\n${SHARE_URL_HOST}`;
 }
