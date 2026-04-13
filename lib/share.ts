@@ -1,12 +1,13 @@
 import { formatMs } from './format';
 
 /**
- * Display host for the share-text footer. Driven by NEXT_PUBLIC_SITE_URL so
- * we can point at the current deployment (e.g. a Vercel preview) until the
- * permanent domain is live. Falls back to the target production domain.
+ * Display host for the share-text footer. Defaults to the current deployment
+ * URL so shares work without any Vercel configuration. Can be overridden via
+ * NEXT_PUBLIC_SITE_URL when the permanent domain is wired up — just flip the
+ * default (or set the env var) at that point.
  */
 export const SHARE_URL_HOST: string = (() => {
-  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle.fun';
+  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle-five.vercel.app';
   return raw.replace(/^https?:\/\//, '').replace(/\/$/, '');
 })();
 
