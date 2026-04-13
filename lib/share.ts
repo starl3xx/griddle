@@ -1,15 +1,5 @@
 import { formatMs } from './format';
-
-/**
- * Display host for the share-text footer. Defaults to the current deployment
- * URL so shares work without any Vercel configuration. Can be overridden via
- * NEXT_PUBLIC_SITE_URL when the permanent domain is wired up — just flip the
- * default (or set the env var) at that point.
- */
-export const SHARE_URL_HOST: string = (() => {
-  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle-fun.vercel.app';
-  return raw.replace(/^https?:\/\//, '').replace(/\/$/, '');
-})();
+import { SITE_HOST } from './site';
 
 export interface ShareInput {
   dayNumber: number;
@@ -82,5 +72,5 @@ export function formatShareText({
     result = 'Unsolved';
   }
 
-  return `Griddle #${paddedDay}\n\n${gridBlock}\n\n${result}\n${SHARE_URL_HOST}`;
+  return `Griddle #${paddedDay}\n\n${gridBlock}\n\n${result}\n${SITE_HOST}`;
 }

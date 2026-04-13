@@ -1,6 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { getCurrentDayNumber, getPuzzleForDay } from '@/lib/scheduler';
 import { formatSeconds } from '@/lib/format';
+import { SITE_HOST } from '@/lib/site';
 
 export const runtime = 'edge';
 
@@ -27,12 +28,6 @@ const BRAND = '#2D68C7';
 const GRAY_300 = '#d1d5db';
 const GRAY_500 = '#6b7280';
 const GRAY_900 = '#111827';
-
-/** Same env-driven host resolution as layout.tsx / share.ts. */
-const FOOTER_HOST: string = (() => {
-  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle-fun.vercel.app';
-  return raw.replace(/^https?:\/\//, '').replace(/\/$/, '');
-})();
 
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url);
@@ -165,7 +160,7 @@ export async function GET(req: Request): Promise<Response> {
             letterSpacing: '0.02em',
           }}
         >
-          {FOOTER_HOST}
+          {SITE_HOST}
         </div>
       </div>
     ),
@@ -203,10 +198,14 @@ function GridCell({ letter }: { letter: string }) {
 }
 
 function clampDayNumber(raw: string | null): number {
-  if (raw === null) return getCurrentDayNumber();
+  const today = getCurrentDayNumber();
+  if (raw === null) return today;
   const n = parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 1) return getCurrentDayNumber();
-  return Math.min(n, 999_999);
+  if (!Number.isFinite(n) || n < 1) return today;
+  // Clamp to today so /api/og?puzzle=500 can’t leak a future puzzle’s grid
+  // to anyone willing to brute-force the URL. Past puzzles are fine —
+  // future archive access will be its own route in M5.
+  return Math.min(n, today);
 }
 
 function normalizeGrid(raw: string | null, fallback: string): string {
