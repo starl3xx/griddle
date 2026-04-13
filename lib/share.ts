@@ -7,7 +7,7 @@ import { formatMs } from './format';
  * default (or set the env var) at that point.
  */
 export const SHARE_URL_HOST: string = (() => {
-  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle-five.vercel.app';
+  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle-fun.vercel.app';
   return raw.replace(/^https?:\/\//, '').replace(/\/$/, '');
 })();
 
@@ -21,20 +21,41 @@ export interface ShareInput {
 }
 
 /**
+ * Convert an ASCII letter (or string of letters) to its Unicode "fullwidth"
+ * form in the Halfwidth-and-Fullwidth-Forms block (U+FF21–U+FF3A for A–Z).
+ * Fullwidth characters render at a fixed em width in virtually every font,
+ * which is the trick that gives the share grid a monospace-aligned look
+ * even on proportional-font surfaces (iMessage, Twitter, Farcaster, etc.).
+ */
+function toFullWidth(s: string): string {
+  let out = '';
+  for (const ch of s) {
+    const code = ch.toUpperCase().charCodeAt(0);
+    if (code >= 0x41 && code <= 0x5a) {
+      out += String.fromCodePoint(0xff21 + (code - 0x41));
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/**
  * Plain-text share format — works in any surface (SMS, clipboard,
  * Farcaster cast text, Twitter, iMessage). Never reveals the target
  * word; only shows the grid letters and the solver’s result.
  *
- * Example output:
+ * Example output (fullwidth letters render the grid as a uniform 3×3 even
+ * in proportional fonts):
  *
  *   Griddle #042
  *
- *   A  E  F
- *   T  O  G
- *   L  R  W
+ *   ＡＥＦ
+ *   ＴＯＧ
+ *   ＬＲＷ
  *
  *   Solved in 3:24 ◆ unassisted
- *   griddle.fun
+ *   griddle-fun.vercel.app
  */
 export function formatShareText({
   dayNumber,
@@ -45,12 +66,12 @@ export function formatShareText({
   unassisted = false,
 }: ShareInput): string {
   const paddedDay = dayNumber.toString().padStart(3, '0');
-  const row = (start: number) =>
-    [grid[start], grid[start + 1], grid[start + 2]]
-      .map((c) => c.toUpperCase())
-      .join('  ');
 
-  const gridBlock = [row(0), row(3), row(6)].join('\n');
+  const gridBlock = [
+    toFullWidth(grid.slice(0, 3)),
+    toFullWidth(grid.slice(3, 6)),
+    toFullWidth(grid.slice(6, 9)),
+  ].join('\n');
 
   let result: string;
   if (solved && timeMs !== undefined) {
