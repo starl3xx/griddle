@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
-import { getPuzzleForDay } from '@/lib/scheduler';
+import { getCurrentDayNumber, getPuzzleForDay } from '@/lib/scheduler';
+import { formatSeconds } from '@/lib/format';
 
 export const runtime = 'edge';
 
@@ -26,6 +27,12 @@ const BRAND = '#2D68C7';
 const GRAY_300 = '#d1d5db';
 const GRAY_500 = '#6b7280';
 const GRAY_900 = '#111827';
+
+/** Same env-driven host resolution as layout.tsx / share.ts. */
+const FOOTER_HOST: string = (() => {
+  const raw = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle-fun.vercel.app';
+  return raw.replace(/^https?:\/\//, '').replace(/\/$/, '');
+})();
 
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url);
@@ -131,7 +138,7 @@ export async function GET(req: Request): Promise<Response> {
               Solved in
             </span>
             <span style={{ fontSize: '42px', fontWeight: 800, color: GRAY_900 }}>
-              {formatTime(time)}
+              {formatSeconds(time)}
             </span>
           </div>
         ) : (
@@ -158,7 +165,7 @@ export async function GET(req: Request): Promise<Response> {
             letterSpacing: '0.02em',
           }}
         >
-          griddle-fun.vercel.app
+          {FOOTER_HOST}
         </div>
       </div>
     ),
@@ -196,8 +203,9 @@ function GridCell({ letter }: { letter: string }) {
 }
 
 function clampDayNumber(raw: string | null): number {
-  const n = raw ? parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(n) || n < 1) return 1;
+  if (raw === null) return getCurrentDayNumber();
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return getCurrentDayNumber();
   return Math.min(n, 999_999);
 }
 
@@ -213,11 +221,5 @@ function parseTime(raw: string | null): number | null {
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.min(n, 86_400);
-}
-
-function formatTime(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
