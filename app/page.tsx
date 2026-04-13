@@ -10,6 +10,7 @@ import { HowToPlayCard } from '@/components/HowToPlayCard';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle } from '@/lib/useGriddle';
 import { getPuzzleForDay } from '@/lib/scheduler';
+import { useFarcaster } from '@/lib/farcaster';
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
 const HOWTOPLAY_STORAGE_KEY = 'griddle_howtoplay_dismissed_v1';
@@ -19,6 +20,10 @@ export default function Page() {
   // server-fetched puzzle where the `word` is never sent to the client and
   // solve verification happens via /api/solve.
   const puzzle = getPuzzleForDay(1);
+
+  // Fires sdk.actions.ready() when we’re inside a Farcaster mini-app
+  // container so the host can hide its splash screen. No-op in browser.
+  useFarcaster();
 
   // Tutorial state is hoisted here (not inside TutorialModal) so we can pass
   // `disabled={showTutorial}` into useGriddle — otherwise stray keystrokes

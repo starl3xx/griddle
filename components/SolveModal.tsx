@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
+import { composeCast, useFarcaster } from '@/lib/farcaster';
+import { SITE_URL } from '@/lib/site';
 
 interface SolveModalProps {
   dayNumber: number;
@@ -25,6 +27,7 @@ export function SolveModal({
 }: SolveModalProps) {
   type ShareStatus = 'idle' | 'copied' | 'error';
   const [shareStatus, setShareStatus] = useState<ShareStatus>('idle');
+  const { inMiniApp } = useFarcaster();
 
   useEffect(() => {
     if (shareStatus === 'idle') return;
@@ -40,10 +43,22 @@ export function SolveModal({
       timeMs: solveMs,
       unassisted,
     });
-    // Prefer Web Share API when available — OS handles the UX, no status needed.
+    const embedUrl = `${SITE_URL}/?puzzle=${dayNumber}`;
+
+    // Priority 1: Farcaster cast composer when we’re inside a Farcaster
+    // mini-app container. The embed becomes a playable Griddle frame in
+    // the cast, so recipients can tap and play without leaving Farcaster.
+    if (inMiniApp) {
+      const ok = await composeCast(text, embedUrl);
+      if (ok) return;
+      // If composeCast failed for any reason, fall through to the Web
+      // Share API chain below so we still have *some* share surface.
+    }
+
+    // Priority 2: Web Share API — OS handles the UX, no status needed.
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: `Griddle #${dayNumber}`, text });
+        await navigator.share({ title: `Griddle #${dayNumber}`, text, url: embedUrl });
         return;
       } catch (err) {
         // AbortError = user cancelled the native sheet, not a failure
