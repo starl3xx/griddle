@@ -27,8 +27,8 @@ export default function Page() {
     <main className="min-h-screen flex flex-col items-center justify-center px-4 py-10 gap-6">
       <header className="text-center">
         <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">Griddle</h1>
-        <p className="text-xs sm:text-sm font-semibold text-gray-500 uppercase tracking-widest mt-1 tabular-nums">
-          #{puzzle.dayNumber.toString().padStart(3, '0')}
+        <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums">
+          #{puzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
         </p>
       </header>
 
@@ -52,6 +52,12 @@ export default function Page() {
         <button type="button" className="btn-secondary" onClick={actions.reset}>
           Reset
         </button>
+      </div>
+
+      <div className="max-w-md mx-auto bg-brand-50 rounded-card px-5 py-4 text-sm text-gray-800 leading-relaxed">
+        <span className="font-bold text-brand-700">How to play:</span> Find the 9-letter word
+        using all cells. After picking a letter, the crossed-out cells are off-limits —
+        consecutive letters can’t be neighbors. Type or tap to build your word.
       </div>
 
       {state.solved && (

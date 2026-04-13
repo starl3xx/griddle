@@ -55,6 +55,7 @@ function Cell({ letter, state, sequence, onClick }: CellProps) {
     'relative w-20 h-20 sm:w-24 sm:h-24 rounded-lg border-4 flex items-center justify-center text-3xl sm:text-4xl font-black uppercase transition-all duration-fast select-none';
   const stateClasses: Record<CellState, string> = {
     open: 'bg-white border-gray-300 text-gray-900 hover:border-brand shadow-btn',
+    available: 'bg-success-50 border-success-200 text-gray-900 hover:border-success-500 shadow-btn',
     current: 'bg-brand border-brand text-white scale-105 shadow-card',
     used: 'bg-brand-50 border-brand-200 text-brand-700',
     blocked: 'bg-white border-gray-200 text-gray-300 opacity-40 cursor-not-allowed',
