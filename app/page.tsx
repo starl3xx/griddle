@@ -6,11 +6,13 @@ import { WordSlots } from '@/components/WordSlots';
 import { FlashBadge } from '@/components/FlashBadge';
 import { SolveModal } from '@/components/SolveModal';
 import { TutorialModal } from '@/components/TutorialModal';
+import { HowToPlayCard } from '@/components/HowToPlayCard';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle } from '@/lib/useGriddle';
 import { getPuzzleForDay } from '@/lib/scheduler';
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
+const HOWTOPLAY_STORAGE_KEY = 'griddle_howtoplay_dismissed_v1';
 
 export default function Page() {
   // DEV: puzzle #1 hardcoded client-side for M1/M2. In M4 this becomes a
@@ -22,16 +24,17 @@ export default function Page() {
   // `disabled={showTutorial}` into useGriddle — otherwise stray keystrokes
   // while the tutorial is open would silently fill the grid behind it.
   const [showTutorial, setShowTutorial] = useState(false);
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      if (!window.localStorage.getItem(TUTORIAL_STORAGE_KEY)) {
-        setShowTutorial(true);
-      }
+      setShowTutorial(!window.localStorage.getItem(TUTORIAL_STORAGE_KEY));
+      setShowHowToPlay(!window.localStorage.getItem(HOWTOPLAY_STORAGE_KEY));
     } catch {
-      // storage unavailable (private mode, etc) — show the tutorial anyway
+      // storage unavailable (private mode, etc) — show both anyway
       setShowTutorial(true);
+      setShowHowToPlay(true);
     }
   }, []);
 
@@ -42,6 +45,15 @@ export default function Page() {
       // noop
     }
     setShowTutorial(false);
+  }, []);
+
+  const dismissHowToPlay = useCallback(() => {
+    try {
+      window.localStorage.setItem(HOWTOPLAY_STORAGE_KEY, '1');
+    } catch {
+      // noop
+    }
+    setShowHowToPlay(false);
   }, []);
 
   const [solveResult, setSolveResult] = useState<{
@@ -101,6 +113,10 @@ export default function Page() {
             Reset
           </button>
         </div>
+
+        {!showTutorial && showHowToPlay && (
+          <HowToPlayCard onDismiss={dismissHowToPlay} />
+        )}
 
         <NextPuzzleCountdown />
       </main>
