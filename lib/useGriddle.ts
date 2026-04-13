@@ -5,7 +5,7 @@ import { getBlockedCells, isValidPath } from './adjacency';
 import { isDictionaryWord } from './dictionary';
 import { SolveTelemetry, type SolvePayload } from './telemetry';
 
-export type CellState = 'open' | 'current' | 'used' | 'blocked';
+export type CellState = 'open' | 'available' | 'current' | 'used' | 'blocked';
 
 export interface GriddleState {
   letters: string[];
@@ -59,11 +59,12 @@ export function useGriddle({
     const used = new Set(path);
     const current = path[path.length - 1] ?? null;
     const blocked = getBlockedCells(current);
+    const inProgress = path.length > 0;
     return Array.from({ length: 9 }, (_, i) => {
       if (i === current) return 'current';
       if (used.has(i)) return 'used';
       if (blocked.has(i)) return 'blocked';
-      return 'open';
+      return inProgress ? 'available' : 'open';
     });
   }, [path]);
 
