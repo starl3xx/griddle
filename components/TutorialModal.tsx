@@ -1,0 +1,126 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+
+const STORAGE_KEY = 'griddle_tutorial_seen_v1';
+
+export function TutorialModal() {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (!window.localStorage.getItem(STORAGE_KEY)) {
+        setOpen(true);
+      }
+    } catch {
+      // storage unavailable (private mode, etc) — just show the tutorial
+      setOpen(true);
+    }
+  }, []);
+
+  const dismiss = () => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, '1');
+    } catch {
+      // noop
+    }
+    setOpen(false);
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in">
+      <div className="modal-sheet sm:rounded-card animate-slide-up">
+        <h2 className="text-2xl font-black tracking-tight text-gray-900">
+          Welcome to Griddle
+        </h2>
+        <p className="text-sm font-medium text-gray-500 mt-1">
+          A daily 3×3 word puzzle
+        </p>
+
+        <div className="my-5">
+          <TinyGridIllustration />
+        </div>
+
+        <ul className="space-y-2 text-sm text-gray-800 leading-relaxed">
+          <li className="flex gap-2">
+            <span className="text-brand font-bold">1.</span>
+            <span>Find the hidden 9-letter word using every cell exactly once.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-brand font-bold">2.</span>
+            <span>
+              Consecutive letters can’t be orthogonal neighbors — the crossed-out cells
+              are off-limits from your current position.
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-brand font-bold">3.</span>
+            <span>Type on your keyboard or tap cells. Backspace to undo.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-brand font-bold">4.</span>
+            <span>Green cells show where you can go next.</span>
+          </li>
+        </ul>
+
+        <button type="button" onClick={dismiss} className="btn-primary w-full mt-6">
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TinyGridIllustration() {
+  /**
+   * 3×3 diagram: center cell (idx 4) is "current" blue, its four orthogonal
+   * neighbors (1, 3, 5, 7) are "blocked" gray with an X, and the four
+   * diagonal corners (0, 2, 6, 8) are "available" green — a compressed
+   * version of the cell-state story in the real game.
+   */
+  const state = [
+    'available',
+    'blocked',
+    'available',
+    'blocked',
+    'current',
+    'blocked',
+    'available',
+    'blocked',
+    'available',
+  ] as const;
+
+  const cls: Record<(typeof state)[number], string> = {
+    available: 'bg-success-50 border-success-200',
+    blocked: 'bg-white border-gray-200 opacity-50',
+    current: 'bg-brand border-brand',
+  };
+
+  return (
+    <div className="mx-auto w-fit grid grid-cols-3 gap-1.5">
+      {state.map((s, i) => (
+        <div
+          key={i}
+          className={`w-11 h-11 rounded-md border-2 flex items-center justify-center relative ${cls[s]}`}
+        >
+          {s === 'blocked' && (
+            <svg
+              className="w-4 h-4 text-gray-400"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
