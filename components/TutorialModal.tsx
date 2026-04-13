@@ -52,17 +52,13 @@ export function TutorialModal() {
           <li className="flex gap-2">
             <span className="text-brand font-bold">2.</span>
             <span>
-              Consecutive letters can’t be orthogonal neighbors — the crossed-out cells
-              are off-limits from your current position.
+              Consecutive letters can’t be direct neighbors — crossed-out cells are
+              off-limits.
             </span>
           </li>
           <li className="flex gap-2">
             <span className="text-brand font-bold">3.</span>
             <span>Type on your keyboard or tap cells. Backspace to undo.</span>
-          </li>
-          <li className="flex gap-2">
-            <span className="text-brand font-bold">4.</span>
-            <span>Green cells show where you can go next.</span>
           </li>
         </ul>
 

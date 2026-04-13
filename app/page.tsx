@@ -73,13 +73,6 @@ export default function Page() {
           </button>
         </div>
 
-        <div className="max-w-md mx-auto bg-brand-50 rounded-card px-5 py-4 text-sm text-gray-800 leading-relaxed">
-          <span className="font-bold text-brand-700">How to play:</span> Find the 9-letter
-          word using all cells. After picking a letter, the crossed-out cells are
-          off-limits — consecutive letters can’t be neighbors. Type or tap to build your
-          word.
-        </div>
-
         <NextPuzzleCountdown />
       </main>
 
