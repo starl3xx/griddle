@@ -1,8 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import '@/styles/globals.css';
-
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ?? 'https://griddle-fun.vercel.app';
+import { SITE_URL } from '@/lib/site';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
