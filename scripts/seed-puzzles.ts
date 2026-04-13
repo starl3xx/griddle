@@ -17,11 +17,9 @@ config({ path: '.env.local' });
 
 import { db } from '../lib/db/client';
 import { puzzles } from '../lib/db/schema';
-import { getPuzzleForDay } from '../lib/scheduler';
+import { getPuzzleForDay, LAUNCH_DATE } from '../lib/scheduler';
 import { PUZZLE_COUNT } from '../lib/puzzles';
 import { sql } from 'drizzle-orm';
-
-const LAUNCH_DATE = new Date('2026-04-13T00:00:00Z');
 
 function dateForDay(dayNumber: number): string {
   const d = new Date(LAUNCH_DATE);
