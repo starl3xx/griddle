@@ -1,40 +1,44 @@
 import type { Metadata, Viewport } from 'next';
 import '@/styles/globals.css';
-import { SITE_URL } from '@/lib/site';
+import {
+  SITE_URL,
+  SITE_NAME,
+  SITE_DESCRIPTION,
+  SITE_SHORT_DESCRIPTION,
+} from '@/lib/site';
+
+const TITLE_DEFAULT = `${SITE_NAME} — daily 3×3 word puzzle`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'Griddle — daily 3×3 word puzzle',
-    template: '%s · Griddle',
+    default: TITLE_DEFAULT,
+    template: `%s · ${SITE_NAME}`,
   },
-  description:
-    'A daily 3×3 word puzzle. Find the hidden 9-letter word using every cell exactly once. Consecutive letters can’t be neighbors.',
-  applicationName: 'Griddle',
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
   keywords: ['word game', 'puzzle', 'daily', 'farcaster', 'base', '$WORD'],
   authors: [{ name: 'starl3xx' }],
   creator: 'starl3xx',
   openGraph: {
     type: 'website',
     url: SITE_URL,
-    siteName: 'Griddle',
-    title: 'Griddle — daily 3×3 word puzzle',
-    description:
-      'Find the hidden 9-letter word. Consecutive letters can’t be neighbors.',
+    siteName: SITE_NAME,
+    title: TITLE_DEFAULT,
+    description: SITE_SHORT_DESCRIPTION,
     images: [
       {
         url: '/api/og',
         width: 1200,
         height: 630,
-        alt: 'Griddle — daily 3×3 word puzzle',
+        alt: TITLE_DEFAULT,
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Griddle — daily 3×3 word puzzle',
-    description:
-      'Find the hidden 9-letter word. Consecutive letters can’t be neighbors.',
+    title: TITLE_DEFAULT,
+    description: SITE_SHORT_DESCRIPTION,
     images: ['/api/og'],
   },
   icons: {

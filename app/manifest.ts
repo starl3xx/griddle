@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { SITE_NAME, SITE_SHORT_NAME, SITE_DESCRIPTION } from '@/lib/site';
 
 /**
  * PWA web app manifest. Next.js serves this at `/manifest.webmanifest` and
@@ -6,6 +7,10 @@ import type { MetadataRoute } from 'next';
  * browsers get the "Add to Home Screen" / installable-app affordance, and
  * the device stores Griddle as a standalone app with the correct icon,
  * theme color, and splash behavior.
+ *
+ * Name + description are imported from `lib/site.ts` so the PWA install
+ * prompt, page metadata, and social previews stay in lockstep — one
+ * source of truth, no drift.
  *
  * The icons intentionally reuse the same SVGs that the favicon metadata
  * points at — one set of assets for favicon, apple-touch-icon, OG image,
@@ -15,10 +20,9 @@ import type { MetadataRoute } from 'next';
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Griddle',
-    short_name: 'Griddle',
-    description:
-      'A daily 3×3 word puzzle. Find the hidden 9-letter word. Consecutive letters can’t be neighbors.',
+    name: SITE_NAME,
+    short_name: SITE_SHORT_NAME,
+    description: SITE_DESCRIPTION,
     start_url: '/',
     display: 'standalone',
     background_color: '#ffffff',
