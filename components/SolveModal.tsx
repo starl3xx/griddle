@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
-import { composeCast, useFarcaster } from '@/lib/farcaster';
+import { composeCast } from '@/lib/farcaster';
 import { SITE_URL } from '@/lib/site';
 
 interface SolveModalProps {
@@ -12,6 +12,14 @@ interface SolveModalProps {
   grid: string;
   solveMs: number;
   unassisted?: boolean;
+  /**
+   * True when the app is running inside a Farcaster mini-app container.
+   * Passed down from page.tsx’s single `useFarcaster()` call so we don’t
+   * re-run the async detection cycle on modal mount (which would leave
+   * `inMiniApp=false` for the first ~2s after solving — exactly when the
+   * user hits Share).
+   */
+  inMiniApp: boolean;
   onPlayAgain: () => void;
   onClose: () => void;
 }
@@ -22,12 +30,12 @@ export function SolveModal({
   grid,
   solveMs,
   unassisted = false,
+  inMiniApp,
   onPlayAgain,
   onClose,
 }: SolveModalProps) {
   type ShareStatus = 'idle' | 'copied' | 'error';
   const [shareStatus, setShareStatus] = useState<ShareStatus>('idle');
-  const { inMiniApp } = useFarcaster();
 
   useEffect(() => {
     if (shareStatus === 'idle') return;
@@ -49,10 +57,11 @@ export function SolveModal({
     // mini-app container. The embed becomes a playable Griddle frame in
     // the cast, so recipients can tap and play without leaving Farcaster.
     if (inMiniApp) {
-      const ok = await composeCast(text, embedUrl);
-      if (ok) return;
-      // If composeCast failed for any reason, fall through to the Web
-      // Share API chain below so we still have *some* share surface.
+      const result = await composeCast(text, embedUrl);
+      if (result === 'cast') return;
+      if (result === 'cancelled') return;
+      // result === 'failed' → SDK threw or unavailable. Fall through to
+      // the Web Share / clipboard chain so there’s still a share surface.
     }
 
     // Priority 2: Web Share API — OS handles the UX, no status needed.

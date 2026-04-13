@@ -86,17 +86,43 @@ export function useFarcaster(): FarcasterState {
 }
 
 /**
- * Open the Farcaster cast composer with pre-filled text and an embed URL.
- * Safe to call outside a Farcaster context — the dynamic import will fail
- * gracefully (returns false) and the caller can fall back to Web Share /
- * clipboard.
+ * Three-state result from `composeCast`:
+ *
+ *   - `cast`       — the user actually posted a cast
+ *   - `cancelled`  — the user opened the composer and dismissed it (respect
+ *                    the intent; do NOT fall through to other share methods)
+ *   - `failed`     — the SDK threw or isn’t available at all (caller SHOULD
+ *                    fall through to Web Share / clipboard)
+ *
+ * The distinction matters because `sdk.actions.composeCast` *resolves* (not
+ * rejects) when the user cancels, returning `{ cast: null }`. Treating every
+ * resolution as success means a cancelled composer silently swallows the
+ * share action — the clipboard fallback never runs, but nothing was actually
+ * shared either. The user hits Share and sees… nothing. Three-state return
+ * lets callers handle each case intentionally.
  */
-export async function composeCast(text: string, embedUrl: string): Promise<boolean> {
+export type ComposeCastResult = 'cast' | 'cancelled' | 'failed';
+
+/**
+ * Open the Farcaster cast composer with pre-filled text and an embed URL.
+ * Safe to call outside a Farcaster context — dynamic import failure or any
+ * thrown error returns `'failed'` and the caller can fall back to Web Share
+ * / clipboard.
+ */
+export async function composeCast(
+  text: string,
+  embedUrl: string,
+): Promise<ComposeCastResult> {
   try {
     const { sdk } = await import('@farcaster/miniapp-sdk');
-    await sdk.actions.composeCast({ text, embeds: [embedUrl] });
-    return true;
+    const result = await sdk.actions.composeCast({ text, embeds: [embedUrl] });
+    // composeCast’s Result<false> shape is { cast: ComposeCastInnerResult | null }.
+    // cast === null means the user cancelled the composer.
+    if (result && 'cast' in result && result.cast != null) {
+      return 'cast';
+    }
+    return 'cancelled';
   } catch {
-    return false;
+    return 'failed';
   }
 }

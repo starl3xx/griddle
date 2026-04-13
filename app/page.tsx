@@ -21,9 +21,13 @@ export default function Page() {
   // solve verification happens via /api/solve.
   const puzzle = getPuzzleForDay(1);
 
-  // Fires sdk.actions.ready() when we’re inside a Farcaster mini-app
-  // container so the host can hide its splash screen. No-op in browser.
-  useFarcaster();
+  // Single source of truth for Farcaster context: this hook fires
+  // sdk.actions.ready() on mount so the container can hide its splash,
+  // and races sdk.context against a 2s timeout to decide inMiniApp.
+  // The result is passed down to SolveModal as a prop so the modal
+  // doesn’t re-run the async detection on its own mount (which would
+  // leave inMiniApp=false for the first ~2s after solving).
+  const { inMiniApp } = useFarcaster();
 
   // Tutorial state is hoisted here (not inside TutorialModal) so we can pass
   // `disabled={showTutorial}` into useGriddle — otherwise stray keystrokes
@@ -135,6 +139,7 @@ export default function Page() {
           grid={puzzle.grid}
           solveMs={solveResult.solveMs}
           unassisted={solveResult.unassisted}
+          inMiniApp={inMiniApp}
           onPlayAgain={handlePlayAgain}
           onClose={() => setSolveResult(null)}
         />
