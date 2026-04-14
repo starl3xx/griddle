@@ -25,14 +25,30 @@ export function useDarkMode(sessionWallet: string | null) {
     }
   });
 
-  // Load from DB when wallet connects (overwrites localStorage if different).
+  // Sync dark mode with DB when wallet connects.
+  // Strategy: if the DB already has a row (hasSettings=true), apply its
+  // value (user's cross-device preference wins). If no row exists yet,
+  // write the local localStorage value to DB so the first connect
+  // doesn't silently revert a preference the user just set.
   useEffect(() => {
     if (!sessionWallet) return;
     fetch('/api/settings')
       .then((r) => r.ok ? r.json() : null)
-      .then((data: { darkModeEnabled?: boolean } | null) => {
-        if (data?.darkModeEnabled !== undefined) {
-          setDark(data.darkModeEnabled);
+      .then((data: { darkModeEnabled?: boolean; hasSettings?: boolean } | null) => {
+        if (!data) return;
+        if (data.hasSettings) {
+          // Real DB row — apply its value.
+          setDark(!!data.darkModeEnabled);
+        } else {
+          // No row yet — push local preference to DB.
+          setDark((current) => {
+            fetch('/api/settings', {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ darkModeEnabled: current }),
+            }).catch(() => {});
+            return current;
+          });
         }
       })
       .catch(() => {/* best-effort */});

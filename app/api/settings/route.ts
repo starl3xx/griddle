@@ -25,7 +25,9 @@ export async function GET(): Promise<NextResponse> {
   }
   const row = await getUserSettings(wallet);
   if (!row) {
-    return NextResponse.json({ ...DEFAULT_USER_SETTINGS, wallet });
+    // hasSettings:false signals useDarkMode to push local preference to DB
+    // rather than overwrite local state with defaults on first wallet connect.
+    return NextResponse.json({ ...DEFAULT_USER_SETTINGS, wallet, hasSettings: false });
   }
   return NextResponse.json({
     wallet: row.wallet,
@@ -33,6 +35,7 @@ export async function GET(): Promise<NextResponse> {
     streakProtectionUsedAt: row.streakProtectionUsedAt,
     unassistedModeEnabled: row.unassistedModeEnabled,
     darkModeEnabled: row.darkModeEnabled,
+    hasSettings: true,
   });
 }
 

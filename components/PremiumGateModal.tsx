@@ -93,7 +93,7 @@ export function PremiumGateModal({
             <Diamond className="w-5 h-5" weight="fill" aria-hidden />
           </div>
           <div className="min-w-0">
-            <h2 className="text-xl font-black tracking-tight text-gray-900">
+            <h2 className="text-xl font-black tracking-tight text-gray-900 dark:text-gray-100">
               {headline}
             </h2>
             <p className="text-sm font-medium text-gray-500 mt-0.5">

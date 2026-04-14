@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Diamond, Moon, Sun, ShieldCheck, Eye, EyeSlash, Question, Link as LinkIcon } from '@phosphor-icons/react';
+import { Diamond, Moon, Sun, ShieldCheck, Eye, EyeSlash, Question } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
 import { Avatar } from './Avatar';
 import type { WalletStats } from '@/lib/db/queries';
