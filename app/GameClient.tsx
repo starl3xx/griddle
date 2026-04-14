@@ -203,7 +203,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // the session premium to the wallet so future loads use the wallet key.
       const walletRes = await fetch(`/api/premium/${normalized}`).catch(() => null);
       const walletData = walletRes?.ok
-        ? ((await walletRes.json()) as { premium?: boolean })
+        ? await walletRes.json().catch(() => null) as { premium?: boolean } | null
         : null;
       if (walletData?.premium) {
         setPremium(true);
