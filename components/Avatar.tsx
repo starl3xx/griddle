@@ -1,6 +1,6 @@
 'use client';
 
-import { User } from 'lucide-react';
+import { User } from '@phosphor-icons/react';
 
 interface AvatarProps {
   /** Farcaster profile picture URL. When present, renders as an img. */
@@ -45,7 +45,7 @@ export function Avatar({ pfpUrl, size = 'md' }: AvatarProps) {
       className={`${sizeClass} rounded-full bg-brand-100 text-brand-700 flex items-center justify-center flex-shrink-0`}
       aria-label="Anonymous player"
     >
-      <User className={iconClass} strokeWidth={2.5} aria-hidden />
+      <User className={iconClass} weight="bold" aria-hidden />
     </div>
   );
 }

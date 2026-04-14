@@ -1,6 +1,6 @@
 'use client';
 
-import { Trophy, Archive } from 'lucide-react';
+import { Trophy, Archive } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
 
 interface HomeTilesProps {
@@ -36,10 +36,10 @@ export function HomeTiles({
         <Avatar pfpUrl={pfpUrl} monogram={monogram} size="xs" />
       </Tile>
       <Tile label="Leaderboard" onClick={onLeaderboardClick} locked={!premium}>
-        <Trophy className="w-5 h-5 text-accent" strokeWidth={2.5} aria-hidden />
+        <Trophy className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
       <Tile label="Archive" onClick={onArchiveClick} locked={!premium}>
-        <Archive className="w-5 h-5 text-accent" strokeWidth={2.5} aria-hidden />
+        <Archive className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
     </div>
   );
