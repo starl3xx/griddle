@@ -193,7 +193,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const handleWalletConnect = useCallback(
     async (address: string) => {
       const normalized = address.toLowerCase();
-      setSessionWallet(normalized);
+      // Link wallet in KV BEFORE setting sessionWallet in state. useDarkMode
+      // fires an effect when sessionWallet changes and immediately calls
+      // GET /api/settings (which reads the wallet via getSessionWallet from KV).
+      // If setSessionWallet fires before the link POST completes, the KV entry
+      // doesn't exist yet and the settings fetch returns wallet:null, silently
+      // skipping the dark-mode DB sync.
       try {
         await fetch('/api/wallet/link', {
           method: 'POST',
@@ -201,8 +206,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           body: JSON.stringify({ wallet: address }),
         });
       } catch {
-        // link is best-effort
+        // link is best-effort — proceed even on failure so UI updates
       }
+      setSessionWallet(normalized);
       // Check wallet premium. If the wallet doesn't have a premium_users
       // row but the session does (fiat paid before wallet connect), migrate
       // the session premium to the wallet so future loads use the wallet key.
