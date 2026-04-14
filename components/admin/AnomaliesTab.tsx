@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { CircleNotch, ArrowsClockwise } from '@phosphor-icons/react';
 
 interface AnomalyRow {
   id: number;
@@ -77,9 +77,9 @@ export function AnomaliesTab() {
           disabled={loading}
         >
           {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
           ) : (
-            <RefreshCw className="h-4 w-4" />
+            <ArrowsClockwise className="h-4 w-4" weight="bold" />
           )}
         </Button>
       </CardHeader>
@@ -90,7 +90,7 @@ export function AnomaliesTab() {
           </div>
         ) : loading && entries.length === 0 ? (
           <div className="flex justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" />
           </div>
         ) : entries.length === 0 ? (
           <p className="text-center text-sm text-gray-500 py-8">

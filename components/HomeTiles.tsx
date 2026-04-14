@@ -1,5 +1,6 @@
 'use client';
 
+import { Trophy, Archive, Diamond } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
 
 interface HomeTilesProps {
@@ -32,17 +33,13 @@ export function HomeTiles({
   return (
     <div className="w-full max-w-[420px] grid grid-cols-3 gap-3">
       <Tile label="Stats" onClick={onStatsClick}>
-        <Avatar pfpUrl={pfpUrl} monogram={monogram} size="sm" />
+        <Avatar pfpUrl={pfpUrl} monogram={monogram} size="xs" />
       </Tile>
       <Tile label="Leaderboard" onClick={onLeaderboardClick} locked={!premium}>
-        <span className="text-2xl leading-none" aria-hidden>
-          🏆
-        </span>
+        <Trophy className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
       <Tile label="Archive" onClick={onArchiveClick} locked={!premium}>
-        <span className="text-2xl leading-none" aria-hidden>
-          🗃️
-        </span>
+        <Archive className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
     </div>
   );
@@ -60,7 +57,7 @@ function Tile({ label, onClick, locked = false, children }: TileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="relative bg-white hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-card aspect-square flex flex-col items-center justify-center gap-2 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      className="relative bg-white hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-card px-3 py-3 flex flex-col items-center justify-center gap-1.5 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
     >
       {children}
       <span className="text-[11px] font-bold uppercase tracking-wider text-gray-600">
@@ -68,11 +65,11 @@ function Tile({ label, onClick, locked = false, children }: TileProps) {
       </span>
       {locked && (
         <span
-          className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-accent/15 text-accent flex items-center justify-center text-[9px]"
+          className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-accent/15 text-accent flex items-center justify-center"
           aria-label="Premium"
           title="Premium"
         >
-          ◆
+          <Diamond className="w-2.5 h-2.5" weight="fill" aria-hidden />
         </span>
       )}
     </button>

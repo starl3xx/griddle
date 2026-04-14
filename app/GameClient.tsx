@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+import { Diamond } from '@phosphor-icons/react';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
-import { FlashBadge } from '@/components/FlashBadge';
 import { SolveModal } from '@/components/SolveModal';
 import { TutorialModal } from '@/components/TutorialModal';
 import { HomeTiles } from '@/components/HomeTiles';
@@ -251,11 +251,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">
             Griddle
           </h1>
-          <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums">
-            #{initialPuzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
+          <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums flex items-center justify-center gap-1.5">
+            <span>
+              #{initialPuzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
+            </span>
             {premium && (
-              <span className="ml-2 text-accent" title="Premium unlocked">
-                ◆
+              <span className="text-accent inline-flex items-center" title="Premium unlocked">
+                <Diamond className="w-3.5 h-3.5" weight="fill" aria-hidden />
               </span>
             )}
           </p>
@@ -268,7 +270,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           </button>
         </header>
 
-        <FlashBadge word={state.flashWord} flashKey={state.flashKey} />
+        <FoundWords words={state.foundWords} />
 
         <Grid
           grid={initialPuzzle.grid}
@@ -280,8 +282,6 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         />
 
         <WordSlots letters={state.letters} />
-
-        <FoundWords words={state.foundWords} />
 
         <div className="flex gap-3 mt-1">
           <button

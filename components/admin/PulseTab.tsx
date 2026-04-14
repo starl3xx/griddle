@@ -4,14 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
-  Activity,
-  AlertTriangle,
+  Pulse,
+  Warning,
   Crown,
-  Loader2,
-  RefreshCw,
-  TrendingUp,
+  CircleNotch,
+  ArrowsClockwise,
+  TrendUp,
   Users,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 
 interface PulseData {
   solves24h: number;
@@ -58,7 +58,7 @@ export function PulseTab() {
   if (loading && !data) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" />
       </div>
     );
   }
@@ -68,7 +68,7 @@ export function PulseTab() {
       <div className="text-center py-12">
         <p className="text-sm text-error mb-4">{error}</p>
         <Button variant="outline" size="sm" onClick={fetchPulse}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+          <ArrowsClockwise className="h-4 w-4 mr-2" weight="bold" />
           Retry
         </Button>
       </div>
@@ -100,41 +100,41 @@ export function PulseTab() {
           aria-label="Refresh pulse"
         >
           {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <CircleNotch className="h-4 w-4 animate-spin" weight="bold" />
           ) : (
-            <RefreshCw className="h-4 w-4" />
+            <ArrowsClockwise className="h-4 w-4" weight="bold" />
           )}
         </Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <MetricCard
-          icon={<Activity className="h-4 w-4" />}
+          icon={<Pulse className="h-4 w-4" weight="bold" />}
           label="Solves · 24h"
           value={data.solves24h}
           sub={`${data.solves7d} in last 7d`}
         />
         <MetricCard
-          icon={<Users className="h-4 w-4" />}
+          icon={<Users className="h-4 w-4" weight="bold" />}
           label="Active wallets · 7d"
           value={data.activeWallets7d}
           sub="distinct"
         />
         <MetricCard
-          icon={<TrendingUp className="h-4 w-4" />}
+          icon={<TrendUp className="h-4 w-4" weight="bold" />}
           label="Solves · 7d"
           value={data.solves7d}
           sub="solved = true"
         />
         <MetricCard
-          icon={<AlertTriangle className="h-4 w-4" />}
+          icon={<Warning className="h-4 w-4" weight="bold" />}
           label="Flagged · 24h"
           value={data.flaggedSolves24h}
           sub={`${data.flaggedRatePct.toFixed(1)}% of last 24h`}
           tone={flagTone}
         />
         <MetricCard
-          icon={<Crown className="h-4 w-4" />}
+          icon={<Crown className="h-4 w-4" weight="bold" />}
           label="Premium users"
           value={data.premiumUsersTotal}
           sub="all-time"

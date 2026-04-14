@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Diamond, Medal, ShareNetwork, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
@@ -98,8 +99,8 @@ export function SolveModal({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in">
       <div className="modal-sheet sm:rounded-card animate-slide-up text-center">
-        <div className="text-5xl mb-2" aria-hidden>
-          🎉
+        <div className="flex justify-center mb-2" aria-hidden>
+          <Medal className="w-12 h-12 text-accent" weight="fill" />
         </div>
         <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-gray-900">
           Solved!
@@ -121,11 +122,11 @@ export function SolveModal({
           </span>
           {unassisted && (
             <span
-              className="text-accent text-lg font-bold ml-1"
+              className="text-accent ml-1 inline-flex items-center"
               title="Unassisted solve"
               aria-label="unassisted"
             >
-              ◆
+              <Diamond className="w-4 h-4" weight="fill" aria-hidden />
             </span>
           )}
         </div>
@@ -134,16 +135,18 @@ export function SolveModal({
           <button
             type="button"
             onClick={handleShare}
-            className="btn-accent flex-1 relative"
+            className="btn-accent flex-1 relative inline-flex items-center justify-center gap-2"
             aria-live="polite"
           >
+            <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
             {shareLabel}
           </button>
           <button
             type="button"
             onClick={onPlayAgain}
-            className="btn-secondary flex-1"
+            className="btn-secondary flex-1 inline-flex items-center justify-center gap-2"
           >
+            <ArrowCounterClockwise className="w-4 h-4" weight="bold" aria-hidden />
             Play again
           </button>
         </div>

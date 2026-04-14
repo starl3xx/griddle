@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { PulseTab } from './PulseTab';
 import { AnomaliesTab } from './AnomaliesTab';
 import { GrantTab } from './GrantTab';
-import { Gauge, AlertTriangle, Gift } from 'lucide-react';
+import { Gauge, Warning, Gift } from '@phosphor-icons/react';
 
 type Tab = 'pulse' | 'anomalies' | 'grant';
 
@@ -45,7 +45,7 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
           <TabButton
             active={activeTab === 'pulse'}
             onClick={() => setActiveTab('pulse')}
-            icon={<Gauge className="h-4 w-4" />}
+            icon={<Gauge className="h-4 w-4" weight="bold" />}
             label="Pulse"
           />
         </TabGroup>
@@ -54,13 +54,13 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
           <TabButton
             active={activeTab === 'anomalies'}
             onClick={() => setActiveTab('anomalies')}
-            icon={<AlertTriangle className="h-4 w-4" />}
+            icon={<Warning className="h-4 w-4" weight="bold" />}
             label="Anomalies"
           />
           <TabButton
             active={activeTab === 'grant'}
             onClick={() => setActiveTab('grant')}
-            icon={<Gift className="h-4 w-4" />}
+            icon={<Gift className="h-4 w-4" weight="bold" />}
             label="Grant"
           />
         </TabGroup>
