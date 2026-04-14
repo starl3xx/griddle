@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
-import { puzzles, puzzleLoads } from './schema';
+import { puzzles, puzzleLoads, solves } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
@@ -173,6 +173,124 @@ export async function recordPuzzleLoad(sessionId: string, puzzleId: number): Pro
     .insert(puzzleLoads)
     .values({ sessionId, puzzleId })
     .onConflictDoNothing({ target: [puzzleLoads.sessionId, puzzleLoads.puzzleId] });
+}
+
+/**
+ * Daily leaderboard row — one wallet, their fastest legitimate solve.
+ */
+export interface LeaderboardEntry {
+  rank: number;
+  wallet: string;
+  serverSolveMs: number;
+  unassisted: boolean;
+}
+
+/**
+ * Top N solvers for a given day. Filters:
+ *   - solved = true (no failed attempts)
+ *   - flag IS NULL (no ineligible/suspicious — anti-bot drops them)
+ *   - wallet IS NOT NULL (no anonymous solves on the leaderboard)
+ *
+ * Each wallet appears once with their fastest serverSolveMs. Drizzle
+ * `selectDistinctOn` would be cleaner but isn't available across all
+ * dialects we care about, so we use a raw window function over the
+ * result. For ~100 row leaderboards this is fast enough that the
+ * extra complexity isn't worth optimizing.
+ */
+export async function getDailyLeaderboard(
+  dayNumber: number,
+  limit = 100,
+): Promise<LeaderboardEntry[]> {
+  const puzzleRows = await db
+    .select({ id: puzzles.id })
+    .from(puzzles)
+    .where(eq(puzzles.dayNumber, dayNumber))
+    .limit(1);
+  if (puzzleRows.length === 0) return [];
+  const puzzleId = puzzleRows[0].id;
+
+  // Pull all eligible solves for the puzzle, sorted by speed. Walk the
+  // result once and keep the first occurrence per wallet — that's their
+  // fastest. For a real puzzle this is at most ~hundreds of rows; for
+  // viral days we can swap to DISTINCT ON later.
+  const rows = await db
+    .select({
+      wallet: solves.wallet,
+      serverSolveMs: solves.serverSolveMs,
+      unassisted: solves.unassisted,
+    })
+    .from(solves)
+    .where(
+      and(
+        eq(solves.puzzleId, puzzleId),
+        eq(solves.solved, true),
+        isNull(solves.flag),
+        isNotNull(solves.wallet),
+        isNotNull(solves.serverSolveMs),
+      ),
+    )
+    .orderBy(asc(solves.serverSolveMs));
+
+  const seen = new Set<string>();
+  const result: LeaderboardEntry[] = [];
+  for (const row of rows) {
+    if (!row.wallet || row.serverSolveMs == null) continue;
+    if (seen.has(row.wallet)) continue;
+    seen.add(row.wallet);
+    result.push({
+      rank: result.length + 1,
+      wallet: row.wallet,
+      serverSolveMs: row.serverSolveMs,
+      unassisted: row.unassisted,
+    });
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+/**
+ * Recent flagged solves for the admin anomaly dashboard. Returns the
+ * latest N rows where flag IS NOT NULL, ordered by created_at DESC.
+ * The flag is set by /api/solve based on the env-tunable thresholds
+ * (ineligible / suspicious). Admin can review these to spot bots.
+ */
+export interface AnomalyRow {
+  id: number;
+  puzzleId: number;
+  wallet: string | null;
+  sessionId: string;
+  serverSolveMs: number | null;
+  clientSolveMs: number | null;
+  keystrokeStddevMs: number | null;
+  keystrokeMinMs: number | null;
+  keystrokeCount: number | null;
+  flag: 'ineligible' | 'suspicious';
+  createdAt: Date;
+}
+
+export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
+  const rows = await db
+    .select({
+      id: solves.id,
+      puzzleId: solves.puzzleId,
+      wallet: solves.wallet,
+      sessionId: solves.sessionId,
+      serverSolveMs: solves.serverSolveMs,
+      clientSolveMs: solves.clientSolveMs,
+      keystrokeStddevMs: solves.keystrokeStddevMs,
+      keystrokeMinMs: solves.keystrokeMinMs,
+      keystrokeCount: solves.keystrokeCount,
+      flag: solves.flag,
+      createdAt: solves.createdAt,
+    })
+    .from(solves)
+    .where(isNotNull(solves.flag))
+    .orderBy(sql`${solves.createdAt} DESC`)
+    .limit(limit);
+  return rows.map((r) => ({
+    ...r,
+    flag: r.flag as 'ineligible' | 'suspicious',
+  }));
 }
 
 /**

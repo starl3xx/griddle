@@ -217,6 +217,7 @@ bun run db:seed                  # Seed 279 puzzles (idempotent)
 | `BOT_THRESHOLD_INELIGIBLE_MS` | Below this server-side solve time, mark ineligible (default `8000`) | M4b ✅ |
 | `BOT_THRESHOLD_SUSPICIOUS_MS` | Below this, flag but count (default `15000`) | M4b ✅ |
 | `BOT_THRESHOLD_STDDEV_MS` | Keystroke stddev floor for suspicion (default `30`) | M4b ✅ |
+| `ADMIN_WALLETS` | Comma-separated lowercase 0x addresses authorized to view `/admin/anomalies` | M4d ✅ |
 
 ---
 
@@ -230,8 +231,8 @@ bun run db:seed                  # Seed 279 puzzles (idempotent)
 | **M4a** | DB foundation | Neon Postgres, Drizzle migrations, 279-puzzle seed | ✅ Shipped |
 | **M4b** | Server-authoritative game | `/api/puzzle/today`, `/api/solve`, session middleware, useGriddle async refactor, page split into server + client | ✅ Shipped |
 | **M4-perf** | Cache + lazy load | Upstash Redis read-through cache, dictionary lazy-load (-217 kB first-load JS) | ✅ Shipped |
-| **M4c** | Wallet adapters | wagmi 2.x + viem, custom ConnectButton (no RainbowKit), Farcaster wallet connector, Coinbase smart wallet, anonymous → wallet linking, premium status read | In progress |
-| **M4d** | Leaderboard + admin | Daily leaderboard page, `/admin/anomalies` flagged-solve dashboard | Planned |
+| **M4c** | Wallet adapters | wagmi 2.x + viem, custom ConnectButton (no RainbowKit), Farcaster wallet connector, Coinbase smart wallet, anonymous → wallet linking, session→wallet KV binding, premium status read | ✅ Shipped |
+| **M4d** | Leaderboard + admin | `/leaderboard/[day]` page + API, `/admin/anomalies` flagged-solve dashboard (wallet-allowlisted) | In progress |
 | **M4e** | Premium contracts | Foundry project, `GriddlePremium.sol` (escrow-then-burn), `GriddleRewards.sol` (signed streak claims), LHAW oracle extension | Planned |
 | **M4f** | Premium UI + Apple Pay | `PremiumModal.tsx` with two paths — $5 crypto (EIP-2612 permit) and $6 Apple Pay (Stripe → swap → escrow). Buy+burn worker, Stripe webhook, dispute window | Planned |
 

@@ -148,6 +148,13 @@ export function SolveModal({
           </button>
         </div>
 
+        <a
+          href={`/leaderboard/${dayNumber}`}
+          className="block mt-4 text-sm font-semibold text-brand hover:text-brand-700 transition-colors duration-fast"
+        >
+          View today’s leaderboard →
+        </a>
+
         <button
           type="button"
           onClick={onClose}
