@@ -1,6 +1,6 @@
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
-import { puzzles, puzzleLoads, solves } from './schema';
+import { puzzles, puzzleLoads, solves, premiumUsers } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
@@ -291,6 +291,63 @@ export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
     ...r,
     flag: r.flag as 'ineligible' | 'suspicious',
   }));
+}
+
+/**
+ * Admin Pulse aggregate — one-shot snapshot feeding the Pulse tab on
+ * the admin dashboard. Five headline numbers, each with enough context
+ * for a one-glance health read. Kept cheap: every query is indexed on
+ * `created_at` or `puzzle_id` + `wallet`, and the 24h/7d windows are
+ * small constant-bound scans on recent rows.
+ *
+ * NOT cached — the admin page is low-traffic by definition, staleness
+ * hurts more than latency.
+ */
+export interface AdminPulse {
+  /** Successful solves in the last 24h (no flag filter — includes flagged). */
+  solves24h: number;
+  /** Successful solves in the last 7d. */
+  solves7d: number;
+  /** Distinct wallets with any solve in the last 7d. */
+  activeWallets7d: number;
+  /** Flagged solves in the last 24h (ineligible + suspicious). */
+  flaggedSolves24h: number;
+  /** Percentage of last-24h solves that were flagged, 0-100. */
+  flaggedRatePct: number;
+  /** Premium wallets all-time. */
+  premiumUsersTotal: number;
+}
+
+export async function getAdminPulse(): Promise<AdminPulse> {
+  const [row] = await db
+    .select({
+      solves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.solved} = true)::int`,
+      solves7d: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '7 days' and ${solves.solved} = true)::int`,
+      activeWallets7d: sql<number>`count(distinct ${solves.wallet}) filter (where ${solves.createdAt} >= now() - interval '7 days' and ${solves.wallet} is not null)::int`,
+      flaggedSolves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.flag} is not null)::int`,
+    })
+    .from(solves);
+
+  const [premiumRow] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(premiumUsers);
+
+  const solves24h = row?.solves24h ?? 0;
+  const flagged = row?.flaggedSolves24h ?? 0;
+  // Avoid NaN on a zero-solve day.
+  const flaggedRatePct =
+    solves24h + flagged === 0
+      ? 0
+      : Math.round((flagged / Math.max(1, solves24h + flagged)) * 1000) / 10;
+
+  return {
+    solves24h,
+    solves7d: row?.solves7d ?? 0,
+    activeWallets7d: row?.activeWallets7d ?? 0,
+    flaggedSolves24h: flagged,
+    flaggedRatePct,
+    premiumUsersTotal: premiumRow?.total ?? 0,
+  };
 }
 
 /**
