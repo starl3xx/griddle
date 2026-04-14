@@ -565,7 +565,10 @@ export interface UpsertProfileInput {
   /** Operator note, only for `premiumSource='admin_grant'`. */
   reason?: string;
   /**
-   * Stripe checkout session id — set on the handle-only fiat path
+   * Stripe checkout session id — three states:
+   *   - `undefined` (omitted) — keep existing value on update
+   *   - `null`                — explicitly clear (crypto re-unlock wipes stale fiat id)
+   *   - `string`              — set to new value (fiat unlock)
    * (where the unlock doesn't produce a `premium_users` row to carry
    * the session id). Persisting it here gives us the same two
    * guarantees the wallet-path fiat unlock already has:
@@ -573,7 +576,7 @@ export interface UpsertProfileInput {
    *   - Idempotency via the partial unique index on this column,
    *     so a replayed webhook can't double-insert the same session
    */
-  stripeSessionId?: string;
+  stripeSessionId?: string | null;
 }
 
 /**
@@ -614,7 +617,12 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   const premiumSource = input.premiumSource ?? null;
   const grantedBy = input.grantedBy ? input.grantedBy.toLowerCase() : null;
   const reason = input.reason ?? null;
-  const stripeSessionId = input.stripeSessionId ?? null;
+  // stripeSessionId distinguishes three states:
+  //   undefined (omitted) → keep the existing value on update
+  //   null                → explicitly clear (crypto re-unlock wipes a stale fiat session id)
+  //   string              → set to new value (fiat unlock)
+  // We preserve the raw undefined vs null distinction throughout.
+  const stripeSessionId = input.stripeSessionId;
 
   if (wallet === null && handle === null) {
     throw new Error('upsertProfile requires at least one of wallet or handle');
@@ -659,7 +667,8 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
       premiumSource: premiumSource ?? existing.premiumSource,
       grantedBy: grantedBy ?? existing.grantedBy,
       reason: reason ?? existing.reason,
-      stripeSessionId: stripeSessionId ?? existing.stripeSessionId,
+      // !==undefined so null explicitly clears; ?? would treat null as "keep existing"
+      stripeSessionId: stripeSessionId !== undefined ? stripeSessionId : existing.stripeSessionId,
     });
   }
 
@@ -727,7 +736,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
     premiumSource: premiumSource ?? raceWinner.premiumSource,
     grantedBy: grantedBy ?? raceWinner.grantedBy,
     reason: reason ?? raceWinner.reason,
-    stripeSessionId: stripeSessionId ?? raceWinner.stripeSessionId,
+    stripeSessionId: stripeSessionId !== undefined ? stripeSessionId : raceWinner.stripeSessionId,
   });
 }
 
@@ -1012,7 +1021,11 @@ export async function recordCryptoUnlock(
   // forget pattern from the caller's point of view — if the profile
   // upsert races another writer, the error is surfaced here and retried
   // at the verify endpoint level, not silently swallowed.
-  await upsertProfile({ wallet: normalized, premiumSource: 'crypto' });
+  // Explicitly null stripeSessionId so a user who previously paid via
+  // fiat doesn't retain the stale Stripe session id on their profile row
+  // after re-unlocking via crypto — mirrors the same clearing done on
+  // the premium_users row above.
+  await upsertProfile({ wallet: normalized, premiumSource: 'crypto', stripeSessionId: null });
 }
 
 /**

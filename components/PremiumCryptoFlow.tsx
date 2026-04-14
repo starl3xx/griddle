@@ -78,7 +78,10 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       // --- Step 1: quote --------------------------------------------------
       setPhase('quoting');
 
-      const [oracleAddress, unlockUsd, slippagePct] = await Promise.all([
+      // SLIPPAGE_PCT is not fetched — the client sends the oracle midpoint
+      // and the contract's symmetric ±15% band handles drift without us
+      // needing to know the exact tolerance value here.
+      const [oracleAddress, unlockUsd] = await Promise.all([
         publicClient.readContract({
           address: premiumAddress,
           abi: griddlePremiumAbi,
@@ -88,11 +91,6 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
           address: premiumAddress,
           abi: griddlePremiumAbi,
           functionName: 'UNLOCK_USD',
-        }),
-        publicClient.readContract({
-          address: premiumAddress,
-          abi: griddlePremiumAbi,
-          functionName: 'SLIPPAGE_PCT',
         }),
       ]);
 
@@ -115,7 +113,6 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       // ±15% headroom on either side, so a small oracle drift between
       // quote and submit doesn't revert the tx.
       const expected = (unlockUsd * 10n ** 18n) / price;
-      void slippagePct; // eslint: intentional, kept for future log/UI use
       const tokenAmount = expected;
 
       // --- Step 2: sign permit -------------------------------------------
@@ -142,9 +139,6 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
           .catch(() => '1'), // some ERC-2612 tokens omit version() and default to '1'
       ]);
 
-      // ERC-2612 permit deadline — 1 hour is a generous floor that
-      // handles slow wallets and laggy RPCs without exposing the
-      // signature for days.
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
       const signature = await signTypedDataAsync({
@@ -173,8 +167,6 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         },
       });
 
-      // Split the 65-byte signature into r / s / v. `signature` is a
-      // 0x-prefixed hex string of length 132 (2 + 64 + 64 + 2).
       const sig = signature.slice(2);
       const r = (`0x${sig.slice(0, 64)}`) as `0x${string}`;
       const s = (`0x${sig.slice(64, 128)}`) as `0x${string}`;
