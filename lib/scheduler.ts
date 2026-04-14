@@ -26,7 +26,15 @@ export function getPuzzleForDay(dayNumber: number): DailyPuzzle {
   return { dayNumber, word: p.word, grid: p.grid, tier: p.tier };
 }
 
-const LAUNCH_DATE = new Date('2026-04-13T00:00:00Z');
+/**
+ * Canonical launch date for Griddle. Used by both `getCurrentDayNumber`
+ * (runtime, to figure out which puzzle is live right now) and the seed
+ * script `scripts/seed-puzzles.ts` (build-time, to assign dates to each
+ * pre-seeded row). These two readers MUST agree on the value or the
+ * database dates will drift from the live scheduler — hence exported
+ * from a single location.
+ */
+export const LAUNCH_DATE = new Date('2026-04-13T00:00:00Z');
 
 export function getCurrentDayNumber(now: Date = new Date()): number {
   const msPerDay = 86_400_000;
