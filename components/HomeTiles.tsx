@@ -1,5 +1,7 @@
 'use client';
 
+import { Avatar } from './Avatar';
+
 interface HomeTilesProps {
   onStatsClick: () => void;
   onLeaderboardClick: () => void;
@@ -30,7 +32,7 @@ export function HomeTiles({
   return (
     <div className="w-full max-w-[420px] grid grid-cols-3 gap-3">
       <Tile label="Stats" onClick={onStatsClick}>
-        <StatsIcon pfpUrl={pfpUrl} monogram={monogram} />
+        <Avatar pfpUrl={pfpUrl} monogram={monogram} size="sm" />
       </Tile>
       <Tile label="Leaderboard" onClick={onLeaderboardClick} locked={!premium}>
         <span className="text-2xl leading-none" aria-hidden>
@@ -77,26 +79,3 @@ function Tile({ label, onClick, locked = false, children }: TileProps) {
   );
 }
 
-function StatsIcon({
-  pfpUrl,
-  monogram,
-}: {
-  pfpUrl: string | null;
-  monogram: string;
-}) {
-  if (pfpUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return (
-      <img
-        src={pfpUrl}
-        alt=""
-        className="w-9 h-9 rounded-full bg-gray-100 object-cover"
-      />
-    );
-  }
-  return (
-    <div className="w-9 h-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-black text-base">
-      {monogram}
-    </div>
-  );
-}

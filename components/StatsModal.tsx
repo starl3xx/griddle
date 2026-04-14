@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatMs } from '@/lib/format';
+import { Avatar } from './Avatar';
 // Type-only import — erased at compile time, so server-side code from
 // lib/db/queries.ts doesn't get pulled into the client bundle. Keeps
 // the shape in lockstep with the server definition so adding a field
@@ -134,23 +135,6 @@ export function StatsModal({
   );
 }
 
-function Avatar({ pfpUrl, monogram }: { pfpUrl: string | null; monogram: string }) {
-  if (pfpUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return (
-      <img
-        src={pfpUrl}
-        alt=""
-        className="w-11 h-11 rounded-full bg-gray-100 object-cover flex-shrink-0"
-      />
-    );
-  }
-  return (
-    <div className="w-11 h-11 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-black text-lg flex-shrink-0">
-      {monogram}
-    </div>
-  );
-}
 
 function StatsSkeleton() {
   return (

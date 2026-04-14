@@ -186,8 +186,18 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // until the user clicks Connect for the first time. Once true, the
   // LazyConnectFlow chunk is fetched, WalletProvider mounts, and the
   // connector picker auto-opens (see LazyConnectFlow’s AutoOpener).
+  //
+  // pickerOpenKey force-opens the picker every time it bumps. Needed
+  // because after a disconnect, `walletEnabled` is already true — so
+  // a subsequent `triggerConnect()` wouldn't re-mount LazyConnectFlow
+  // and AutoOpener's effect wouldn't re-fire. Bumping the key from
+  // the parent is the explicit "please open the picker again" signal.
   const [walletEnabled, setWalletEnabled] = useState(false);
-  const triggerConnect = useCallback(() => setWalletEnabled(true), []);
+  const [pickerOpenKey, setPickerOpenKey] = useState(0);
+  const triggerConnect = useCallback(() => {
+    setWalletEnabled(true);
+    setPickerOpenKey((k) => k + 1);
+  }, []);
 
   // Modal state for the three HomeTiles. Only one can be open at a
   // time — the parent owns the premium-gate decision so the tiles stay
@@ -225,11 +235,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
             <LazyConnectFlow
               onConnect={handleWalletConnect}
               onDisconnect={handleWalletDisconnect}
+              openKey={pickerOpenKey}
             />
           ) : (
             <button
               type="button"
-              onClick={() => setWalletEnabled(true)}
+              onClick={triggerConnect}
               className="bg-brand text-white rounded-pill px-4 py-1.5 text-xs font-bold uppercase tracking-wider hover:bg-brand-600 transition-colors duration-fast"
             >
               Connect
