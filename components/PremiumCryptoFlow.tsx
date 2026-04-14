@@ -224,11 +224,14 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
     }
   };
 
-  // Auto-start the flow once we know we're connected and contracts are
-  // configured — there's no second "are you sure" click needed, the
-  // wallet itself will prompt at the signing step.
+  // Auto-start the flow on mount / connect. If the wallet isn't connected
+  // or the contracts aren't configured, handleUnlock's own guards set
+  // phase='error' with a helpful message and surface the Close button —
+  // without this effect invoking it, the component would hang on
+  // "Preparing…" forever with no way to dismiss (since the Close button
+  // only renders on error state).
   useEffect(() => {
-    if (phase === 'idle' && isConnected && contractsReady) {
+    if (phase === 'idle') {
       handleUnlock();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
