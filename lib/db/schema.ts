@@ -204,6 +204,35 @@ export const profiles = pgTable(
 );
 
 /**
+ * Per-wallet user preferences. Keyed on wallet address (lowercase).
+ * Created lazily on first save — users who never change settings have no row.
+ *
+ * Premium settings (streak_protection_*, unassisted_mode) are only surfaced
+ * in the UI for premium users, but the constraint is enforced client-side;
+ * the DB stores whatever is sent. Non-premium users who somehow POST a setting
+ * just pay to store a preference they can't use yet.
+ *
+ * dark_mode is stored here for cross-device sync when the user has a wallet;
+ * for anonymous users it lives only in localStorage.
+ */
+export const userSettings = pgTable('user_settings', {
+  wallet: varchar('wallet', { length: 42 }).primaryKey(),
+  /** Whether streak protection is armed for the next missed day. */
+  streakProtectionEnabled: boolean('streak_protection_enabled').default(false).notNull(),
+  /**
+   * When the user last consumed a streak protection. Used to enforce the
+   * 7-day cooldown before the protection becomes available again.
+   * Null = never used (protection is available from the start).
+   */
+  streakProtectionUsedAt: timestamp('streak_protection_used_at'),
+  /** Hide green/dim cell hints during play. Earns the Ace Wordmark instead. */
+  unassistedModeEnabled: boolean('unassisted_mode_enabled').default(false).notNull(),
+  /** Prefer dark color scheme across all devices where the wallet is connected. */
+  darkModeEnabled: boolean('dark_mode_enabled').default(false).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+/**
  * Tracks when a session first received the grid for a given puzzle.
  * This is the authoritative start time for `server_solve_ms` — we can’t
  * trust the client’s self-reported timer because a bot can lie about it.

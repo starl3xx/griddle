@@ -1,12 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Diamond, Moon, Sun, ShieldCheck, Eye, EyeSlash, Question, Link as LinkIcon } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
 import { Avatar } from './Avatar';
-// Type-only import — erased at compile time, so server-side code from
-// lib/db/queries.ts doesn't get pulled into the client bundle. Keeps
-// the shape in lockstep with the server definition so adding a field
-// on one side can't silently desync the other.
 import type { WalletStats } from '@/lib/db/queries';
 
 interface StatsResponse {
@@ -14,73 +11,126 @@ interface StatsResponse {
   stats?: WalletStats;
 }
 
+interface SettingsResponse {
+  streakProtectionEnabled: boolean;
+  streakProtectionUsedAt: string | null;
+  unassistedModeEnabled: boolean;
+  darkModeEnabled: boolean;
+}
+
 interface StatsModalProps {
   open: boolean;
+  premium: boolean;
+  dark: boolean;
+  onToggleDark: () => void;
   onClose: () => void;
+  /** Opens the wallet connector picker in the parent. */
   onConnect: () => void;
-  /** Farcaster profile picture URL if authed inside a miniapp container. */
+  /** Opens the premium gate modal for users who want to upgrade. */
+  onUpgrade: () => void;
   pfpUrl: string | null;
-  /** Display name to render next to the avatar — falls back to a truncated wallet. */
   displayName: string | null;
 }
 
+// 7-day streak protection cooldown
+const PROTECTION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
 /**
- * Stats modal — opened by the Stats tile. Fetches aggregate stats for
- * the session's bound wallet on mount. Four states:
+ * Stats modal — three states based on identity + premium:
  *
- *   - loading     → spinner placeholders
- *   - no-wallet   → Connect CTA (button defers to the parent's connect flow)
- *   - zero-solves → friendly empty state (wallet is bound but no eligible solves yet)
- *   - loaded      → six-cell stats grid
+ *  1. **Anonymous** — no wallet, no session premium. Shows upgrade CTAs.
+ *  2. **Account** — wallet connected or session premium, no premium unlocked.
+ *     Shows basic stats + upsell strip.
+ *  3. **Premium** — full stats grid + settings panel (streak protection,
+ *     unassisted mode) + dark mode toggle + Wordmarks + FAQ link.
  *
- * The avatar is the user's Farcaster pfpUrl when running inside a miniapp,
- * otherwise a monogram derived from the connected wallet address.
+ * Dark mode toggle is visible to everyone regardless of premium state.
  */
 export function StatsModal({
   open,
+  premium,
+  dark,
+  onToggleDark,
   onClose,
   onConnect,
+  onUpgrade,
   pfpUrl,
   displayName,
 }: StatsModalProps) {
-  // Default to loading=true + data=null so the first paint of a fresh
-  // open renders the skeleton, not the no-wallet CTA. The previous
-  // (loading=false, data=null) default produced a one-frame flash of
-  // "Connect wallet" before the useEffect switched into loading — and
-  // on reopen, stale `data` from the previous fetch would flash for
-  // one frame. Resetting both in the effect on every open keeps the
-  // render deterministic across repeated opens.
-  const [data, setData] = useState<StatsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [statsData, setStatsData] = useState<StatsResponse | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [settings, setSettings] = useState<SettingsResponse | null>(null);
+  const [savingProtection, setSavingProtection] = useState(false);
+  const [savingUnassisted, setSavingUnassisted] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setLoading(true);
-    setData(null);
-    fetch('/api/stats')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: StatsResponse | null) => {
-        if (cancelled) return;
-        setData(j);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setData(null);
-        setLoading(false);
+    setStatsLoading(true);
+    setStatsData(null);
+    setSettings(null);
+
+    const fetches: Promise<void>[] = [
+      fetch('/api/stats')
+        .then((r) => r.ok ? r.json() : null)
+        .then((j: StatsResponse | null) => { if (!cancelled) { setStatsData(j); setStatsLoading(false); } })
+        .catch(() => { if (!cancelled) setStatsLoading(false); }),
+    ];
+
+    if (premium) {
+      fetches.push(
+        fetch('/api/settings')
+          .then((r) => r.ok ? r.json() : null)
+          .then((s: SettingsResponse | null) => { if (!cancelled) setSettings(s); })
+          .catch(() => {}),
+      );
+    }
+
+    Promise.all(fetches).catch(() => {});
+    return () => { cancelled = true; };
+  }, [open, premium]);
+
+  const toggleSetting = async (field: 'streakProtectionEnabled' | 'unassistedModeEnabled') => {
+    if (!settings) return;
+    const current = field === 'streakProtectionEnabled'
+      ? settings.streakProtectionEnabled
+      : settings.unassistedModeEnabled;
+    const next = !current;
+    const setSaving = field === 'streakProtectionEnabled' ? setSavingProtection : setSavingUnassisted;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ [field]: next }),
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+      if (res.ok) {
+        const updated = (await res.json()) as SettingsResponse;
+        setSettings(updated);
+      }
+    } catch {/* best-effort */} finally {
+      setSaving(false);
+    }
+  };
 
   if (!open) return null;
 
-  const wallet = data?.wallet ?? null;
-  const stats = data?.stats;
+  const wallet = statsData?.wallet ?? null;
+  const stats = statsData?.stats;
+  const hasAccount = !!wallet;
   const monogram = wallet ? wallet.slice(2, 3).toUpperCase() : '?';
   const label = displayName ?? (wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Anonymous');
+
+  // Streak protection cooldown
+  const protectionUsedAt = settings?.streakProtectionUsedAt
+    ? new Date(settings.streakProtectionUsedAt)
+    : null;
+  const protectionOnCooldown = protectionUsedAt
+    ? Date.now() - protectionUsedAt.getTime() < PROTECTION_COOLDOWN_MS
+    : false;
+  const cooldownDaysLeft = protectionOnCooldown && protectionUsedAt
+    ? Math.ceil((PROTECTION_COOLDOWN_MS - (Date.now() - protectionUsedAt.getTime())) / (24 * 60 * 60 * 1000))
+    : 0;
 
   return (
     <div
@@ -91,80 +141,181 @@ export function StatsModal({
         className="modal-sheet sm:rounded-card animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="flex items-center gap-3">
           <Avatar pfpUrl={pfpUrl} monogram={monogram} />
           <div className="min-w-0">
-            <h2 className="text-lg font-black tracking-tight text-gray-900 truncate">
+            <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100 truncate">
               {label}
             </h2>
             <p className="text-xs font-medium text-gray-500">Your Griddle stats</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close stats"
-            className="ml-auto w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors duration-fast"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              className="w-4 h-4"
-              aria-hidden
+          <div className="ml-auto flex items-center gap-1">
+            {/* Dark mode toggle — universal */}
+            <button
+              type="button"
+              onClick={onToggleDark}
+              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast"
             >
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
+              {dark
+                ? <Sun className="w-4 h-4" weight="bold" aria-hidden />
+                : <Moon className="w-4 h-4" weight="bold" aria-hidden />}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close stats"
+              className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4" aria-hidden>
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
+        {/* Stats body */}
         <div className="mt-5">
-          {loading ? (
+          {statsLoading ? (
             <StatsSkeleton />
-          ) : !wallet ? (
-            <NoWalletState onConnect={onConnect} />
+          ) : !hasAccount ? (
+            <AnonymousState onConnect={onConnect} onUpgrade={onUpgrade} />
           ) : !stats || stats.totalSolves === 0 ? (
-            <EmptyState />
+            <div className="py-4 text-center text-sm text-gray-500">
+              No solves yet. Today's puzzle is waiting.
+            </div>
           ) : (
             <StatsGrid stats={stats} />
           )}
+        </div>
+
+        {/* Premium upsell for non-premium accounts */}
+        {!premium && hasAccount && (
+          <div className="mt-4 border border-accent/30 rounded-md p-3 flex items-center gap-3">
+            <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock premium</p>
+              <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
+            </div>
+            <button type="button" onClick={onUpgrade} className="btn-accent py-1.5 px-3 text-xs flex-shrink-0">
+              Upgrade
+            </button>
+          </div>
+        )}
+
+        {/* Premium settings */}
+        {premium && (
+          <div className="mt-5 border-t border-gray-100 dark:border-gray-800 pt-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Settings</p>
+
+            <SettingRow
+              icon={<ShieldCheck className="w-4 h-4" weight="bold" />}
+              label="Streak protection"
+              description={
+                protectionOnCooldown
+                  ? `Available again in ${cooldownDaysLeft}d`
+                  : settings?.streakProtectionEnabled
+                    ? 'Armed — will save your streak once'
+                    : 'Saves your streak if you miss a day'
+              }
+              checked={settings?.streakProtectionEnabled ?? false}
+              disabled={savingProtection || protectionOnCooldown}
+              onChange={() => toggleSetting('streakProtectionEnabled')}
+            />
+
+            <SettingRow
+              icon={settings?.unassistedModeEnabled
+                ? <EyeSlash className="w-4 h-4" weight="bold" />
+                : <Eye className="w-4 h-4" weight="bold" />}
+              label="Unassisted mode"
+              description="Hides cell hints — earn 🎯 Ace for solving blind"
+              checked={settings?.unassistedModeEnabled ?? false}
+              disabled={savingUnassisted}
+              onChange={() => toggleSetting('unassistedModeEnabled')}
+            />
+          </div>
+        )}
+
+        {/* Wordmarks placeholder */}
+        {premium && (
+          <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Wordmarks</p>
+            <p className="text-xs text-gray-400 italic">Coming soon — achievements for your best solves.</p>
+          </div>
+        )}
+
+        {/* FAQ link */}
+        <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-3 flex items-center justify-center gap-1.5">
+          <Question className="w-3.5 h-3.5 text-gray-400" weight="bold" aria-hidden />
+          <a
+            href="/faq"
+            className="text-xs font-semibold text-gray-400 hover:text-brand transition-colors"
+          >
+            FAQ
+          </a>
         </div>
       </div>
     </div>
   );
 }
 
-
-function StatsSkeleton() {
+function AnonymousState({ onConnect, onUpgrade }: { onConnect: () => void; onUpgrade: () => void }) {
   return (
-    <div className="grid grid-cols-3 gap-3">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="h-16 rounded-md bg-gray-100 animate-pulse" />
-      ))}
-    </div>
-  );
-}
-
-function NoWalletState({ onConnect }: { onConnect: () => void }) {
-  return (
-    <div className="py-6 text-center">
-      <p className="text-sm text-gray-700 leading-relaxed">
-        Connect a wallet to track your streaks and fastest times.
+    <div className="py-4 space-y-3">
+      <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
+        Track your streaks and fastest times by connecting a wallet or unlocking premium.
       </p>
-      <button type="button" onClick={onConnect} className="btn-primary w-full mt-5">
+      <button type="button" onClick={onConnect} className="btn-primary w-full">
         Connect wallet
+      </button>
+      <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">
+        <Diamond className="w-4 h-4 text-accent" weight="fill" aria-hidden />
+        Unlock with card or crypto
       </button>
     </div>
   );
 }
 
-function EmptyState() {
+function SettingRow({
+  icon, label, description, checked, disabled, onChange,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: () => void;
+}) {
   return (
-    <div className="py-6 text-center">
-      <p className="text-sm text-gray-700 leading-relaxed">
-        No solves yet. Today’s puzzle is waiting for you.
-      </p>
+    <div className="flex items-center gap-3">
+      <span className="text-accent flex-shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{label}</p>
+        <p className="text-[11px] text-gray-500">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={onChange}
+        className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50 disabled:cursor-not-allowed ${checked ? 'bg-accent' : 'bg-gray-300 dark:bg-gray-600'}`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-fast mt-0.5 ${checked ? 'translate-x-4' : 'translate-x-0.5'}`}
+        />
+      </button>
+    </div>
+  );
+}
+
+function StatsSkeleton() {
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="h-16 rounded-md bg-gray-100 dark:bg-gray-800 animate-pulse" />
+      ))}
     </div>
   );
 }
@@ -174,30 +325,19 @@ function StatsGrid({ stats }: { stats: WalletStats }) {
     <div className="grid grid-cols-3 gap-3">
       <StatCell label="Solves" value={stats.totalSolves.toString()} />
       <StatCell label="Unassisted" value={stats.unassistedSolves.toString()} />
-      <StatCell
-        label="Current"
-        value={stats.currentStreak > 0 ? `${stats.currentStreak}🔥` : '0'}
-      />
+      <StatCell label="Current" value={stats.currentStreak > 0 ? `${stats.currentStreak}🔥` : '0'} />
       <StatCell label="Longest" value={stats.longestStreak.toString()} />
-      <StatCell
-        label="Fastest"
-        value={stats.fastestMs != null ? formatMs(stats.fastestMs) : '—'}
-      />
-      <StatCell
-        label="Average"
-        value={stats.averageMs != null ? formatMs(stats.averageMs) : '—'}
-      />
+      <StatCell label="Fastest" value={stats.fastestMs != null ? formatMs(stats.fastestMs) : '—'} />
+      <StatCell label="Average" value={stats.averageMs != null ? formatMs(stats.averageMs) : '—'} />
     </div>
   );
 }
 
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-gray-50 rounded-md p-3 text-center">
-      <div className="text-base font-black text-gray-900 tabular-nums">{value}</div>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mt-0.5">
-        {label}
-      </div>
+    <div className="bg-gray-50 dark:bg-gray-800 rounded-md p-3 text-center">
+      <div className="text-base font-black text-gray-900 dark:text-gray-100 tabular-nums">{value}</div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mt-0.5">{label}</div>
     </div>
   );
 }

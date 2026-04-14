@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { Diamond } from '@phosphor-icons/react';
+import { useDarkMode } from '@/lib/useDarkMode';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
 import { SolveModal } from '@/components/SolveModal';
@@ -60,6 +61,10 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
 export default function GameClient({ initialPuzzle }: GameClientProps) {
   const { inMiniApp, pfpUrl, displayName } = useFarcaster();
   const router = useRouter();
+
+  /** The wallet currently bound to this session, or null if none. */
+  const [sessionWallet, setSessionWallet] = useState<string | null>(null);
+  const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
 
   const [showTutorial, setShowTutorial] = useState(false);
 
@@ -276,9 +281,6 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    */
   const [showCryptoFlow, setShowCryptoFlow] = useState(false);
 
-  /** The wallet currently bound to this session, or null if none. */
-  const [sessionWallet, setSessionWallet] = useState<string | null>(null);
-
   const handleUnlockCrypto = useCallback(() => {
     setShowCryptoFlow(true);
   }, []);
@@ -333,24 +335,20 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
   return (
     <>
-      <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
-        <div className="absolute top-4 right-4">
-          {walletEnabled ? (
-            <LazyConnectFlow
-              onConnect={handleWalletConnect}
-              onDisconnect={handleWalletDisconnect}
-              openKey={pickerOpenKey}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={triggerConnect}
-              className="bg-brand text-white rounded-pill px-4 py-1.5 text-xs font-bold uppercase tracking-wider hover:bg-brand-600 transition-colors duration-fast"
-            >
-              Connect
-            </button>
-          )}
+      {/* LazyConnectFlow stays mounted (hidden) once enabled so wagmi
+          can auto-reconnect on page load. No visible Connect button in
+          the header — wallet actions are surfaced through the tiles. */}
+      {walletEnabled && (
+        <div className="hidden">
+          <LazyConnectFlow
+            onConnect={handleWalletConnect}
+            onDisconnect={handleWalletDisconnect}
+            openKey={pickerOpenKey}
+          />
         </div>
+      )}
+
+      <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
         <header className="text-center">
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">
             Griddle
@@ -422,10 +420,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
       <StatsModal
         open={showStats}
+        premium={premium}
+        dark={dark}
+        onToggleDark={toggleDark}
         onClose={() => setShowStats(false)}
         onConnect={() => {
           setShowStats(false);
           triggerConnect();
+        }}
+        onUpgrade={() => {
+          setShowStats(false);
+          setPremiumGate('leaderboard');
         }}
         pfpUrl={pfpUrl}
         displayName={displayName}
