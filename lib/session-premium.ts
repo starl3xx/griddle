@@ -34,17 +34,19 @@ export async function getSessionPremium(
   }
 }
 
+/**
+ * Throws on KV failure so the Stripe webhook can return 500 and
+ * trigger a retry — a swallowed error would return 200 and Stripe
+ * would never redeliver, leaving a no-wallet buyer with no premium
+ * record anywhere.
+ */
 export async function setSessionPremium(
   sessionId: string,
   stripeSessionId: string,
 ): Promise<void> {
-  try {
-    await kv.set<SessionPremiumValue>(
-      KEY(sessionId),
-      { stripeSessionId },
-      { ex: ONE_YEAR },
-    );
-  } catch (err) {
-    console.warn(`[session-premium] set failed for ${sessionId}:`, err);
-  }
+  await kv.set<SessionPremiumValue>(
+    KEY(sessionId),
+    { stripeSessionId },
+    { ex: ONE_YEAR },
+  );
 }
