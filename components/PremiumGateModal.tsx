@@ -23,6 +23,7 @@ interface PremiumGateModalProps {
    * inline inside the modal.
    */
   onUnlockFiat: () => Promise<void> | void;
+
 }
 
 /**
@@ -60,14 +61,8 @@ export function PremiumGateModal({
       ? 'Premium unlocks every day’s ranked leaderboard — see who solved fastest, who went unassisted, and how you stack up.'
       : 'Premium unlocks the full puzzle archive — replay any past day and climb its leaderboard.';
 
-  const needsWallet = !sessionWallet;
-
   const handleFiatClick = async () => {
     setFiatError(null);
-    if (needsWallet) {
-      setFiatError('Connect a wallet first — checkout needs an address.');
-      return;
-    }
     setFiatSubmitting(true);
     try {
       await onUnlockFiat();
@@ -151,8 +146,7 @@ export function PremiumGateModal({
           <button
             type="button"
             onClick={handleFiatClick}
-            disabled={fiatSubmitting || needsWallet}
-            title={needsWallet ? 'Connect a wallet first' : undefined}
+            disabled={fiatSubmitting}
             className="rounded-md border-2 border-gray-200 bg-white px-3 py-3 text-left hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
@@ -160,11 +154,7 @@ export function PremiumGateModal({
             </div>
             <div className="text-xl font-black text-gray-900 tabular-nums mt-0.5">$6</div>
             <div className="text-[11px] font-medium text-gray-500 mt-0.5">
-              {fiatSubmitting
-                ? 'Opening checkout…'
-                : needsWallet
-                  ? 'Connect wallet first'
-                  : 'Card & Apple Pay'}
+              {fiatSubmitting ? 'Opening checkout…' : 'Card & Apple Pay'}
             </div>
           </button>
         </div>
