@@ -34,11 +34,26 @@ export async function getSessionPremium(
   }
 }
 
-export async function clearSessionPremium(sessionId: string): Promise<void> {
+/**
+ * Atomically claim the migration slot for this session by deleting the
+ * key and returning its value. Returns the stored value if we claimed it
+ * (caller may proceed with migration), or null if the key was already
+ * gone (another request already migrated this session — caller should
+ * abort to avoid granting premium to a second wallet from one payment).
+ *
+ * GETDEL is atomic in Redis: no two concurrent callers can both receive
+ * a non-null value for the same key.
+ */
+export async function claimAndClearSessionPremium(
+  sessionId: string,
+): Promise<SessionPremiumValue | null> {
   try {
-    await kv.del(KEY(sessionId));
+    return await kv.getdel<SessionPremiumValue>(KEY(sessionId));
   } catch (err) {
-    console.warn(`[session-premium] del failed for ${sessionId}:`, err);
+    console.warn(`[session-premium] getdel failed for ${sessionId}:`, err);
+    // Treat as "not found" — caller will abort migration rather than risk
+    // a double-grant. The session key may still exist and a retry will work.
+    return null;
   }
 }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { getSessionPremium, clearSessionPremium } from '@/lib/session-premium';
+import { claimAndClearSessionPremium } from '@/lib/session-premium';
 import { recordFiatUnlock } from '@/lib/db/queries';
 import { isValidAddress } from '@/lib/address';
 
@@ -40,7 +40,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const sessionId = await getSessionId();
-  const sessionPremium = await getSessionPremium(sessionId);
+
+  // Atomically claim the migration slot: GETDEL returns the stored value
+  // and deletes the key in one Redis operation. If two concurrent requests
+  // race here, exactly one gets a non-null value and proceeds; the other
+  // gets null and aborts — preventing a single payment from granting
+  // premium_users rows to two different wallets.
+  const sessionPremium = await claimAndClearSessionPremium(sessionId);
 
   if (!sessionPremium) {
     return NextResponse.json({ migrated: false, reason: 'no session premium' });
@@ -50,12 +56,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     stripeSessionId: sessionPremium.stripeSessionId,
     wallet: wallet.toLowerCase(),
   });
-
-  // Clear the session-premium key now that a wallet row exists. This
-  // prevents repeated migration attempts (which would hit the profiles
-  // stripe_session_idx for idempotency but are still wasted work), and
-  // closes the window where a second wallet could claim the same session.
-  await clearSessionPremium(sessionId);
 
   return NextResponse.json({ migrated: true });
 }
