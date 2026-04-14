@@ -374,18 +374,26 @@ export interface AdminPulse {
 }
 
 export async function getAdminPulse(): Promise<AdminPulse> {
+  // Bound the scan to the widest window this query needs (7 days).
+  // `FILTER` clauses narrow what gets counted but don't bound the scan,
+  // so without this WHERE every call would sequentially scan the full
+  // `solves` table. As the table grows an index on `created_at` would
+  // let PG range-scan this even tighter; that migration is a follow-up.
+  const windowStart = sql<Date>`now() - interval '7 days'`;
+
   const [row] = await db
     .select({
       // Successful solves in the last 24h — includes flagged rows. This
       // is the denominator for `flaggedRatePct`, so the numerator below
       // MUST also filter on `solved = true` or the ratio skews.
       solves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.solved} = true)::int`,
-      solves7d: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '7 days' and ${solves.solved} = true)::int`,
-      activeWallets7d: sql<number>`count(distinct ${solves.wallet}) filter (where ${solves.createdAt} >= now() - interval '7 days' and ${solves.wallet} is not null)::int`,
+      solves7d: sql<number>`count(*) filter (where ${solves.solved} = true)::int`,
+      activeWallets7d: sql<number>`count(distinct ${solves.wallet}) filter (where ${solves.wallet} is not null)::int`,
       // Intersection: flagged AND solved=true — matches the denominator.
       flaggedSolves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.solved} = true and ${solves.flag} is not null)::int`,
     })
-    .from(solves);
+    .from(solves)
+    .where(gte(solves.createdAt, windowStart));
 
   const [premiumRow] = await db
     .select({ total: sql<number>`count(*)::int` })
