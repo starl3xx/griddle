@@ -76,8 +76,14 @@ export function useGriddle({
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();
 
   const lastFlashedWordRef = useRef<string | null>(null);
-  // Guards the async solve effect against re-firing while the same
-  // 9-letter path is still in flight.
+
+  /**
+   * Synchronous re-entry guard for solve attempts. Set to the in-flight
+   * 9-letter attempt while a /api/solve POST is pending. Cleared in the
+   * .finally() of the verify call. Lives in a ref (not state) so reading
+   * it inside an input handler reflects the latest value without needing
+   * a re-render.
+   */
   const inFlightAttemptRef = useRef<string | null>(null);
 
   const letters = useMemo(() => path.map((i) => grid[i]), [path, grid]);
@@ -131,52 +137,55 @@ export function useGriddle({
     }
   }, [letters]);
 
-  // Async solve detection on reaching 9 letters. Fires once per unique
-  // 9-letter attempt — backspace → retype re-fires because the ref is
-  // reset on length < 9.
-  useEffect(() => {
-    if (solved || pendingSolve) return;
-    if (letters.length !== 9) {
-      // Reset the in-flight guard as soon as the user steps off a
-      // 9-letter attempt (backspace, reset, etc.) so the next 9-letter
-      // attempt fires a fresh check.
-      inFlightAttemptRef.current = null;
-      return;
-    }
-    if (!isValidPath(path)) return;
-    const attempt = letters.join('');
-    if (inFlightAttemptRef.current === attempt) return;
-    inFlightAttemptRef.current = attempt;
+  /**
+   * Imperative solve trigger. Called from `typeLetter` / `tapCell` after
+   * appending the 9th letter, NOT from a useEffect.
+   *
+   * Why imperative? An effect that calls `setPendingSolve(true)` and lists
+   * `pendingSolve` in its dep array cancels its own async work — the
+   * pendingSolve change re-triggers the effect, which fires the previous
+   * cleanup, which sets `cancelled = true`, which short-circuits the
+   * `.finally()` that was supposed to clear pendingSolve. Net result:
+   * pendingSolve gets stuck at `true` and the game freezes after the
+   * first 9-letter attempt. Imperative trigger sidesteps the entire
+   * effect-cleanup-self-cancel cycle.
+   */
+  const triggerSolve = useCallback(
+    (finalPath: number[]) => {
+      if (solved) return;
+      if (finalPath.length !== 9) return;
+      if (!isValidPath(finalPath)) return;
 
-    const payload = telemetryRef.current!.build(attempt);
-    setPendingSolve(true);
+      const finalLetters = finalPath.map((i) => grid[i]).join('');
+      // Re-entry guard: if a verify for the same letters is already in
+      // flight, ignore. inFlightAttemptRef is cleared in finally().
+      if (inFlightAttemptRef.current === finalLetters) return;
+      inFlightAttemptRef.current = finalLetters;
 
-    let cancelled = false;
-    onSolveAttempt({ ...payload, unassisted })
-      .then((verdict) => {
-        if (cancelled) return;
-        if (verdict.solved) {
-          setSolved(true);
-          if (verdict.word != null) {
-            onSolved?.({ ...payload, unassisted, word: verdict.word });
+      const payload = telemetryRef.current!.build(finalLetters);
+      setPendingSolve(true);
+
+      onSolveAttempt({ ...payload, unassisted })
+        .then((verdict) => {
+          if (verdict.solved) {
+            setSolved(true);
+            if (verdict.word != null) {
+              onSolved?.({ ...payload, unassisted, word: verdict.word });
+            }
+          } else {
+            triggerShake();
           }
-        } else {
+        })
+        .catch(() => {
           triggerShake();
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        triggerShake();
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setPendingSolve(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [letters, path, solved, pendingSolve, onSolveAttempt, onSolved, unassisted, triggerShake]);
+        })
+        .finally(() => {
+          setPendingSolve(false);
+          inFlightAttemptRef.current = null;
+        });
+    },
+    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake],
+  );
 
   const typeLetter = useCallback(
     (letter: string) => {
@@ -198,9 +207,11 @@ export function useGriddle({
         return;
       }
       telemetryRef.current?.recordKeystroke();
-      setPath((p) => [...p, foundCell!]);
+      const newPath = [...path, foundCell];
+      setPath(newPath);
+      if (newPath.length === 9) triggerSolve(newPath);
     },
-    [grid, path, solved, disabled, pendingSolve, triggerShake],
+    [grid, path, solved, disabled, pendingSolve, triggerShake, triggerSolve],
   );
 
   const tapCell = useCallback(
@@ -215,9 +226,11 @@ export function useGriddle({
         return;
       }
       telemetryRef.current?.recordKeystroke();
-      setPath((p) => [...p, cellIdx]);
+      const newPath = [...path, cellIdx];
+      setPath(newPath);
+      if (newPath.length === 9) triggerSolve(newPath);
     },
-    [path, solved, disabled, pendingSolve, triggerShake],
+    [path, solved, disabled, pendingSolve, triggerShake, triggerSolve],
   );
 
   const backspace = useCallback(() => {

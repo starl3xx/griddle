@@ -32,6 +32,12 @@ const INELIGIBLE_MS = parseInt(process.env.BOT_THRESHOLD_INELIGIBLE_MS ?? '8000'
 const SUSPICIOUS_MS = parseInt(process.env.BOT_THRESHOLD_SUSPICIOUS_MS ?? '15000', 10);
 const SUSPICIOUS_STDDEV_MS = parseInt(process.env.BOT_THRESHOLD_STDDEV_MS ?? '30', 10);
 
+// A real solve has 8 inter-keystroke intervals (9 letters → 8 gaps).
+// Backspaces inside an attempt rarely push it past ~50 events. 1000
+// is a generous upper bound — a request claiming more is malformed
+// and we reject it outright rather than try to process it.
+const MAX_KEYSTROKE_INTERVALS = 1000;
+
 interface SolveRequestBody {
   dayNumber: number;
   claimedWord: string;
@@ -64,6 +70,7 @@ export async function POST(
     typeof body.claimedWord !== 'string' ||
     body.claimedWord.length !== 9 ||
     !Array.isArray(body.keystrokeIntervalsMs) ||
+    body.keystrokeIntervalsMs.length > MAX_KEYSTROKE_INTERVALS ||
     typeof body.clientSolveMs !== 'number' ||
     typeof body.keystrokeCount !== 'number'
   ) {
@@ -130,12 +137,28 @@ function keystrokeStats(intervals: number[]): {
   stddev: number | null;
   min: number | null;
 } {
+  // Loop-based instead of `Math.min(...intervals)` because the spread
+  // operator passes each element as a function argument, which blows
+  // the call stack for arrays past ~1e5 elements. The route validates
+  // length ≤ MAX_KEYSTROKE_INTERVALS, but defense-in-depth: even if a
+  // future caller bypasses the validation, this helper can’t crash.
   if (intervals.length === 0) return { stddev: null, min: null };
-  const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-  const variance =
-    intervals.reduce((acc, v) => acc + (v - mean) ** 2, 0) / intervals.length;
+  let sum = 0;
+  let min = Infinity;
+  for (const v of intervals) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    sum += v;
+    if (v < min) min = v;
+  }
+  const mean = sum / intervals.length;
+  let varianceSum = 0;
+  for (const v of intervals) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    varianceSum += (v - mean) ** 2;
+  }
+  const variance = varianceSum / intervals.length;
   return {
     stddev: Math.round(Math.sqrt(variance)),
-    min: Math.min(...intervals),
+    min: Number.isFinite(min) ? min : null,
   };
 }
