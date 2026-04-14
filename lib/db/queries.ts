@@ -535,14 +535,27 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
  * `profiles_wallet_or_handle_required` CHECK. Passing both as null will
  * throw; callers should never do this.
  */
+/**
+ * `wallet` and `handle` accept `null` so callers can pass through
+ * normalized input that may have been emptied out — `normalizeIdentity`
+ * treats `null`, `undefined`, and empty-string the same.
+ *
+ * The other three fields are `T | undefined` only (not `| null`): the
+ * implementation below collapses undefined into "keep existing", and
+ * there's no current need for a caller to explicitly clear a
+ * `premiumSource` / `grantedBy` / `reason`. Admin grant audit fields
+ * in particular are append-only — once recorded, they're part of the
+ * audit trail forever. If a future caller ever needs to clear them,
+ * the type contract will flag it and we can add the distinction then.
+ */
 export interface UpsertProfileInput {
   wallet?: string | null;
   handle?: string | null;
-  premiumSource?: 'crypto' | 'fiat' | 'admin_grant' | null;
+  premiumSource?: 'crypto' | 'fiat' | 'admin_grant';
   /** Admin wallet, only for `premiumSource='admin_grant'`. Audit trail. */
-  grantedBy?: string | null;
+  grantedBy?: string;
   /** Operator note, only for `premiumSource='admin_grant'`. */
-  reason?: string | null;
+  reason?: string;
 }
 
 /**
