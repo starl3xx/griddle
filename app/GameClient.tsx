@@ -243,31 +243,29 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   }, []);
 
   /**
-   * POST to Stripe checkout and redirect. Errors propagate out so the
-   * modal can surface them inline instead of leaving the user confused.
-   * Wallet or handle (one of the two) carries identity through the
-   * metadata → webhook → DB chain.
+   * POST to Stripe checkout and redirect. The connected wallet is
+   * required — the modal disables the fiat tile when no wallet is
+   * bound, so this callback should never fire without one, but we
+   * still guard in case. Errors propagate out so the modal can
+   * surface them inline instead of leaving the user confused.
    */
-  const handleUnlockFiat = useCallback(
-    async (handle: string | null) => {
-      const res = await fetch('/api/stripe/checkout', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          wallet: sessionWallet ?? undefined,
-          handle: handle ?? undefined,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`Checkout failed: ${body}`);
-      }
-      const data = (await res.json()) as { url?: string };
-      if (!data.url) throw new Error('Checkout did not return a URL');
-      window.location.href = data.url;
-    },
-    [sessionWallet],
-  );
+  const handleUnlockFiat = useCallback(async () => {
+    if (!sessionWallet) {
+      throw new Error('Connect a wallet first.');
+    }
+    const res = await fetch('/api/stripe/checkout', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ wallet: sessionWallet }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Checkout failed: ${body}`);
+    }
+    const data = (await res.json()) as { url?: string };
+    if (!data.url) throw new Error('Checkout did not return a URL');
+    window.location.href = data.url;
+  }, [sessionWallet]);
 
   const handleCryptoUnlocked = useCallback(
     (wallet: string) => {
@@ -396,14 +394,15 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         displayName={displayName}
       />
 
-      <PremiumGateModal
-        open={premiumGate !== null}
-        feature={premiumGate ?? 'leaderboard'}
-        sessionWallet={sessionWallet}
-        onClose={() => setPremiumGate(null)}
-        onUnlockCrypto={handleUnlockCrypto}
-        onUnlockFiat={handleUnlockFiat}
-      />
+      {premiumGate !== null && (
+        <PremiumGateModal
+          feature={premiumGate}
+          sessionWallet={sessionWallet}
+          onClose={() => setPremiumGate(null)}
+          onUnlockCrypto={handleUnlockCrypto}
+          onUnlockFiat={handleUnlockFiat}
+        />
+      )}
 
       {showCryptoFlow && (
         <div

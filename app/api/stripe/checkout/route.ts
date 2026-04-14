@@ -8,20 +8,19 @@ import { isValidAddress } from '@/lib/address';
  *
  * Creates a Stripe Checkout Session for Griddle Premium ($6, one-time)
  * and returns the hosted checkout URL for the client to redirect into.
- * The client POSTs one of:
+ * The client POSTs `{ wallet: '0x…' }` — a connected wallet is REQUIRED
+ * to hit this endpoint in M4f. Rationale: the game's premium gate reads
+ * from `/api/premium/[wallet]` which queries `premium_users` keyed on
+ * wallet. A handle-only buyer has no wallet, so even a successful
+ * charge wouldn't flip their UI to premium — they'd pay and get
+ * nothing. The full handle-identity premium read path (profiles-table
+ * lookup, wallet-handle merge on connect, the free-with-account stats
+ * carrot, etc.) lands in the follow-up M4g PR. Until then, fiat
+ * checkout enforces the wallet requirement up front.
  *
- *   - `{ wallet: '0x…' }` — the user has a connected wallet, so we bind
- *     the future premium row to that address. No handle needed; the
- *     leaderboard will render them by wallet with no name.
- *
- *   - `{ handle: 'alice' }` — no wallet yet; the user picked a handle in
- *     the pre-checkout form. The future profiles row will key on the
- *     handle and the wallet will be linked later if/when they connect.
- *
- * Either field is validated here (wallet = checksum regex, handle =
- * 1-32 chars trimmed). At least one must be present. Both are passed
- * through as session `metadata` so the webhook can insert the right
- * row on checkout completion.
+ * The `handle` field is accepted and forwarded as metadata so the
+ * follow-up PR can enable the handle path without changing the wire
+ * format, but a missing wallet is still rejected with 400 here.
  *
  * Apple Pay is enabled by configuring the Checkout Session with
  * `payment_method_types: ['card']` — Stripe auto-surfaces Apple Pay
@@ -66,9 +65,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     : null;
   const handle = normalizeHandle(body.handle);
 
-  if (!wallet && !handle) {
+  // M4f scope: a connected wallet is REQUIRED for fiat checkout. The
+  // premium-read path only hits `premium_users` by wallet; without
+  // a wallet binding a successful payment would leave the buyer
+  // permanently gated. Handle-only checkout unlocks in M4g.
+  if (!wallet) {
     return NextResponse.json(
-      { error: 'wallet or handle required' },
+      { error: 'wallet required — connect before checkout' },
       { status: 400 },
     );
   }

@@ -4,14 +4,13 @@ import { useState } from 'react';
 import { Diamond } from '@phosphor-icons/react';
 
 interface PremiumGateModalProps {
-  open: boolean;
   /** What the user tried to open — shapes the modal headline. */
   feature: 'leaderboard' | 'archive';
   /**
-   * Wallet address currently bound to this session, or null. When null
-   * the crypto path is disabled (wallet is required for permit signing)
-   * and the fiat path prompts for a handle up front so the buyer still
-   * gets leaderboard presence.
+   * Wallet address currently bound to this session, or null. Both
+   * paths require a wallet in M4f: crypto for permit signing, fiat
+   * because the premium-read path keys on wallet. Handle-only fiat
+   * lands in M4g alongside the profile/identity rework.
    */
   sessionWallet: string | null;
   onClose: () => void;
@@ -19,42 +18,40 @@ interface PremiumGateModalProps {
   onUnlockCrypto: () => void;
   /**
    * Fires when the user clicks "Pay with cash". The parent POSTs to
-   * /api/stripe/checkout with the wallet (if any) or handle and redirects
-   * to the returned session URL. A rejected promise surfaces the error
+   * /api/stripe/checkout with the connected wallet and redirects to
+   * the returned session URL. A rejected promise surfaces the error
    * inline inside the modal.
    */
-  onUnlockFiat: (handle: string | null) => Promise<void> | void;
+  onUnlockFiat: () => Promise<void> | void;
 }
 
 /**
- * Premium-gate modal. Two unlock paths:
+ * Premium-gate modal. Two unlock paths, both require a connected wallet
+ * in M4f:
  *
- *  - **Crypto ($5)** — requires a connected wallet. Clicking opens the
- *    lazy-loaded PremiumCryptoFlow inside the parent, which quotes the
- *    oracle, signs an ERC-2612 permit, calls `unlockWithPermit`, and
- *    asks the server to verify the burn before flipping premium state.
- *  - **Cash ($6)** — Stripe Checkout. If a wallet is connected, premium
- *    binds to that wallet. Otherwise we require a handle up front so
- *    the fiat buyer still gets leaderboard presence; on first wallet
- *    connect those rows merge.
+ *  - **Crypto ($5)** — Lazy-loaded PremiumCryptoFlow signs an ERC-2612
+ *    permit, calls `unlockWithPermit`, server verifies the burn.
+ *  - **Cash ($6)** — Stripe Checkout. Premium binds to the connected
+ *    wallet so the game's `refreshPremium` read sees it post-redirect.
  *
- * The two tiles are click targets, not labels next to an action button.
- * No "Unlock" button below them — a user who clicked a tile clearly
- * intends to pay, so an extra confirmation step is friction.
+ * Handle-only fiat (pay without a wallet) lands in M4g alongside the
+ * profile/identity rework — until then, both tiles need a wallet and
+ * the modal prompts to connect if there isn't one.
+ *
+ * The caller MUST conditionally mount this component (`{open && <Modal />}`)
+ * rather than rely on an `open` prop. That guarantees local state is
+ * reset on every open cycle, preventing stale `fiatSubmitting` /
+ * `fiatError` from persisting across a failed redirect.
  */
 export function PremiumGateModal({
-  open,
   feature,
   sessionWallet,
   onClose,
   onUnlockCrypto,
   onUnlockFiat,
 }: PremiumGateModalProps) {
-  const [handle, setHandle] = useState('');
   const [fiatSubmitting, setFiatSubmitting] = useState(false);
   const [fiatError, setFiatError] = useState<string | null>(null);
-
-  if (!open) return null;
 
   const headline =
     feature === 'leaderboard' ? 'See the leaderboard' : 'Play past puzzles';
@@ -63,26 +60,25 @@ export function PremiumGateModal({
       ? 'Premium unlocks every day’s ranked leaderboard — see who solved fastest, who went unassisted, and how you stack up.'
       : 'Premium unlocks the full puzzle archive — replay any past day and climb its leaderboard.';
 
-  const needsHandle = !sessionWallet;
-  const trimmedHandle = handle.trim();
-  const handleValid = /^[A-Za-z0-9_\-]{1,32}$/.test(trimmedHandle);
+  const needsWallet = !sessionWallet;
 
   const handleFiatClick = async () => {
     setFiatError(null);
-    if (needsHandle && !handleValid) {
-      setFiatError('Pick a handle (1–32 chars, letters/numbers/_/-).');
+    if (needsWallet) {
+      setFiatError('Connect a wallet first — checkout needs an address.');
       return;
     }
     setFiatSubmitting(true);
     try {
-      await onUnlockFiat(needsHandle ? trimmedHandle : null);
+      await onUnlockFiat();
     } catch (err) {
       setFiatError(err instanceof Error ? err.message : 'Checkout failed');
       setFiatSubmitting(false);
     }
     // On success the parent redirects to Stripe — we deliberately leave
     // the spinner spinning rather than reset, so a fast redirect doesn't
-    // flash "idle" state.
+    // flash "idle" state. Conditional mounting from the parent guarantees
+    // the stuck-spinner state is cleared if the redirect ever fails.
   };
 
   return (
@@ -155,37 +151,23 @@ export function PremiumGateModal({
           <button
             type="button"
             onClick={handleFiatClick}
-            disabled={fiatSubmitting}
-            className="rounded-md border-2 border-gray-200 bg-white px-3 py-3 text-left hover:border-gray-300 hover:bg-gray-50 disabled:opacity-60 transition-colors"
+            disabled={fiatSubmitting || needsWallet}
+            title={needsWallet ? 'Connect a wallet first' : undefined}
+            className="rounded-md border-2 border-gray-200 bg-white px-3 py-3 text-left hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
               Pay with cash (Stripe)
             </div>
             <div className="text-xl font-black text-gray-900 tabular-nums mt-0.5">$6</div>
             <div className="text-[11px] font-medium text-gray-500 mt-0.5">
-              {fiatSubmitting ? 'Opening checkout…' : 'Card & Apple Pay'}
+              {fiatSubmitting
+                ? 'Opening checkout…'
+                : needsWallet
+                  ? 'Connect wallet first'
+                  : 'Card & Apple Pay'}
             </div>
           </button>
         </div>
-
-        {needsHandle && (
-          <div className="mt-4">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-              Pick a handle for the leaderboard
-            </label>
-            <input
-              type="text"
-              value={handle}
-              onChange={(e) => setHandle(e.target.value)}
-              placeholder="alice"
-              maxLength={32}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
-            />
-            <p className="text-[11px] text-gray-400 mt-1">
-              Required for cash checkout. Connect a wallet to skip this step.
-            </p>
-          </div>
-        )}
 
         {fiatError && (
           <p className="text-[11px] font-semibold text-error-700 mt-2">{fiatError}</p>
