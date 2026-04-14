@@ -16,6 +16,8 @@ export interface GriddleState {
   flashWord: string | null;
   flashKey: number;
   solved: boolean;
+  /** True while an async solve verification is in flight. */
+  pendingSolve: boolean;
 }
 
 export interface GriddleActions {
@@ -25,14 +27,28 @@ export interface GriddleActions {
   reset: () => void;
 }
 
+/**
+ * Verdict returned by the server for a solve attempt. `solved=true` means
+ * the claimed word matched the stored answer — the hook sets solved state
+ * and fires onSolved. `solved=false` triggers a shake and lets the user
+ * backspace / retry.
+ */
+export interface SolveVerdict {
+  solved: boolean;
+  word?: string;
+}
+
 interface UseGriddleOptions {
   grid: string;
   /**
-   * DEV ONLY: M1 verifies solves client-side against a known target word.
-   * M4 will replace this with a server-side /api/solve verification.
+   * Async solve verification callback. Called when the user has laid
+   * down 9 letters on a valid Hamiltonian path. Returns a promise that
+   * resolves to a verdict. In production this POSTs to /api/solve; in
+   * tests it can be stubbed with a local check.
    */
-  devTargetWord: string;
-  onSolve?: (payload: SolvePayload & { unassisted: boolean }) => void;
+  onSolveAttempt: (payload: SolvePayload & { unassisted: boolean }) => Promise<SolveVerdict>;
+  /** Fires after a verdict with solved=true. */
+  onSolved?: (payload: SolvePayload & { unassisted: boolean; word: string }) => void;
   unassisted?: boolean;
   /**
    * When true, all input (keyboard, tap, backspace) is a no-op. Used while
@@ -44,8 +60,8 @@ interface UseGriddleOptions {
 
 export function useGriddle({
   grid,
-  devTargetWord,
-  onSolve,
+  onSolveAttempt,
+  onSolved,
   unassisted = false,
   disabled = false,
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
@@ -54,11 +70,15 @@ export function useGriddle({
   const [flashWord, setFlashWord] = useState<string | null>(null);
   const [flashKey, setFlashKey] = useState(0);
   const [solved, setSolved] = useState(false);
+  const [pendingSolve, setPendingSolve] = useState(false);
 
   const telemetryRef = useRef<SolveTelemetry | null>(null);
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();
 
   const lastFlashedWordRef = useRef<string | null>(null);
+  // Guards the async solve effect against re-firing while the same
+  // 9-letter path is still in flight.
+  const inFlightAttemptRef = useRef<string | null>(null);
 
   const letters = useMemo(() => path.map((i) => grid[i]), [path, grid]);
 
@@ -91,7 +111,9 @@ export function useGriddle({
     setPath([]);
     setFlashWord(null);
     lastFlashedWordRef.current = null;
+    inFlightAttemptRef.current = null;
     setSolved(false);
+    setPendingSolve(false);
     telemetryRef.current?.reset();
   }, []);
 
@@ -109,28 +131,58 @@ export function useGriddle({
     }
   }, [letters]);
 
-  // Solve detection on reaching 9 letters
+  // Async solve detection on reaching 9 letters. Fires once per unique
+  // 9-letter attempt — backspace → retype re-fires because the ref is
+  // reset on length < 9.
   useEffect(() => {
-    if (solved) return;
-    if (letters.length !== 9) return;
+    if (solved || pendingSolve) return;
+    if (letters.length !== 9) {
+      // Reset the in-flight guard as soon as the user steps off a
+      // 9-letter attempt (backspace, reset, etc.) so the next 9-letter
+      // attempt fires a fresh check.
+      inFlightAttemptRef.current = null;
+      return;
+    }
     if (!isValidPath(path)) return;
     const attempt = letters.join('');
-    if (attempt === devTargetWord) {
-      setSolved(true);
-      const payload = telemetryRef.current!.build(attempt);
-      onSolve?.({ ...payload, unassisted });
-    } else {
-      // 9 letters laid down but not the target — shake + bounce back
-      triggerShake();
-    }
-  }, [letters, path, devTargetWord, solved, onSolve, unassisted, triggerShake]);
+    if (inFlightAttemptRef.current === attempt) return;
+    inFlightAttemptRef.current = attempt;
+
+    const payload = telemetryRef.current!.build(attempt);
+    setPendingSolve(true);
+
+    let cancelled = false;
+    onSolveAttempt({ ...payload, unassisted })
+      .then((verdict) => {
+        if (cancelled) return;
+        if (verdict.solved) {
+          setSolved(true);
+          if (verdict.word != null) {
+            onSolved?.({ ...payload, unassisted, word: verdict.word });
+          }
+        } else {
+          triggerShake();
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        triggerShake();
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setPendingSolve(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [letters, path, solved, pendingSolve, onSolveAttempt, onSolved, unassisted, triggerShake]);
 
   const typeLetter = useCallback(
     (letter: string) => {
-      if (solved || disabled) return;
+      if (solved || disabled || pendingSolve) return;
       const lc = letter.toLowerCase();
       if (!/^[a-z]$/.test(lc)) return;
-      // find the cell in grid that matches AND is not yet used AND is not blocked
       const used = new Set(path);
       const current = path[path.length - 1] ?? null;
       const blocked = getBlockedCells(current);
@@ -148,12 +200,12 @@ export function useGriddle({
       telemetryRef.current?.recordKeystroke();
       setPath((p) => [...p, foundCell!]);
     },
-    [grid, path, solved, disabled, triggerShake],
+    [grid, path, solved, disabled, pendingSolve, triggerShake],
   );
 
   const tapCell = useCallback(
     (cellIdx: number) => {
-      if (solved || disabled) return;
+      if (solved || disabled || pendingSolve) return;
       if (cellIdx < 0 || cellIdx > 8) return;
       const used = new Set(path);
       const current = path[path.length - 1] ?? null;
@@ -165,20 +217,19 @@ export function useGriddle({
       telemetryRef.current?.recordKeystroke();
       setPath((p) => [...p, cellIdx]);
     },
-    [path, solved, disabled, triggerShake],
+    [path, solved, disabled, pendingSolve, triggerShake],
   );
 
   const backspace = useCallback(() => {
-    if (solved || disabled) return;
+    if (solved || disabled || pendingSolve) return;
     setPath((p) => (p.length === 0 ? p : p.slice(0, -1)));
     lastFlashedWordRef.current = null;
-  }, [solved, disabled]);
+  }, [solved, disabled, pendingSolve]);
 
-  // Global keyboard listener. When disabled, we skip attaching the listener
-  // entirely so the browser handles key events normally while a modal is
-  // open — no preventDefault on keys we’re about to ignore anyway.
+  // Global keyboard listener. Disabled/pending both skip attachment so
+  // the browser handles keys normally during modals + in-flight solves.
   useEffect(() => {
-    if (disabled) return;
+    if (disabled || pendingSolve) return;
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Backspace') {
@@ -193,10 +244,10 @@ export function useGriddle({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [typeLetter, backspace, disabled]);
+  }, [typeLetter, backspace, disabled, pendingSolve]);
 
   return [
-    { letters, path, cellStates, sequenceByCell, shakeSignal, flashWord, flashKey, solved },
+    { letters, path, cellStates, sequenceByCell, shakeSignal, flashWord, flashKey, solved, pendingSolve },
     { typeLetter, tapCell, backspace, reset },
   ];
 }

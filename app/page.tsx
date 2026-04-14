@@ -1,149 +1,45 @@
-'use client';
+import { notFound } from 'next/navigation';
+import GameClient from './GameClient';
+import { getTodayPuzzle, recordPuzzleLoad } from '@/lib/db/queries';
+import { getSessionId } from '@/lib/session';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Grid } from '@/components/Grid';
-import { WordSlots } from '@/components/WordSlots';
-import { FlashBadge } from '@/components/FlashBadge';
-import { SolveModal } from '@/components/SolveModal';
-import { TutorialModal } from '@/components/TutorialModal';
-import { HowToPlayCard } from '@/components/HowToPlayCard';
-import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
-import { useGriddle } from '@/lib/useGriddle';
-import { getPuzzleForDay } from '@/lib/scheduler';
-import { useFarcaster } from '@/lib/farcaster';
+/**
+ * Root page. Server component — reads today’s puzzle directly from
+ * Neon via Drizzle (the **target word is stripped from the payload**
+ * before it leaves the server) and passes the safe subset into the
+ * client-side game wrapper.
+ *
+ * Session handling is owned by `middleware.ts`, which mints a session
+ * cookie on first visit and forwards the id via the `x-session-id`
+ * request header so this handler can read it synchronously.
+ *
+ * This route is `force-dynamic` because the puzzle rolls over at UTC
+ * midnight and the session cookie is set per-request.
+ */
+export const dynamic = 'force-dynamic';
 
-const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
-const HOWTOPLAY_STORAGE_KEY = 'griddle_howtoplay_dismissed_v1';
+export default async function Page() {
+  const sessionId = await getSessionId();
 
-export default function Page() {
-  // DEV: puzzle #1 hardcoded client-side for M1/M2. In M4 this becomes a
-  // server-fetched puzzle where the `word` is never sent to the client and
-  // solve verification happens via /api/solve.
-  const puzzle = getPuzzleForDay(1);
+  const puzzle = await getTodayPuzzle();
+  if (!puzzle) {
+    notFound();
+  }
 
-  // Single source of truth for Farcaster context: this hook fires
-  // sdk.actions.ready() on mount so the container can hide its splash,
-  // and races sdk.context against a 2s timeout to decide inMiniApp.
-  // The result is passed down to SolveModal as a prop so the modal
-  // doesn’t re-run the async detection on its own mount (which would
-  // leave inMiniApp=false for the first ~2s after solving).
-  const { inMiniApp } = useFarcaster();
+  // Record the first load — authoritative start time for server_solve_ms.
+  // Idempotent, safe to call on every render; later loads are no-ops.
+  await recordPuzzleLoad(sessionId, puzzle.id);
 
-  // Tutorial state is hoisted here (not inside TutorialModal) so we can pass
-  // `disabled={showTutorial}` into useGriddle — otherwise stray keystrokes
-  // while the tutorial is open would silently fill the grid behind it.
-  const [showTutorial, setShowTutorial] = useState(false);
-  const [showHowToPlay, setShowHowToPlay] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      setShowTutorial(!window.localStorage.getItem(TUTORIAL_STORAGE_KEY));
-      setShowHowToPlay(!window.localStorage.getItem(HOWTOPLAY_STORAGE_KEY));
-    } catch {
-      // storage unavailable (private mode, etc) — show both anyway
-      setShowTutorial(true);
-      setShowHowToPlay(true);
-    }
-  }, []);
-
-  const dismissTutorial = useCallback(() => {
-    try {
-      window.localStorage.setItem(TUTORIAL_STORAGE_KEY, '1');
-    } catch {
-      // noop
-    }
-    setShowTutorial(false);
-  }, []);
-
-  const dismissHowToPlay = useCallback(() => {
-    try {
-      window.localStorage.setItem(HOWTOPLAY_STORAGE_KEY, '1');
-    } catch {
-      // noop
-    }
-    setShowHowToPlay(false);
-  }, []);
-
-  const [solveResult, setSolveResult] = useState<{
-    solveMs: number;
-    unassisted: boolean;
-  } | null>(null);
-
-  const handleSolve = useCallback(
-    (payload: { clientSolveMs: number; unassisted: boolean }) => {
-      setSolveResult({ solveMs: payload.clientSolveMs, unassisted: payload.unassisted });
-    },
-    [],
-  );
-
-  const [state, actions] = useGriddle({
-    grid: puzzle.grid,
-    devTargetWord: puzzle.word,
-    onSolve: handleSolve,
-    disabled: showTutorial,
-  });
-
-  const handlePlayAgain = useCallback(() => {
-    setSolveResult(null);
-    actions.reset();
-  }, [actions]);
-
+  // Explicit prop shape — intentionally does NOT include `puzzle.word`.
+  // Don’t be tempted to spread `puzzle` here; the spread would leak the
+  // answer to the client bundle.
   return (
-    <>
-      <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
-        <header className="text-center">
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">
-            Griddle
-          </h1>
-          <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums">
-            #{puzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
-          </p>
-        </header>
-
-        <FlashBadge word={state.flashWord} flashKey={state.flashKey} />
-
-        <Grid
-          grid={puzzle.grid}
-          cellStates={state.cellStates}
-          sequenceByCell={state.sequenceByCell}
-          shakeSignal={state.shakeSignal}
-          solved={state.solved}
-          onCellTap={actions.tapCell}
-        />
-
-        <WordSlots letters={state.letters} />
-
-        <div className="flex gap-3 mt-1">
-          <button type="button" className="btn-secondary" onClick={actions.backspace}>
-            Backspace
-          </button>
-          <button type="button" className="btn-secondary" onClick={actions.reset}>
-            Reset
-          </button>
-        </div>
-
-        {!showTutorial && showHowToPlay && (
-          <HowToPlayCard onDismiss={dismissHowToPlay} />
-        )}
-
-        <NextPuzzleCountdown />
-      </main>
-
-      <TutorialModal open={showTutorial} onDismiss={dismissTutorial} />
-
-      {solveResult && (
-        <SolveModal
-          dayNumber={puzzle.dayNumber}
-          word={puzzle.word}
-          grid={puzzle.grid}
-          solveMs={solveResult.solveMs}
-          unassisted={solveResult.unassisted}
-          inMiniApp={inMiniApp}
-          onPlayAgain={handlePlayAgain}
-          onClose={() => setSolveResult(null)}
-        />
-      )}
-    </>
+    <GameClient
+      initialPuzzle={{
+        dayNumber: puzzle.dayNumber,
+        date: puzzle.date,
+        grid: puzzle.grid,
+      }}
+    />
   );
 }

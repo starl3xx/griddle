@@ -1,6 +1,7 @@
 /**
- * Drizzle schema. No migrations run in M1 — this file is a contract that
- * lib/db/queries.ts (M4) will consume when the DB is wired up.
+ * Drizzle schema. Migration history in drizzle/, applied live on Neon
+ * as of M4a. Each schema change goes through `db:generate` to emit a
+ * new migration SQL file in drizzle/, then `db:migrate` to apply it.
  */
 import {
   pgTable,
@@ -68,5 +69,27 @@ export const leaderboard = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.puzzleId, t.wallet] }),
+  }),
+);
+
+/**
+ * Tracks when a session first received the grid for a given puzzle.
+ * This is the authoritative start time for `server_solve_ms` — we can’t
+ * trust the client’s self-reported timer because a bot can lie about it.
+ *
+ * Populated by `/api/puzzle/today` on first load for a (session_id, puzzle_id)
+ * pair. Read by `/api/solve` to compute `now - loaded_at` on submit.
+ * Primary key is composite so a session loading the same puzzle twice is
+ * a no-op — the earliest load wins.
+ */
+export const puzzleLoads = pgTable(
+  'puzzle_loads',
+  {
+    sessionId: varchar('session_id', { length: 64 }).notNull(),
+    puzzleId: integer('puzzle_id').references(() => puzzles.id).notNull(),
+    loadedAt: timestamp('loaded_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.sessionId, t.puzzleId] }),
   }),
 );
