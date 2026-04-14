@@ -1,6 +1,13 @@
 import { and, asc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
-import { puzzles, puzzleLoads, solves, streaks, premiumUsers } from './schema';
+import {
+  puzzles,
+  puzzleLoads,
+  solves,
+  streaks,
+  premiumUsers,
+  profiles,
+} from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
@@ -433,6 +440,149 @@ export async function getArchiveList(limit = 60): Promise<ArchiveEntry[]> {
     .orderBy(sql`${puzzles.dayNumber} DESC`)
     .limit(limit);
   return rows.map((r) => ({ dayNumber: r.dayNumber, date: r.date }));
+}
+
+/**
+ * Player profile queries — scaffolding for the inclusive leaderboard in
+ * M4f. A profile is identified by a wallet, a handle, or both; the UI
+ * renders `handle` when set and falls back to a truncated wallet.
+ *
+ * These helpers are safe to call before M4f's UI ships — nothing in the
+ * game currently reads from `profiles`, so an empty table is a no-op
+ * for existing flows. The leaderboard render path will start consuming
+ * these once the profile-collection UI lands.
+ */
+export interface ProfileRow {
+  id: number;
+  wallet: string | null;
+  handle: string | null;
+  premiumSource: 'crypto' | 'fiat' | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Lookup by wallet address. Normalized to lowercase before the query so
+ * mixed-case input (e.g. the checksummed form from wagmi) hits the same
+ * row as the lowercased form stored on write.
+ */
+export async function getProfileByWallet(wallet: string): Promise<ProfileRow | null> {
+  const normalized = wallet.toLowerCase();
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.wallet, normalized))
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    wallet: r.wallet,
+    handle: r.handle,
+    premiumSource: r.premiumSource as 'crypto' | 'fiat' | null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * Lookup by handle, case-insensitive. Uses `lower(handle)` to hit the
+ * `profiles_handle_lower_idx` unique index rather than scanning.
+ */
+export async function getProfileByHandle(handle: string): Promise<ProfileRow | null> {
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.handle}) = lower(${handle})`)
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    wallet: r.wallet,
+    handle: r.handle,
+    premiumSource: r.premiumSource as 'crypto' | 'fiat' | null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * Upsert a profile. Used by both premium unlock paths:
+ *
+ *   - **Crypto**: `upsertProfile({ wallet, premiumSource: 'crypto' })` —
+ *     creates or updates the wallet-keyed profile on unlock.
+ *   - **Fiat**: `upsertProfile({ handle, premiumSource: 'fiat' })` —
+ *     creates the handle-keyed profile during Stripe checkout, before
+ *     the player has connected a wallet.
+ *
+ * If both `wallet` and `handle` are provided, attempts to match an
+ * existing row on wallet first (updating handle in place) so that a
+ * previously handle-only profile can pick up a wallet on first connect
+ * without creating a duplicate row. Callers performing that "merge"
+ * path should look up by handle first via `getProfileByHandle`, then
+ * call `upsertProfile` with both.
+ *
+ * Constraint enforcement (wallet OR handle required) lives in the DB
+ * `profiles_wallet_or_handle_required` CHECK. Passing both as null will
+ * throw; callers should never do this.
+ */
+export interface UpsertProfileInput {
+  wallet?: string | null;
+  handle?: string | null;
+  premiumSource?: 'crypto' | 'fiat' | null;
+}
+
+export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileRow> {
+  const wallet = input.wallet ? input.wallet.toLowerCase() : null;
+  const handle = input.handle ?? null;
+  const premiumSource = input.premiumSource ?? null;
+
+  if (wallet === null && handle === null) {
+    throw new Error('upsertProfile requires at least one of wallet or handle');
+  }
+
+  // Prefer matching on wallet when present, else handle. The two unique
+  // partial indexes on `profiles` mean we can't catch duplicates via
+  // onConflictDoUpdate against both columns at once — so do the lookup
+  // explicitly and route to insert vs update.
+  let existing: ProfileRow | null = null;
+  if (wallet) existing = await getProfileByWallet(wallet);
+  if (!existing && handle) existing = await getProfileByHandle(handle);
+
+  if (existing) {
+    const [updated] = await db
+      .update(profiles)
+      .set({
+        wallet: wallet ?? existing.wallet,
+        handle: handle ?? existing.handle,
+        premiumSource: premiumSource ?? existing.premiumSource,
+        updatedAt: new Date(),
+      })
+      .where(eq(profiles.id, existing.id))
+      .returning();
+    return {
+      id: updated.id,
+      wallet: updated.wallet,
+      handle: updated.handle,
+      premiumSource: updated.premiumSource as 'crypto' | 'fiat' | null,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    };
+  }
+
+  const [inserted] = await db
+    .insert(profiles)
+    .values({ wallet, handle, premiumSource })
+    .returning();
+  return {
+    id: inserted.id,
+    wallet: inserted.wallet,
+    handle: inserted.handle,
+    premiumSource: inserted.premiumSource as 'crypto' | 'fiat' | null,
+    createdAt: inserted.createdAt,
+    updatedAt: inserted.updatedAt,
+  };
 }
 
 /**

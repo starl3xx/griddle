@@ -15,7 +15,10 @@ import {
   jsonb,
   primaryKey,
   index,
+  uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const puzzles = pgTable('puzzles', {
   id: serial('id').primaryKey(),
@@ -82,6 +85,55 @@ export const leaderboard = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.puzzleId, t.wallet] }),
+  }),
+);
+
+/**
+ * Player profile — the identity carrier for the leaderboard. A profile
+ * may be keyed on a `wallet`, a `handle`, or (eventually) both:
+ *
+ *   - Crypto premium path (M4f): the unlock tx binds the wallet, and
+ *     the profile is created with `wallet` set, `handle` null,
+ *     `premium_source='crypto'`. The wallet address is the identity.
+ *
+ *   - Fiat premium path (M4f): Apple Pay / card checkout collects a
+ *     required unique handle up front. A profile is created with
+ *     `handle` set, `wallet` null, `premium_source='fiat'`. The
+ *     handle is the identity until the player later connects a
+ *     wallet — at which point the two rows merge.
+ *
+ * Leaderboard rendering reads the profile by wallet and prefers
+ * `handle` when set, falling back to a truncated wallet. This means
+ * wallet-only players don't need to pick a handle, and fiat-only
+ * players aren't locked out of the leaderboard for lacking a wallet.
+ *
+ * Constraint: at least one of `wallet` or `handle` must be non-null.
+ * Enforced via a CHECK so an empty profile row can never exist.
+ *
+ * Handle uniqueness is case-insensitive — `Alice` and `alice` would
+ * collide. Enforced with a `uniqueIndex` on `lower(handle)`.
+ */
+export const profiles = pgTable(
+  'profiles',
+  {
+    id: serial('id').primaryKey(),
+    wallet: varchar('wallet', { length: 42 }),
+    handle: varchar('handle', { length: 32 }),
+    premiumSource: varchar('premium_source', { length: 16 }), // 'crypto' | 'fiat' | null
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    walletIdx: uniqueIndex('profiles_wallet_idx')
+      .on(t.wallet)
+      .where(sql`${t.wallet} is not null`),
+    handleLowerIdx: uniqueIndex('profiles_handle_lower_idx')
+      .on(sql`lower(${t.handle})`)
+      .where(sql`${t.handle} is not null`),
+    walletOrHandleRequired: check(
+      'profiles_wallet_or_handle_required',
+      sql`${t.wallet} is not null or ${t.handle} is not null`,
+    ),
   }),
 );
 
