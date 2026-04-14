@@ -202,13 +202,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // row but the session does (fiat paid before wallet connect), migrate
       // the session premium to the wallet so future loads use the wallet key.
       const walletRes = await fetch(`/api/premium/${normalized}`).catch(() => null);
+      // Only parse a successful response — a failed or errored check
+      // must NOT trigger migration (GETDEL would delete the session key,
+      // and onConflictDoUpdate would overwrite a crypto-paid row with fiat).
       const walletData = walletRes?.ok
         ? await walletRes.json().catch(() => null) as { premium?: boolean } | null
         : null;
       if (walletData?.premium) {
         setPremium(true);
-      } else {
-        // Attempt migration — fire-and-forget. On failure the migrate
+      } else if (walletRes?.ok && walletData !== null) {
+        // Confirmed via a successful response that the wallet has no premium row.
+        // Safe to attempt migration — fire-and-forget. On failure the migrate
         // route restores the session key so the next connect can retry.
         fetch('/api/premium/migrate', {
           method: 'POST',
@@ -221,6 +225,8 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           })
           .catch(() => {/* best-effort */});
       }
+      // If walletRes was null/non-ok (network error, 5xx), skip migration
+      // entirely — we can't distinguish "no premium" from "check failed".
     },
     [],
   );
