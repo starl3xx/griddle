@@ -20,11 +20,11 @@ interface FoundWordsProps {
  * (brand / accent / warning / error) so the strip stays in-theme.
  */
 const LENGTH_CLASSES: Record<number, string> = {
-  4: 'bg-brand-50 text-brand-700 border-brand-200',
-  5: 'bg-accent-50 text-accent-700 border-accent-200',
-  6: 'bg-warning-50 text-warning-700 border-warning-200',
-  7: 'bg-warning-100 text-warning-800 border-warning-300',
-  8: 'bg-error-50 text-error-700 border-error-200',
+  4: 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 border-brand-200 dark:border-brand-700',
+  5: 'bg-accent-50 dark:bg-accent-900/40 text-accent-700 dark:text-accent-300 border-accent-200 dark:border-accent-700',
+  6: 'bg-warning-50 dark:bg-warning-900/40 text-warning-700 dark:text-warning-300 border-warning-200 dark:border-warning-700',
+  7: 'bg-warning-100 dark:bg-warning-900/60 text-warning-800 dark:text-warning-200 border-warning-300 dark:border-warning-600',
+  8: 'bg-error-50 dark:bg-error-900/40 text-error-700 dark:text-error-300 border-error-200 dark:border-error-700',
 };
 
 /**

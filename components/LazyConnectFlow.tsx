@@ -63,6 +63,11 @@ function AutoOpener({ openKey }: { openKey: number }) {
   useConnect();
 
   useEffect(() => {
+    // openKey=0 is the initial mount — LazyConnectFlow is now mounted
+    // eagerly on page load for wagmi auto-reconnect, but we must NOT open
+    // the connector picker on load. Only bump-triggered opens (openKey > 0)
+    // should open the picker.
+    if (openKey === 0) return;
     const btn = document.querySelector<HTMLButtonElement>(
       'button[data-griddle-connect="true"]',
     );
