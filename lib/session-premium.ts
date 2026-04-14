@@ -34,6 +34,14 @@ export async function getSessionPremium(
   }
 }
 
+export async function clearSessionPremium(sessionId: string): Promise<void> {
+  try {
+    await kv.del(KEY(sessionId));
+  } catch (err) {
+    console.warn(`[session-premium] del failed for ${sessionId}:`, err);
+  }
+}
+
 /**
  * Throws on KV failure so the Stripe webhook can return 500 and
  * trigger a retry — a swallowed error would return 200 and Stripe

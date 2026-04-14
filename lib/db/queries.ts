@@ -1056,13 +1056,15 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
 
   if (wallet) {
     const normalizedWallet = wallet.toLowerCase();
-    // Wallet path: insert into premium_users with stripe_session_id set.
-    // Idempotency has two layers:
-    //   1. The partial unique index on stripe_session_id means a webhook
-    //      replay for the same session id can't create a duplicate row.
-    //   2. onConflictDoUpdate targeting wallet handles the rare case
-    //      where the same wallet already has a row from a prior unlock —
-    //      we refresh it to reflect the newer fiat purchase.
+    // Wallet path: wallet IS the primary key, so wallet-keyed idempotency
+    // is guaranteed by onConflictDoUpdate alone. We do NOT store the
+    // stripeSessionId on this row — that column exists for handle-only
+    // fiat buyers who have no wallet PK to anchor their row. Storing it
+    // here would create a unique-index conflict on the stripe_session_idx
+    // when a second wallet tries to migrate from the same session (e.g.
+    // the buyer disconnects wallet A and connects wallet B). The audit
+    // trail for wallet-path fiat purchases is in the profiles row written
+    // below, which always carries the stripe_session_id.
     await db
       .insert(premiumUsers)
       .values({
@@ -1071,7 +1073,7 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
         source: 'fiat',
         grantedBy: null,
         reason: null,
-        stripeSessionId: input.stripeSessionId,
+        stripeSessionId: null,
       })
       .onConflictDoUpdate({
         target: premiumUsers.wallet,
@@ -1080,22 +1082,19 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
           source: 'fiat',
           grantedBy: null,
           reason: null,
-          stripeSessionId: input.stripeSessionId,
+          stripeSessionId: null,
           unlockedAt: new Date(),
         },
       });
   }
 
-  // Always persist the stripe session id on the profile row too. For
-  // the wallet-path fiat unlock it's redundant with premium_users (same
-  // session id on both rows), but for the handle-only fiat path this
-  // is the ONLY place the session id lives — without it a handle-only
-  // payment has no DB audit trail back to Stripe and the replay
-  // idempotency guarantee from premium_users doesn't apply. The
-  // partial unique index on profiles.stripe_session_id closes that
-  // gap: a replayed webhook for a handle-only buyer either hits the
-  // matching row and updates in place, or the index rejects the
-  // duplicate insert.
+  // Persist the stripe session id on the profile row. For wallet-path
+  // fiat unlocks this is the ONLY place the session id lives (we don't
+  // store it on premium_users for the wallet path — see comment above).
+  // For handle-only fiat buyers, profiles is the sole identity row.
+  // The partial unique index on profiles.stripe_session_id gives
+  // idempotency: a replayed webhook updates in place rather than
+  // inserting a duplicate.
   await upsertProfile({
     wallet: wallet ?? undefined,
     handle: handle ?? undefined,

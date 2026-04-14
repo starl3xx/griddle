@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { getSessionPremium } from '@/lib/session-premium';
+import { getSessionPremium, clearSessionPremium } from '@/lib/session-premium';
 import { recordFiatUnlock } from '@/lib/db/queries';
 import { isValidAddress } from '@/lib/address';
 
@@ -50,6 +50,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     stripeSessionId: sessionPremium.stripeSessionId,
     wallet: wallet.toLowerCase(),
   });
+
+  // Clear the session-premium key now that a wallet row exists. This
+  // prevents repeated migration attempts (which would hit the profiles
+  // stripe_session_idx for idempotency but are still wasted work), and
+  // closes the window where a second wallet could claim the same session.
+  await clearSessionPremium(sessionId);
 
   return NextResponse.json({ migrated: true });
 }
