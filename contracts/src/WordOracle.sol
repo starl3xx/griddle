@@ -1,86 +1,75 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import { Ownable2Step, Ownable } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { IWordOracle } from "./interfaces/IWordOracle.sol";
 
 /**
  * @title WordOracle
- * @notice Push oracle for the $WORD/USD price. A permissioned backend
- *         updater fetches the price from CoinGecko (via ORACLE_API_KEY)
- *         and posts it here on a regular cadence. GriddlePremium reads
- *         this to price crypto unlocks and fiat escrow opens.
+ * @notice Thin read-only adapter that derives the $WORD/USD per-token price
+ *         from the LHAW JackpotManagerV3 market-cap oracle.
  *
- * @dev    Price is 18-decimal USD per 1 $WORD.
- *         Example: $0.000123 per $WORD → price = 1.23e14
+ * The JackpotManager already receives periodic `updateClanktonMarketCap()`
+ * calls from the LHAW backend. This adapter converts the stored 8-decimal
+ * market cap into the 18-decimal per-token price that GriddlePremium needs —
+ * no separate oracle cron required.
  *
- *         The updater key is a hot backend wallet. The owner (hardware
- *         wallet / multisig) can rotate the updater if the key is
- *         compromised without redeploying this contract or GriddlePremium.
+ * Math:
+ *   $WORD total supply = 100 000 000 000 tokens (100B)
+ *   clanktonMarketCapUsd is 8-decimal USD  (e.g. 3 566 500 00000 = $35 665)
+ *   price_18dec = marketCapUsd_8dec × 10^18
+ *                 ─────────────────────────── = marketCapUsd_8dec / 10
+ *                      10^8 × 100 × 10^9
  *
- *         GriddlePremium rejects prices older than MAX_ORACLE_AGE (5 min),
- *         so the backend must push at least every 4 minutes to avoid
- *         failed unlocks. A 1-minute cadence gives comfortable headroom.
+ * Staleness check: GriddlePremium rejects prices older than MAX_ORACLE_AGE
+ * (5 min). The LHAW cron calls updateClanktonMarketCap on a sub-minute
+ * cadence, so this adapter is always fresher than that threshold in practice.
+ *
+ * No admin surface, no storage, no upgradeability — the adapter is fully
+ * stateless. Redeploy if the JackpotManager address ever changes.
  */
-contract WordOracle is IWordOracle, Ownable2Step {
-    // --- Storage ----------------------------------------------------------
+contract WordOracle is IWordOracle {
+    /// @notice LHAW JackpotManagerV3 on Base mainnet.
+    address public immutable jackpotManager;
 
-    uint256 private _price;
-    uint256 private _updatedAt;
-    address public updater;
+    /// @notice $WORD total supply in whole tokens (100 billion).
+    uint256 public constant TOTAL_SUPPLY_TOKENS = 100_000_000_000;
 
-    // --- Events -----------------------------------------------------------
-
-    event PriceUpdated(uint256 price, uint256 updatedAt);
-    event UpdaterChanged(address indexed oldUpdater, address indexed newUpdater);
-
-    // --- Errors -----------------------------------------------------------
-
-    error NotUpdater();
-    error ZeroPrice();
-    error ZeroAddress();
-
-    // --- Constructor ------------------------------------------------------
-
-    constructor(address updater_, address owner_) Ownable(owner_) {
-        if (updater_ == address(0) || owner_ == address(0)) revert ZeroAddress();
-        updater = updater_;
-        emit UpdaterChanged(address(0), updater_);
+    constructor(address jackpotManager_) {
+        require(jackpotManager_ != address(0), "WordOracle: zero address");
+        jackpotManager = jackpotManager_;
     }
-
-    // --- Oracle interface -------------------------------------------------
 
     /**
-     * @notice Returns the latest $WORD/USD price and the timestamp of the
-     *         last update. Reverts are not used — callers (GriddlePremium)
-     *         check staleness via `block.timestamp - updatedAt > MAX_ORACLE_AGE`.
+     * @inheritdoc IWordOracle
+     * @dev Reads `clanktonMarketCapUsd` (8-decimal) and `lastMarketCapUpdate`
+     *      directly from JackpotManagerV3's public storage slots.
+     *      Returns (0, 0) if the market cap has never been set — GriddlePremium
+     *      will treat a zero price as a revert-worthy condition via OracleZeroPrice.
      */
-    function getWordUsdPrice() external view override returns (uint256 price, uint256 updatedAt) {
-        return (_price, _updatedAt);
-    }
+    function getWordUsdPrice()
+        external
+        view
+        override
+        returns (uint256 price, uint256 updatedAt)
+    {
+        // JackpotManagerV3 public getters — no interface import needed.
+        (bool ok1, bytes memory d1) = jackpotManager.staticcall(
+            abi.encodeWithSignature("clanktonMarketCapUsd()")
+        );
+        (bool ok2, bytes memory d2) = jackpotManager.staticcall(
+            abi.encodeWithSignature("lastMarketCapUpdate()")
+        );
 
-    // --- Updater ----------------------------------------------------------
+        if (!ok1 || !ok2 || d1.length < 32 || d2.length < 32) {
+            return (0, 0);
+        }
 
-    /**
-     * @notice Post a new price. Called by the backend on a ~1-minute cadence.
-     * @param  price_     18-decimal USD per 1 $WORD (e.g. 1.23e14 for $0.000123)
-     * @param  updatedAt_ Unix timestamp of the CoinGecko quote (not block time)
-     *                    — lets callers detect stale API responses even if the
-     *                    transaction lands late.
-     */
-    function updatePrice(uint256 price_, uint256 updatedAt_) external {
-        if (msg.sender != updater) revert NotUpdater();
-        if (price_ == 0) revert ZeroPrice();
-        _price = price_;
-        _updatedAt = updatedAt_;
-        emit PriceUpdated(price_, updatedAt_);
-    }
+        uint256 marketCapUsd8 = abi.decode(d1, (uint256));
+        uint256 lastUpdate    = abi.decode(d2, (uint256));
 
-    // --- Admin ------------------------------------------------------------
-
-    function setUpdater(address newUpdater) external onlyOwner {
-        if (newUpdater == address(0)) revert ZeroAddress();
-        emit UpdaterChanged(updater, newUpdater);
-        updater = newUpdater;
+        // Convert 8-decimal USD market cap → 18-decimal USD per-token price.
+        // Division by 10 = multiply by 1e18 then divide by (1e8 × 100e9).
+        price     = marketCapUsd8 / 10;
+        updatedAt = lastUpdate;
     }
 }
