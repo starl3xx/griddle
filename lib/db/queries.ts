@@ -1065,6 +1065,12 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
     // the buyer disconnects wallet A and connects wallet B). The audit
     // trail for wallet-path fiat purchases is in the profiles row written
     // below, which always carries the stripe_session_id.
+    // onConflictDoNothing: if the wallet already has a premium_users row
+    // (from a prior crypto unlock, admin grant, or a previous fiat purchase),
+    // the existing row wins. We must NOT overwrite it — doing so would
+    // destroy the txHash and source from a crypto premium row, making the
+    // on-chain burn untraceable from the DB alone. The wallet is already
+    // premium; no update is needed in any case.
     await db
       .insert(premiumUsers)
       .values({
@@ -1075,17 +1081,7 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
         reason: null,
         stripeSessionId: null,
       })
-      .onConflictDoUpdate({
-        target: premiumUsers.wallet,
-        set: {
-          txHash: null,
-          source: 'fiat',
-          grantedBy: null,
-          reason: null,
-          stripeSessionId: null,
-          unlockedAt: new Date(),
-        },
-      });
+      .onConflictDoNothing();
   }
 
   // Persist the stripe session id on the profile row. For wallet-path
