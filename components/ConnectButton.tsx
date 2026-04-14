@@ -34,15 +34,23 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
   // state, and onDisconnect on the disconnect transition. Track the
   // previously-seen address to avoid double-firing on reconnect to the
   // same wallet.
+  //
+  // Also: close the picker if it’s still open when we transition to
+  // connected. Without this, wagmi’s persisted-state auto-reconnect
+  // (which happens AFTER the AutoOpener click sets pickerOpen=true)
+  // can leave stale pickerOpen=true state. Then when the user
+  // eventually disconnects, the picker would reappear unexpectedly.
   const [lastSeen, setLastSeen] = useState<string | null>(null);
   useEffect(() => {
     if (isConnected && address && address !== lastSeen) {
       setLastSeen(address);
       onConnect?.(address);
+      setPickerOpen(false);
     }
     if (!isConnected && lastSeen) {
       setLastSeen(null);
       onDisconnect?.();
+      setPickerOpen(false);
     }
   }, [isConnected, address, lastSeen, onConnect, onDisconnect]);
 

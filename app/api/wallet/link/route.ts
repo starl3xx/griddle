@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client';
 import { solves } from '@/lib/db/schema';
 import { getSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
+import { setSessionWallet, clearSessionWallet } from '@/lib/wallet-session';
 
 /**
  * POST /api/wallet/link
@@ -50,11 +51,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   const sessionId = await getSessionId();
   const normalized = body.wallet.toLowerCase();
 
-  const result = await db
-    .update(solves)
-    .set({ wallet: normalized })
-    .where(and(eq(solves.sessionId, sessionId), isNull(solves.wallet)))
-    .returning({ id: solves.id });
+  // Two writes, one purpose: (1) backfill historical anonymous solves
+  // for this session, (2) bind the session to this wallet so FUTURE
+  // solves on /api/solve get attributed automatically.
+  const [result] = await Promise.all([
+    db
+      .update(solves)
+      .set({ wallet: normalized })
+      .where(and(eq(solves.sessionId, sessionId), isNull(solves.wallet)))
+      .returning({ id: solves.id }),
+    setSessionWallet(sessionId, normalized),
+  ]);
 
   // Intentionally do NOT include sessionId in the response. The session
   // cookie is httpOnly precisely so client-side JS can't read it; echoing
@@ -64,4 +71,20 @@ export async function POST(req: Request): Promise<NextResponse> {
     wallet: normalized,
     linked: result.length,
   });
+}
+
+/**
+ * DELETE /api/wallet/link
+ *
+ * Clears the session → wallet binding. Called when the user disconnects
+ * their wallet so subsequent solves on the same session aren’t silently
+ * attributed to the just-disconnected wallet.
+ *
+ * Does NOT touch existing `solves.wallet` rows — historical attributions
+ * stay put. Only the forward-looking binding is cleared.
+ */
+export async function DELETE(): Promise<NextResponse> {
+  const sessionId = await getSessionId();
+  await clearSessionWallet(sessionId);
+  return NextResponse.json({ ok: true });
 }

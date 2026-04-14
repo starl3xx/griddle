@@ -172,11 +172,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     }
   }, []);
 
-  // Reset premium state on disconnect — without this the badge persists
-  // until a full page reload, which is misleading (premium is per-wallet,
-  // not per-session).
+  // Reset premium state on disconnect AND clear the server-side
+  // session→wallet binding so subsequent solves aren’t silently
+  // attributed to the just-disconnected wallet.
   const handleWalletDisconnect = useCallback(() => {
     setPremium(false);
+    fetch('/api/wallet/link', { method: 'DELETE' }).catch(() => {
+      // Best-effort: the client UI is already in disconnect state,
+      // a failed delete just means the binding lingers in KV until
+      // the TTL expires or the next connect overwrites it.
+    });
   }, []);
 
   // walletEnabled gates the dynamic import of the wagmi stack. False

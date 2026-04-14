@@ -7,6 +7,7 @@ import {
   getPuzzleWordByDayNumber,
 } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
+import { getSessionWallet } from '@/lib/wallet-session';
 
 /**
  * POST /api/solve
@@ -97,10 +98,16 @@ export async function POST(
 
   const sessionId = await getSessionId();
 
-  // Look up the puzzle and the session’s load time in parallel.
-  const [puzzle, loadedAt] = await Promise.all([
+  // Look up the puzzle, the session’s load time, and the session’s
+  // bound wallet (if any) in parallel. The wallet binding is set by
+  // POST /api/wallet/link when the user connects, so any solve made
+  // AFTER connecting gets attributed automatically without the client
+  // having to pass the wallet (and without the server trusting client
+  // claims about wallet ownership).
+  const [puzzle, loadedAt, wallet] = await Promise.all([
     getPuzzleWordByDayNumber(body.dayNumber),
     getPuzzleLoadedAt(sessionId, body.dayNumber),
+    getSessionWallet(sessionId),
   ]);
 
   if (!puzzle) {
@@ -131,6 +138,7 @@ export async function POST(
   await db.insert(solves).values({
     puzzleId: puzzle.id,
     sessionId,
+    wallet,
     solved,
     bestWord: solved ? claimed : null,
     clientSolveMs: body.clientSolveMs,
