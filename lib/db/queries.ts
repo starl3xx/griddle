@@ -607,37 +607,104 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // OR they both matched the same row. Update in place.
   const existing = byWallet ?? byHandle;
   if (existing) {
-    const [updated] = await db
-      .update(profiles)
-      .set({
-        wallet: wallet ?? existing.wallet,
-        handle: handle ?? existing.handle,
-        premiumSource: premiumSource ?? existing.premiumSource,
-        updatedAt: new Date(),
-      })
-      .where(eq(profiles.id, existing.id))
-      .returning();
+    return updateProfileInPlace(existing.id, {
+      wallet: wallet ?? existing.wallet,
+      handle: handle ?? existing.handle,
+      premiumSource: premiumSource ?? existing.premiumSource,
+    });
+  }
+
+  // Insert-fresh path with TOCTOU protection. Between the parallel
+  // lookup above and this insert, a concurrent `upsertProfile` call
+  // with the same wallet/handle could race us to the insert and win
+  // — a bare insert would then throw an unhandled unique constraint
+  // violation from one of the two partial unique indexes.
+  //
+  // `onConflictDoNothing()` targets any unique conflict: if someone
+  // inserted first, we get an empty `returning()` array instead of
+  // a thrown error. We then re-run the lookup and apply our update
+  // against the row the concurrent request created, giving the
+  // caller the same "last writer wins" semantics as the no-race
+  // path without needing to surface raw DB errors.
+  const insertedRows = await db
+    .insert(profiles)
+    .values({ wallet, handle, premiumSource })
+    .onConflictDoNothing()
+    .returning();
+
+  if (insertedRows.length > 0) {
+    const r = insertedRows[0];
     return {
-      id: updated.id,
-      wallet: updated.wallet,
-      handle: updated.handle,
-      premiumSource: updated.premiumSource as 'crypto' | 'fiat' | null,
-      createdAt: updated.createdAt,
-      updatedAt: updated.updatedAt,
+      id: r.id,
+      wallet: r.wallet,
+      handle: r.handle,
+      premiumSource: r.premiumSource as 'crypto' | 'fiat' | null,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
     };
   }
 
-  const [inserted] = await db
-    .insert(profiles)
-    .values({ wallet, handle, premiumSource })
+  // Race: a concurrent upsert created the row we wanted to insert.
+  // Re-query and update in place. We intentionally do NOT recurse
+  // into `upsertProfile` — recursion would double the lookup + risk
+  // re-entering the merge-conflict branch if the race winner happened
+  // to combine wallet+handle differently than we expected.
+  const [retryByWallet, retryByHandle] = await Promise.all([
+    wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
+    handle ? getProfileByHandle(handle) : Promise.resolve(null),
+  ]);
+  const raceWinner = retryByWallet ?? retryByHandle;
+  if (!raceWinner) {
+    throw new Error(
+      'upsertProfile: insert rejected by unique constraint but row not findable on re-query',
+    );
+  }
+  // Check for merge-conflict across the race: if the concurrent
+  // insert landed with one identity and we wanted the other, we'd
+  // still hit the cross-row merge case we already guard above.
+  if (
+    retryByWallet &&
+    retryByHandle &&
+    retryByWallet.id !== retryByHandle.id
+  ) {
+    throw new MergeConflictError(retryByWallet.id, retryByHandle.id);
+  }
+  return updateProfileInPlace(raceWinner.id, {
+    wallet: wallet ?? raceWinner.wallet,
+    handle: handle ?? raceWinner.handle,
+    premiumSource: premiumSource ?? raceWinner.premiumSource,
+  });
+}
+
+/**
+ * Shared "UPDATE profiles SET ... RETURNING *" step used by both the
+ * normal update path and the race-recovery path in `upsertProfile`.
+ */
+async function updateProfileInPlace(
+  id: number,
+  patch: {
+    wallet: string | null;
+    handle: string | null;
+    premiumSource: 'crypto' | 'fiat' | null;
+  },
+): Promise<ProfileRow> {
+  const [updated] = await db
+    .update(profiles)
+    .set({
+      wallet: patch.wallet,
+      handle: patch.handle,
+      premiumSource: patch.premiumSource,
+      updatedAt: new Date(),
+    })
+    .where(eq(profiles.id, id))
     .returning();
   return {
-    id: inserted.id,
-    wallet: inserted.wallet,
-    handle: inserted.handle,
-    premiumSource: inserted.premiumSource as 'crypto' | 'fiat' | null,
-    createdAt: inserted.createdAt,
-    updatedAt: inserted.updatedAt,
+    id: updated.id,
+    wallet: updated.wallet,
+    handle: updated.handle,
+    premiumSource: updated.premiumSource as 'crypto' | 'fiat' | null,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
   };
 }
 
