@@ -251,7 +251,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">
             Griddle
           </h1>
-          <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums inline-flex items-center justify-center gap-1.5">
+          <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums flex items-center justify-center gap-1.5">
             <span>
               #{initialPuzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
             </span>
