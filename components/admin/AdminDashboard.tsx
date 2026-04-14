@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { PulseTab } from './PulseTab';
 import { AnomaliesTab } from './AnomaliesTab';
-import { Gauge, AlertTriangle } from 'lucide-react';
+import { GrantTab } from './GrantTab';
+import { Gauge, AlertTriangle, Gift } from 'lucide-react';
 
-type Tab = 'pulse' | 'anomalies';
+type Tab = 'pulse' | 'anomalies' | 'grant';
 
 interface AdminDashboardProps {
   /** Connected admin wallet — shown in the header for context. */
@@ -56,11 +57,18 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
             icon={<AlertTriangle className="h-4 w-4" />}
             label="Anomalies"
           />
+          <TabButton
+            active={activeTab === 'grant'}
+            onClick={() => setActiveTab('grant')}
+            icon={<Gift className="h-4 w-4" />}
+            label="Grant"
+          />
         </TabGroup>
 
         <div className="mt-6">
           {activeTab === 'pulse' && <PulseTab />}
           {activeTab === 'anomalies' && <AnomaliesTab />}
+          {activeTab === 'grant' && <GrantTab />}
         </div>
       </div>
     </div>

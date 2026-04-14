@@ -60,10 +60,25 @@ export const solves = pgTable(
   }),
 );
 
+/**
+ * Premium unlock ledger, keyed on the wallet address that paid (or
+ * was granted). `source` distinguishes:
+ *   - 'crypto'      — EIP-2612 permit+burn via GriddlePremium.unlockWithPermit
+ *   - 'fiat'        — Apple Pay / card via Stripe → swap → escrow-then-burn
+ *   - 'admin_grant' — comped manually by an operator from /admin (no burn, no tx)
+ *
+ * `txHash` is nullable because admin grants have no onchain footprint
+ * and the fiat path's burn happens asynchronously after the dispute
+ * window, so the hash isn't known at unlock time. `grantedBy` + `reason`
+ * carry the audit trail for admin grants; they're null for paid unlocks.
+ */
 export const premiumUsers = pgTable('premium_users', {
   wallet: varchar('wallet', { length: 42 }).primaryKey(),
   unlockedAt: timestamp('unlocked_at').defaultNow().notNull(),
-  txHash: varchar('tx_hash', { length: 66 }).notNull(),
+  txHash: varchar('tx_hash', { length: 66 }),
+  source: varchar('source', { length: 16 }).default('crypto').notNull(),
+  grantedBy: varchar('granted_by', { length: 42 }),
+  reason: varchar('reason', { length: 200 }),
 });
 
 export const streaks = pgTable('streaks', {
