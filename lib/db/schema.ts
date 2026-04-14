@@ -14,6 +14,7 @@ import {
   char,
   jsonb,
   primaryKey,
+  index,
 } from 'drizzle-orm/pg-core';
 
 export const puzzles = pgTable('puzzles', {
@@ -25,24 +26,36 @@ export const puzzles = pgTable('puzzles', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const solves = pgTable('solves', {
-  id: serial('id').primaryKey(),
-  puzzleId: integer('puzzle_id').references(() => puzzles.id).notNull(),
-  wallet: varchar('wallet', { length: 42 }),
-  sessionId: varchar('session_id', { length: 64 }).notNull(),
-  solved: boolean('solved').default(false).notNull(),
-  bestWord: varchar('best_word', { length: 9 }),
-  clientSolveMs: integer('client_solve_ms'),
-  serverSolveMs: integer('server_solve_ms'),
-  keystrokeIntervalsMs: jsonb('keystroke_intervals_ms').$type<number[]>(),
-  keystrokeCount: integer('keystroke_count'),
-  keystrokeStddevMs: integer('keystroke_stddev_ms'),
-  keystrokeMinMs: integer('keystroke_min_ms'),
-  unassisted: boolean('unassisted').default(false).notNull(),
-  flag: varchar('flag', { length: 16 }), // null | 'ineligible' | 'suspicious'
-  rewardClaimed: boolean('reward_claimed').default(false).notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+export const solves = pgTable(
+  'solves',
+  {
+    id: serial('id').primaryKey(),
+    puzzleId: integer('puzzle_id').references(() => puzzles.id).notNull(),
+    wallet: varchar('wallet', { length: 42 }),
+    sessionId: varchar('session_id', { length: 64 }).notNull(),
+    solved: boolean('solved').default(false).notNull(),
+    bestWord: varchar('best_word', { length: 9 }),
+    clientSolveMs: integer('client_solve_ms'),
+    serverSolveMs: integer('server_solve_ms'),
+    keystrokeIntervalsMs: jsonb('keystroke_intervals_ms').$type<number[]>(),
+    keystrokeCount: integer('keystroke_count'),
+    keystrokeStddevMs: integer('keystroke_stddev_ms'),
+    keystrokeMinMs: integer('keystroke_min_ms'),
+    unassisted: boolean('unassisted').default(false).notNull(),
+    flag: varchar('flag', { length: 16 }), // null | 'ineligible' | 'suspicious'
+    rewardClaimed: boolean('reward_claimed').default(false).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    // Supports the admin Pulse query, which time-bounds every aggregate
+    // to a 7-day window. Without this index, PG does a sequential scan
+    // of the entire table on every Pulse fetch; the query's WHERE
+    // clause bounds the scan but can't use an index to find the window
+    // boundary without one. Low-cardinality-safe since timestamps are
+    // ~unique per row.
+    createdAtIdx: index('solves_created_at_idx').on(t.createdAt),
+  }),
+);
 
 export const premiumUsers = pgTable('premium_users', {
   wallet: varchar('wallet', { length: 42 }).primaryKey(),
