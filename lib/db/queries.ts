@@ -534,6 +534,23 @@ export interface UpsertProfileInput {
 }
 
 /**
+ * Thrown by `upsertProfile` when the wallet and handle passed in
+ * already identify two different existing profile rows. See the note
+ * on that function for why the merge itself is deferred to M4f.
+ */
+export class MergeConflictError extends Error {
+  constructor(
+    public readonly walletProfileId: number,
+    public readonly handleProfileId: number,
+  ) {
+    super(
+      `upsertProfile: wallet and handle point at different rows (${walletProfileId}, ${handleProfileId}); merge deferred`,
+    );
+    this.name = 'MergeConflictError';
+  }
+}
+
+/**
  * Normalize a possibly-empty / whitespace-only string to null. Used so
  * `upsertProfile({ handle: '' })` is treated the same as omitting
  * `handle` entirely — an empty string is never a valid identity, so
@@ -568,36 +585,22 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   ]);
 
   // Merge case: wallet and handle each point at DIFFERENT existing rows.
-  // This happens when a handle-only fiat profile later connects a wallet
-  // that already has a crypto profile, or vice versa. Resolve by keeping
-  // the wallet-keyed row, moving the handle onto it, and deleting the
-  // handle-only row — atomically, so a failed mid-merge can't leave the
-  // handle orphaned on the losing row.
+  // This is the "handle-only fiat profile later connects a wallet that
+  // already has a crypto profile" scenario. The cross-row merge needs
+  // to atomically DELETE the handle-only row and UPDATE the wallet row
+  // to pick up the handle — but the runtime `db` client uses the
+  // stateless neon-http driver, which does not support interactive
+  // `db.transaction()`. Implementing this atomically requires a single
+  // raw-SQL CTE (one HTTP round trip = one implicit server transaction).
+  //
+  // Rather than ship a half-right merge in the scaffolding PR, detect
+  // the case and throw an explicit `MergeConflictError`. M4f will add
+  // a dedicated `mergeProfiles(walletId, handleId)` helper that runs
+  // the CTE when it actually needs this path (wallet-link flow from
+  // the handle-only Apple Pay path). No call sites hit upsertProfile
+  // yet, so throwing here is a safe contract for the scaffolding.
   if (byWallet && byHandle && byWallet.id !== byHandle.id) {
-    const merged = await db.transaction(async (tx) => {
-      // Delete the handle-only row first so the unique partial index on
-      // lower(handle) is free for the subsequent update.
-      await tx.delete(profiles).where(eq(profiles.id, byHandle.id));
-      const [updated] = await tx
-        .update(profiles)
-        .set({
-          handle: handle,
-          premiumSource:
-            premiumSource ?? byWallet.premiumSource ?? byHandle.premiumSource,
-          updatedAt: new Date(),
-        })
-        .where(eq(profiles.id, byWallet.id))
-        .returning();
-      return updated;
-    });
-    return {
-      id: merged.id,
-      wallet: merged.wallet,
-      handle: merged.handle,
-      premiumSource: merged.premiumSource as 'crypto' | 'fiat' | null,
-      createdAt: merged.createdAt,
-      updatedAt: merged.updatedAt,
-    };
+    throw new MergeConflictError(byWallet.id, byHandle.id);
   }
 
   // Single-row update: either wallet or handle matched an existing row,
