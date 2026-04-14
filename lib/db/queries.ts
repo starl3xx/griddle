@@ -533,23 +533,76 @@ export interface UpsertProfileInput {
   premiumSource?: 'crypto' | 'fiat' | null;
 }
 
+/**
+ * Normalize a possibly-empty / whitespace-only string to null. Used so
+ * `upsertProfile({ handle: '' })` is treated the same as omitting
+ * `handle` entirely — an empty string is never a valid identity, so
+ * accepting it would both bypass the "wallet OR handle required" guard
+ * AND fail the lookup paths (since `''` is falsy in the `if (handle)`
+ * branches below).
+ */
+function normalizeIdentity(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  const trimmed = s.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
 export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileRow> {
-  const wallet = input.wallet ? input.wallet.toLowerCase() : null;
-  const handle = input.handle ?? null;
+  const walletNorm = normalizeIdentity(input.wallet);
+  const wallet = walletNorm ? walletNorm.toLowerCase() : null;
+  const handle = normalizeIdentity(input.handle);
   const premiumSource = input.premiumSource ?? null;
 
   if (wallet === null && handle === null) {
     throw new Error('upsertProfile requires at least one of wallet or handle');
   }
 
-  // Prefer matching on wallet when present, else handle. The two unique
+  // Look up BOTH identities before deciding what to do. The two unique
   // partial indexes on `profiles` mean we can't catch duplicates via
-  // onConflictDoUpdate against both columns at once — so do the lookup
-  // explicitly and route to insert vs update.
-  let existing: ProfileRow | null = null;
-  if (wallet) existing = await getProfileByWallet(wallet);
-  if (!existing && handle) existing = await getProfileByHandle(handle);
+  // `onConflictDoUpdate` against both columns at once, and we also need
+  // to detect the "merge" case — where wallet and handle each already
+  // own a different row — before we try to write to either.
+  const [byWallet, byHandle] = await Promise.all([
+    wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
+    handle ? getProfileByHandle(handle) : Promise.resolve(null),
+  ]);
 
+  // Merge case: wallet and handle each point at DIFFERENT existing rows.
+  // This happens when a handle-only fiat profile later connects a wallet
+  // that already has a crypto profile, or vice versa. Resolve by keeping
+  // the wallet-keyed row, moving the handle onto it, and deleting the
+  // handle-only row — atomically, so a failed mid-merge can't leave the
+  // handle orphaned on the losing row.
+  if (byWallet && byHandle && byWallet.id !== byHandle.id) {
+    const merged = await db.transaction(async (tx) => {
+      // Delete the handle-only row first so the unique partial index on
+      // lower(handle) is free for the subsequent update.
+      await tx.delete(profiles).where(eq(profiles.id, byHandle.id));
+      const [updated] = await tx
+        .update(profiles)
+        .set({
+          handle: handle,
+          premiumSource:
+            premiumSource ?? byWallet.premiumSource ?? byHandle.premiumSource,
+          updatedAt: new Date(),
+        })
+        .where(eq(profiles.id, byWallet.id))
+        .returning();
+      return updated;
+    });
+    return {
+      id: merged.id,
+      wallet: merged.wallet,
+      handle: merged.handle,
+      premiumSource: merged.premiumSource as 'crypto' | 'fiat' | null,
+      createdAt: merged.createdAt,
+      updatedAt: merged.updatedAt,
+    };
+  }
+
+  // Single-row update: either wallet or handle matched an existing row,
+  // OR they both matched the same row. Update in place.
+  const existing = byWallet ?? byHandle;
   if (existing) {
     const [updated] = await db
       .update(profiles)
