@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-interface ProgressProps extends React.ComponentProps<'div'> {
+interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
   value?: number;
 }
 
