@@ -1,0 +1,108 @@
+'use client';
+
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { PulseTab } from './PulseTab';
+import { AnomaliesTab } from './AnomaliesTab';
+import { Gauge, AlertTriangle } from 'lucide-react';
+
+type Tab = 'pulse' | 'anomalies';
+
+interface AdminDashboardProps {
+  /** Connected admin wallet — shown in the header for context. */
+  adminWallet: string;
+}
+
+/**
+ * Client shell for the /admin route. Owns tab state and renders the
+ * section-grouped tab nav + the active tab body. All data fetching
+ * happens inside each tab component, so dropping in a new tab doesn't
+ * require plumbing state through here.
+ *
+ * Auth is enforced by the server component that mounts this — we
+ * trust `adminWallet` as already-verified.
+ */
+export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
+  const [activeTab, setActiveTab] = useState<Tab>('pulse');
+
+  return (
+    <div className="min-h-screen bg-white">
+      <div className="container mx-auto py-8 px-4 max-w-7xl">
+        <header className="mb-8">
+          <h1 className="text-3xl font-black tracking-tight text-gray-900">
+            Admin dashboard
+          </h1>
+          <p className="text-sm font-medium text-gray-500 mt-1">
+            Operator console ·{' '}
+            <span className="font-mono">
+              {adminWallet.slice(0, 6)}…{adminWallet.slice(-4)}
+            </span>
+          </p>
+        </header>
+
+        <TabGroup title="Analytics">
+          <TabButton
+            active={activeTab === 'pulse'}
+            onClick={() => setActiveTab('pulse')}
+            icon={<Gauge className="h-4 w-4" />}
+            label="Pulse"
+          />
+        </TabGroup>
+
+        <TabGroup title="Operations">
+          <TabButton
+            active={activeTab === 'anomalies'}
+            onClick={() => setActiveTab('anomalies')}
+            icon={<AlertTriangle className="h-4 w-4" />}
+            label="Anomalies"
+          />
+        </TabGroup>
+
+        <div className="mt-6">
+          {activeTab === 'pulse' && <PulseTab />}
+          {activeTab === 'anomalies' && <AnomaliesTab />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+        {title}
+      </div>
+      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">{children}</div>
+    </>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <Button
+      variant={active ? 'default' : 'outline'}
+      size="sm"
+      onClick={onClick}
+    >
+      {icon}
+      {label}
+    </Button>
+  );
+}
