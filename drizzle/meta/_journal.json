@@ -36,6 +36,20 @@
       "when": 1776175065438,
       "tag": "0004_past_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776185883126,
+      "tag": "0005_loud_arclight",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776187719874,
+      "tag": "0006_robust_giant_girl",
+      "breakpoints": true
     }
   ]
 }

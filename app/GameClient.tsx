@@ -27,6 +27,17 @@ const LazyConnectFlow = dynamic(() => import('@/components/LazyConnectFlow'), {
   loading: () => null,
 });
 
+/**
+ * Same lazy-import reasoning as LazyConnectFlow: the crypto unlock flow
+ * brings in permit signing + contract writes on top of the connect bundle.
+ * Only loaded when the user actually clicks "Pay with crypto" — non-paying
+ * users never see any of the wagmi/viem write path code.
+ */
+const LazyPremiumCryptoFlow = dynamic(
+  () => import('@/components/LazyPremiumCryptoFlow'),
+  { ssr: false, loading: () => null },
+);
+
 interface InitialPuzzle {
   dayNumber: number;
   date: string;
@@ -150,24 +161,34 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * future premium-only UI.
    */
   const [premium, setPremium] = useState(false);
-  const handleWalletConnect = useCallback(async (address: string) => {
-    setSessionWallet(address.toLowerCase());
+  const refreshPremium = useCallback(async (wallet: string) => {
     try {
-      await fetch('/api/wallet/link', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ wallet: address }),
-      });
-      const res = await fetch(`/api/premium/${address}`);
+      const res = await fetch(`/api/premium/${wallet}`);
       if (res.ok) {
         const data = (await res.json()) as { premium?: boolean };
         setPremium(!!data.premium);
       }
     } catch {
-      // best-effort: connection still succeeds, we just don't backfill
-      // or know about premium status
+      // best-effort; leave previous state as-is
     }
   }, []);
+
+  const handleWalletConnect = useCallback(
+    async (address: string) => {
+      setSessionWallet(address.toLowerCase());
+      try {
+        await fetch('/api/wallet/link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ wallet: address }),
+        });
+      } catch {
+        // link is best-effort; premium fetch below is the important part
+      }
+      await refreshPremium(address);
+    },
+    [refreshPremium],
+  );
 
   // Reset premium state on disconnect AND clear the server-side
   // session→wallet binding so subsequent solves aren’t silently
@@ -206,8 +227,54 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const [premiumGate, setPremiumGate] =
     useState<null | 'leaderboard' | 'archive'>(null);
 
+  /**
+   * Whether the crypto unlock flow overlay is mounted. True between the
+   * user clicking "Pay with crypto" and either success (→ refresh
+   * premium, close both modals) or cancel/error (→ close the overlay,
+   * leave the gate modal open so they can retry or switch to cash).
+   */
+  const [showCryptoFlow, setShowCryptoFlow] = useState(false);
+
   /** The wallet currently bound to this session, or null if none. */
   const [sessionWallet, setSessionWallet] = useState<string | null>(null);
+
+  const handleUnlockCrypto = useCallback(() => {
+    setShowCryptoFlow(true);
+  }, []);
+
+  /**
+   * POST to Stripe checkout and redirect. The connected wallet is
+   * required — the modal disables the fiat tile when no wallet is
+   * bound, so this callback should never fire without one, but we
+   * still guard in case. Errors propagate out so the modal can
+   * surface them inline instead of leaving the user confused.
+   */
+  const handleUnlockFiat = useCallback(async () => {
+    if (!sessionWallet) {
+      throw new Error('Connect a wallet first.');
+    }
+    const res = await fetch('/api/stripe/checkout', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ wallet: sessionWallet }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Checkout failed: ${body}`);
+    }
+    const data = (await res.json()) as { url?: string };
+    if (!data.url) throw new Error('Checkout did not return a URL');
+    window.location.href = data.url;
+  }, [sessionWallet]);
+
+  const handleCryptoUnlocked = useCallback(
+    (wallet: string) => {
+      setShowCryptoFlow(false);
+      setPremiumGate(null);
+      void refreshPremium(wallet);
+    },
+    [refreshPremium],
+  );
 
   const handleStatsClick = useCallback(() => setShowStats(true), []);
   const handleLeaderboardClick = useCallback(() => {
@@ -327,14 +394,32 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         displayName={displayName}
       />
 
-      <PremiumGateModal
-        open={premiumGate !== null}
-        feature={premiumGate ?? 'leaderboard'}
-        onClose={() => setPremiumGate(null)}
-        onUnlockClick={() => {
-          // Stubbed — M4f wires this up to the actual Stripe / permit-burn flows.
-        }}
-      />
+      {premiumGate !== null && (
+        <PremiumGateModal
+          feature={premiumGate}
+          sessionWallet={sessionWallet}
+          onClose={() => setPremiumGate(null)}
+          onUnlockCrypto={handleUnlockCrypto}
+          onUnlockFiat={handleUnlockFiat}
+        />
+      )}
+
+      {showCryptoFlow && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in"
+          onClick={() => setShowCryptoFlow(false)}
+        >
+          <div
+            className="modal-sheet sm:rounded-card animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <LazyPremiumCryptoFlow
+              onUnlocked={handleCryptoUnlocked}
+              onCancel={() => setShowCryptoFlow(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {solveResult && (
         <SolveModal

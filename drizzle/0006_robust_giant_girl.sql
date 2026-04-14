@@ -1,0 +1,2 @@
+ALTER TABLE "profiles" ADD COLUMN "stripe_session_id" varchar(128);--> statement-breakpoint
+CREATE UNIQUE INDEX "profiles_stripe_session_idx" ON "profiles" USING btree ("stripe_session_id") WHERE "profiles"."stripe_session_id" is not null;
