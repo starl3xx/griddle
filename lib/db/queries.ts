@@ -1091,11 +1091,19 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
   // The partial unique index on profiles.stripe_session_id gives
   // idempotency: a replayed webhook updates in place rather than
   // inserting a duplicate.
+  // upsertProfile is supplementary audit — premium access is already
+  // granted via the premium_users row above (wallet path) or the session
+  // key (no-wallet path). A profile write failure must NOT propagate: if it
+  // did, the migrate route's catch block would restore the session key even
+  // though the premium_users insert already committed, allowing a second
+  // wallet to claim the same session and create a double-grant.
   await upsertProfile({
     wallet: wallet ?? undefined,
     handle: handle ?? undefined,
     premiumSource: 'fiat',
     stripeSessionId: input.stripeSessionId,
+  }).catch((err) => {
+    console.error('[recordFiatUnlock] upsertProfile failed (non-fatal, premium_users row committed)', err);
   });
 }
 

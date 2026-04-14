@@ -32,7 +32,15 @@ contract WordOracle is IWordOracle {
     address public immutable jackpotManager;
 
     /// @notice $WORD total supply in whole tokens (100 billion).
+    /// @dev    Used in price conversion: price_18dec = marketCapUsd_8dec × 1e18
+    ///         / (1e8 × TOTAL_SUPPLY_TOKENS) = marketCapUsd_8dec / 10.
     uint256 public constant TOTAL_SUPPLY_TOKENS = 100_000_000_000;
+
+    /// @dev price_18dec = marketCapUsd_8dec × 1e18 / (1e8 × TOTAL_SUPPLY_TOKENS)
+    ///      Simplified: numerator and denominator share a factor of 1e9,
+    ///      so the result is marketCapUsd_8dec × 1e9 / 1e8 = marketCapUsd_8dec / 10.
+    ///      Stored here so a supply change updates both the docs and the math.
+    uint256 private constant PRICE_DIVISOR = 1e8 * TOTAL_SUPPLY_TOKENS / 1e18;
 
     constructor(address jackpotManager_) {
         require(jackpotManager_ != address(0), "WordOracle: zero address");
@@ -67,9 +75,8 @@ contract WordOracle is IWordOracle {
         uint256 marketCapUsd8 = abi.decode(d1, (uint256));
         uint256 lastUpdate    = abi.decode(d2, (uint256));
 
-        // Convert 8-decimal USD market cap → 18-decimal USD per-token price.
-        // Division by 10 = multiply by 1e18 then divide by (1e8 × 100e9).
-        price     = marketCapUsd8 / 10;
+        // price_18dec = marketCapUsd_8dec × 1e18 / (1e8 × TOTAL_SUPPLY_TOKENS)
+        price     = (marketCapUsd8 * 1e18) / (1e8 * TOTAL_SUPPLY_TOKENS);
         updatedAt = lastUpdate;
     }
 }
