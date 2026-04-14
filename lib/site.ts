@@ -8,7 +8,7 @@
  */
 
 export const SITE_URL: string = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle-fun.vercel.app'
+  process.env.NEXT_PUBLIC_SITE_URL ?? 'https://griddle.fun'
 ).replace(/\/$/, '');
 
 /** `SITE_URL` with the scheme stripped — for display in share text / OG footers. */
