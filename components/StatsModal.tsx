@@ -2,15 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { formatMs } from '@/lib/format';
-
-interface WalletStats {
-  totalSolves: number;
-  unassistedSolves: number;
-  fastestMs: number | null;
-  averageMs: number | null;
-  currentStreak: number;
-  longestStreak: number;
-}
+// Type-only import — erased at compile time, so server-side code from
+// lib/db/queries.ts doesn't get pulled into the client bundle. Keeps
+// the shape in lockstep with the server definition so adding a field
+// on one side can't silently desync the other.
+import type { WalletStats } from '@/lib/db/queries';
 
 interface StatsResponse {
   wallet: string | null;
