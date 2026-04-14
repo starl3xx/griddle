@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { Diamond } from '@phosphor-icons/react';
 
 interface PremiumGateModalProps {
-  /** What the user tried to open — shapes the modal headline. */
-  feature: 'leaderboard' | 'archive';
+  /** What the user tried to open  -  shapes the modal headline. */
+  feature: 'leaderboard' | 'archive' | 'premium';
   /**
    * Wallet address currently bound to this session, or null. Both
    * paths require a wallet in M4f: crypto for permit signing, fiat
@@ -14,7 +14,7 @@ interface PremiumGateModalProps {
    */
   sessionWallet: string | null;
   onClose: () => void;
-  /** Fires when the user clicks "Pay with crypto" — parent opens the flow. */
+  /** Fires when the user clicks "Pay with crypto"  -  parent opens the flow. */
   onUnlockCrypto: () => void;
   /**
    * Fires when the user clicks "Pay with cash". The parent POSTs to
@@ -30,13 +30,13 @@ interface PremiumGateModalProps {
  * Premium-gate modal. Two unlock paths, both require a connected wallet
  * in M4f:
  *
- *  - **Crypto ($5)** — Lazy-loaded PremiumCryptoFlow signs an ERC-2612
+ *  - **Crypto ($5)**  -  Lazy-loaded PremiumCryptoFlow signs an ERC-2612
  *    permit, calls `unlockWithPermit`, server verifies the burn.
- *  - **Cash ($6)** — Stripe Checkout. Premium binds to the connected
+ *  - **Cash ($6)**  -  Stripe Checkout. Premium binds to the connected
  *    wallet so the game's `refreshPremium` read sees it post-redirect.
  *
  * Handle-only fiat (pay without a wallet) lands in M4g alongside the
- * profile/identity rework — until then, both tiles need a wallet and
+ * profile/identity rework  -  until then, both tiles need a wallet and
  * the modal prompts to connect if there isn't one.
  *
  * The caller MUST conditionally mount this component (`{open && <Modal />}`)
@@ -55,11 +55,14 @@ export function PremiumGateModal({
   const [fiatError, setFiatError] = useState<string | null>(null);
 
   const headline =
-    feature === 'leaderboard' ? 'See the leaderboard' : 'Play past puzzles';
-  const blurb =
-    feature === 'leaderboard'
-      ? 'Premium unlocks every day’s ranked leaderboard — see who solved fastest, who went unassisted, and how you stack up.'
-      : 'Premium unlocks the full puzzle archive — replay any past day and climb its leaderboard.';
+    feature === 'leaderboard' ? 'See the leaderboard'
+    : feature === 'archive' ? 'Play past puzzles'
+    : 'Unlock Griddle Premium';
+  const blurbText = feature === 'leaderboard'
+    ? "Premium unlocks every day's ranked leaderboard. See who solved fastest and how you stack up."
+    : feature === 'archive'
+      ? 'Premium unlocks the full puzzle archive. Replay any past day and climb its leaderboard.'
+      : 'Unlock leaderboards, the full archive, streak protection, and unassisted mode. One-time, no subscription.';
 
   const handleFiatClick = async () => {
     setFiatError(null);
@@ -70,7 +73,7 @@ export function PremiumGateModal({
       setFiatError(err instanceof Error ? err.message : 'Checkout failed');
       setFiatSubmitting(false);
     }
-    // On success the parent redirects to Stripe — we deliberately leave
+    // On success the parent redirects to Stripe  -  we deliberately leave
     // the spinner spinning rather than reset, so a fast redirect doesn't
     // flash "idle" state. Conditional mounting from the parent guarantees
     // the stuck-spinner state is cleared if the redirect ever fails.
@@ -94,7 +97,7 @@ export function PremiumGateModal({
               {headline}
             </h2>
             <p className="text-sm font-medium text-gray-500 mt-0.5">
-              Griddle Premium — one-time unlock
+              Griddle Premium  -  one-time unlock
             </p>
           </div>
           <button
@@ -117,10 +120,10 @@ export function PremiumGateModal({
           </button>
         </div>
 
-        <p className="text-sm text-gray-700 leading-relaxed mt-4">{blurb}</p>
+        <p className="text-sm text-gray-700 leading-relaxed mt-4">{blurbText}</p>
 
         <ul className="text-sm text-gray-800 leading-relaxed mt-4 space-y-1.5">
-          <Benefit>Every day’s ranked leaderboard</Benefit>
+          <Benefit>Every day's ranked leaderboard</Benefit>
           <Benefit>Full puzzle archive</Benefit>
           <Benefit>Personal stats dashboard</Benefit>
           <Benefit>Streak protection + unassisted mode</Benefit>

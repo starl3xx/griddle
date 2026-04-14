@@ -271,7 +271,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // dumb (just emit click events).
   const [showStats, setShowStats] = useState(false);
   const [premiumGate, setPremiumGate] =
-    useState<null | 'leaderboard' | 'archive'>(null);
+    useState<null | 'leaderboard' | 'archive' | 'premium'>(null);
 
   /**
    * Whether the crypto unlock flow overlay is mounted. True between the
@@ -335,11 +335,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
   return (
     <>
-      {/* LazyConnectFlow stays mounted (hidden) once enabled so wagmi
-          can auto-reconnect on page load. No visible Connect button in
-          the header — wallet actions are surfaced through the tiles. */}
+      {/* LazyConnectFlow stays mounted once enabled so wagmi can
+          auto-reconnect on page load. The ConnectButton is visually
+          clipped to a 0×0 area — no visible header button. The wrapper
+          must NOT use display:none (blocks DOM clicks) or
+          visibility:hidden (inherits to children). overflow:hidden on a
+          0×0 absolute div clips the button visually; position:fixed
+          descendants (the picker overlay) escape overflow:hidden so the
+          picker renders correctly over the whole page. AutoOpener fires
+          document.querySelector().click() which works on clipped elements. */}
       {walletEnabled && (
-        <div className="hidden">
+        <div aria-hidden className="absolute w-0 h-0 overflow-hidden">
           <LazyConnectFlow
             onConnect={handleWalletConnect}
             onDisconnect={handleWalletDisconnect}
@@ -430,7 +436,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         }}
         onUpgrade={() => {
           setShowStats(false);
-          setPremiumGate('leaderboard');
+          setPremiumGate('premium');
         }}
         pfpUrl={pfpUrl}
         displayName={displayName}
