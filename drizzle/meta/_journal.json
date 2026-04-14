@@ -50,6 +50,13 @@
       "when": 1776187719874,
       "tag": "0006_robust_giant_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776203184052,
+      "tag": "0007_blushing_saracen",
+      "breakpoints": true
     }
   ]
 }

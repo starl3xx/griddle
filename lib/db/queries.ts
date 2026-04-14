@@ -7,6 +7,7 @@ import {
   streaks,
   premiumUsers,
   profiles,
+  userSettings,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
@@ -1126,4 +1127,88 @@ export async function getPuzzleLoadedAt(
     .limit(1);
   if (rows.length === 0) return null;
   return new Date(rows[0].loadedAt);
+}
+
+// ─── User settings ──────────────────────────────────────────────────────────
+
+export interface UserSettingsRow {
+  wallet: string;
+  streakProtectionEnabled: boolean;
+  streakProtectionUsedAt: Date | null;
+  unassistedModeEnabled: boolean;
+  darkModeEnabled: boolean;
+  updatedAt: Date;
+}
+
+/** Default settings used when no row exists for the wallet. */
+export const DEFAULT_USER_SETTINGS: Omit<UserSettingsRow, 'wallet' | 'updatedAt'> = {
+  streakProtectionEnabled: false,
+  streakProtectionUsedAt: null,
+  unassistedModeEnabled: false,
+  darkModeEnabled: false,
+};
+
+export async function getUserSettings(wallet: string): Promise<UserSettingsRow | null> {
+  const rows = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.wallet, wallet.toLowerCase()))
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    wallet: r.wallet,
+    streakProtectionEnabled: r.streakProtectionEnabled,
+    streakProtectionUsedAt: r.streakProtectionUsedAt,
+    unassistedModeEnabled: r.unassistedModeEnabled,
+    darkModeEnabled: r.darkModeEnabled,
+    updatedAt: r.updatedAt,
+  };
+}
+
+export interface UpdateUserSettingsInput {
+  streakProtectionEnabled?: boolean;
+  unassistedModeEnabled?: boolean;
+  darkModeEnabled?: boolean;
+}
+
+export async function upsertUserSettings(
+  wallet: string,
+  patch: UpdateUserSettingsInput,
+): Promise<UserSettingsRow> {
+  const normalized = wallet.toLowerCase();
+  const rows = await db
+    .insert(userSettings)
+    .values({
+      wallet: normalized,
+      streakProtectionEnabled: patch.streakProtectionEnabled ?? false,
+      unassistedModeEnabled: patch.unassistedModeEnabled ?? false,
+      darkModeEnabled: patch.darkModeEnabled ?? false,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: userSettings.wallet,
+      set: {
+        ...(patch.streakProtectionEnabled !== undefined && {
+          streakProtectionEnabled: patch.streakProtectionEnabled,
+        }),
+        ...(patch.unassistedModeEnabled !== undefined && {
+          unassistedModeEnabled: patch.unassistedModeEnabled,
+        }),
+        ...(patch.darkModeEnabled !== undefined && {
+          darkModeEnabled: patch.darkModeEnabled,
+        }),
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+  const r = rows[0];
+  return {
+    wallet: r.wallet,
+    streakProtectionEnabled: r.streakProtectionEnabled,
+    streakProtectionUsedAt: r.streakProtectionUsedAt,
+    unassistedModeEnabled: r.unassistedModeEnabled,
+    darkModeEnabled: r.darkModeEnabled,
+    updatedAt: r.updatedAt,
+  };
 }

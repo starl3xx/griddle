@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { Diamond } from '@phosphor-icons/react';
+import { useDarkMode } from '@/lib/useDarkMode';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
 import { SolveModal } from '@/components/SolveModal';
@@ -60,6 +61,10 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
 export default function GameClient({ initialPuzzle }: GameClientProps) {
   const { inMiniApp, pfpUrl, displayName } = useFarcaster();
   const router = useRouter();
+
+  /** The wallet currently bound to this session, or null if none. */
+  const [sessionWallet, setSessionWallet] = useState<string | null>(null);
+  const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
 
   const [showTutorial, setShowTutorial] = useState(false);
 
@@ -188,7 +193,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const handleWalletConnect = useCallback(
     async (address: string) => {
       const normalized = address.toLowerCase();
-      setSessionWallet(normalized);
+      // Link wallet in KV BEFORE setting sessionWallet in state. useDarkMode
+      // fires an effect when sessionWallet changes and immediately calls
+      // GET /api/settings (which reads the wallet via getSessionWallet from KV).
+      // If setSessionWallet fires before the link POST completes, the KV entry
+      // doesn't exist yet and the settings fetch returns wallet:null, silently
+      // skipping the dark-mode DB sync.
       try {
         await fetch('/api/wallet/link', {
           method: 'POST',
@@ -196,8 +206,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           body: JSON.stringify({ wallet: address }),
         });
       } catch {
-        // link is best-effort
+        // link is best-effort — proceed even on failure so UI updates
       }
+      setSessionWallet(normalized);
       // Check wallet premium. If the wallet doesn't have a premium_users
       // row but the session does (fiat paid before wallet connect), migrate
       // the session premium to the wallet so future loads use the wallet key.
@@ -256,6 +267,14 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // the parent is the explicit "please open the picker again" signal.
   const [walletEnabled, setWalletEnabled] = useState(false);
   const [pickerOpenKey, setPickerOpenKey] = useState(0);
+
+  // Mount WagmiProvider immediately on page load so wagmi's persisted
+  // state auto-reconnects without requiring a user click. Previously
+  // walletEnabled only flipped true on manual Connect — without this
+  // effect, removing the header Connect button means wagmi never mounts
+  // on reload and auto-reconnect never fires.
+  useEffect(() => { setWalletEnabled(true); }, []);
+
   const triggerConnect = useCallback(() => {
     setWalletEnabled(true);
     setPickerOpenKey((k) => k + 1);
@@ -266,7 +285,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // dumb (just emit click events).
   const [showStats, setShowStats] = useState(false);
   const [premiumGate, setPremiumGate] =
-    useState<null | 'leaderboard' | 'archive'>(null);
+    useState<null | 'leaderboard' | 'archive' | 'premium'>(null);
 
   /**
    * Whether the crypto unlock flow overlay is mounted. True between the
@@ -275,9 +294,6 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * leave the gate modal open so they can retry or switch to cash).
    */
   const [showCryptoFlow, setShowCryptoFlow] = useState(false);
-
-  /** The wallet currently bound to this session, or null if none. */
-  const [sessionWallet, setSessionWallet] = useState<string | null>(null);
 
   const handleUnlockCrypto = useCallback(() => {
     setShowCryptoFlow(true);
@@ -333,24 +349,26 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
   return (
     <>
-      <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
-        <div className="absolute top-4 right-4">
-          {walletEnabled ? (
-            <LazyConnectFlow
-              onConnect={handleWalletConnect}
-              onDisconnect={handleWalletDisconnect}
-              openKey={pickerOpenKey}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={triggerConnect}
-              className="bg-brand text-white rounded-pill px-4 py-1.5 text-xs font-bold uppercase tracking-wider hover:bg-brand-600 transition-colors duration-fast"
-            >
-              Connect
-            </button>
-          )}
+      {/* LazyConnectFlow stays mounted once enabled so wagmi can
+          auto-reconnect on page load. The ConnectButton is visually
+          clipped to a 0×0 area — no visible header button. The wrapper
+          must NOT use display:none (blocks DOM clicks) or
+          visibility:hidden (inherits to children). overflow:hidden on a
+          0×0 absolute div clips the button visually; position:fixed
+          descendants (the picker overlay) escape overflow:hidden so the
+          picker renders correctly over the whole page. AutoOpener fires
+          document.querySelector().click() which works on clipped elements. */}
+      {walletEnabled && (
+        <div aria-hidden className="absolute w-0 h-0 overflow-hidden">
+          <LazyConnectFlow
+            onConnect={handleWalletConnect}
+            onDisconnect={handleWalletDisconnect}
+            openKey={pickerOpenKey}
+          />
         </div>
+      )}
+
+      <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
         <header className="text-center">
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">
             Griddle
@@ -422,10 +440,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
       <StatsModal
         open={showStats}
+        premium={premium}
+        dark={dark}
+        onToggleDark={toggleDark}
         onClose={() => setShowStats(false)}
         onConnect={() => {
           setShowStats(false);
           triggerConnect();
+        }}
+        onUpgrade={() => {
+          setShowStats(false);
+          setPremiumGate('premium');
         }}
         pfpUrl={pfpUrl}
         displayName={displayName}
