@@ -30,7 +30,7 @@ export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
           <li className="flex gap-2">
             <span className="text-brand font-bold">2.</span>
             <span>
-              Consecutive letters can’t be direct neighbors — crossed-out cells are
+              Consecutive letters can’t be direct neighbors — dimmed cells are
               off-limits.
             </span>
           </li>
@@ -51,10 +51,10 @@ export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
 function TinyGridIllustration() {
   /**
    * 3×3 diagram: center cell (idx 4) is "current" — solid brand blue.
-   * The four orthogonal neighbors (1, 3, 5, 7) are "blocked" — pale
-   * gray, no X overlay, color alone signals "off-limits". The four
-   * diagonal corners (0, 2, 6, 8) are "available" — pale green tint
-   * signals "go". Same visual story as the real game grid.
+   * The four orthogonal neighbors (1, 3, 5, 7) are "blocked" — dimmed
+   * gray signals "off-limits". The four diagonal corners (0, 2, 6, 8)
+   * are "available" — pale green tint signals "go". Same visual story
+   * as the real game grid.
    */
   const state = [
     'available',
