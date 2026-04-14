@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getBlockedCells, isValidPath } from './adjacency';
-import { isDictionaryWord } from './dictionary';
+import { isDictionaryWord, prefetchDictionary } from './dictionary';
 import { SolveTelemetry, type SolvePayload } from './telemetry';
 
 export type CellState = 'open' | 'available' | 'current' | 'used' | 'blocked';
@@ -123,18 +123,36 @@ export function useGriddle({
     telemetryRef.current?.reset();
   }, []);
 
-  // Real-time shorter-word detection (4-8 letters)
+  // Real-time shorter-word detection (4-8 letters). The dictionary is
+  // lazy-loaded via dynamic import — the first check after page load
+  // may take ~50-100ms while the chunk downloads, but `prefetchDictionary`
+  // is fired from the first keystroke handler so the chunk is usually
+  // already in flight by the time the user types 4 letters.
   useEffect(() => {
-    if (letters.length < 4 || letters.length > 8) {
-      return;
-    }
+    if (letters.length < 4 || letters.length > 8) return;
     const candidate = letters.join('');
     if (candidate === lastFlashedWordRef.current) return;
-    if (isDictionaryWord(candidate)) {
-      lastFlashedWordRef.current = candidate;
-      setFlashWord(candidate);
-      setFlashKey((k) => k + 1);
-    }
+
+    let cancelled = false;
+    isDictionaryWord(candidate)
+      .then((isWord) => {
+        if (cancelled || !isWord) return;
+        // No post-await dedup guard needed: any mutation to letters
+        // (typeLetter, backspace, reset) changes the effect deps and
+        // fires the cleanup, which sets cancelled=true. The cancelled
+        // check above is the complete staleness defense.
+        lastFlashedWordRef.current = candidate;
+        setFlashWord(candidate);
+        setFlashKey((k) => k + 1);
+      })
+      .catch(() => {
+        // Dictionary chunk failed to load — silently skip the flash.
+        // loadDict() resets its memo on rejection, so the next attempt
+        // (next typed letter) will re-fetch automatically.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [letters]);
 
   /**
@@ -209,6 +227,9 @@ export function useGriddle({
         triggerShake();
         return;
       }
+      // Warm the dictionary chunk on the first keystroke so it’s ready
+      // by the time the user reaches a 4-letter shorter-word check.
+      prefetchDictionary();
       telemetryRef.current?.recordKeystroke();
       const newPath = [...path, foundCell];
       setPath(newPath);
@@ -228,6 +249,7 @@ export function useGriddle({
         triggerShake();
         return;
       }
+      prefetchDictionary();
       telemetryRef.current?.recordKeystroke();
       const newPath = [...path, cellIdx];
       setPath(newPath);
