@@ -204,8 +204,10 @@ export function StatsModal({
           </div>
         )}
 
-        {/* Premium settings */}
-        {premium && (
+        {/* Premium settings — only when wallet is connected (settings PATCH
+            requires a wallet; session-only premium users see the upsell strip
+            which prompts them to connect a wallet to unlock settings). */}
+        {premium && hasAccount && (
           <div className="mt-5 border-t border-gray-100 dark:border-gray-800 pt-4 space-y-3">
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Settings</p>
 
@@ -238,7 +240,7 @@ export function StatsModal({
         )}
 
         {/* Wordmarks placeholder */}
-        {premium && (
+        {premium && hasAccount && (
           <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Wordmarks</p>
             <p className="text-xs text-gray-400 italic">Coming soon — achievements for your best solves.</p>

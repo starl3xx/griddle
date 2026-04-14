@@ -261,6 +261,14 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // the parent is the explicit "please open the picker again" signal.
   const [walletEnabled, setWalletEnabled] = useState(false);
   const [pickerOpenKey, setPickerOpenKey] = useState(0);
+
+  // Mount WagmiProvider immediately on page load so wagmi's persisted
+  // state auto-reconnects without requiring a user click. Previously
+  // walletEnabled only flipped true on manual Connect — without this
+  // effect, removing the header Connect button means wagmi never mounts
+  // on reload and auto-reconnect never fires.
+  useEffect(() => { setWalletEnabled(true); }, []);
+
   const triggerConnect = useCallback(() => {
     setWalletEnabled(true);
     setPickerOpenKey((k) => k + 1);
