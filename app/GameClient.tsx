@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
 import { FlashBadge } from '@/components/FlashBadge';
@@ -11,6 +12,16 @@ import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
 import { useFarcaster } from '@/lib/farcaster';
 import type { SolvePayload } from '@/lib/telemetry';
+
+/**
+ * The wagmi/viem/connector stack is ~140 kB and would balloon the
+ * first-load bundle if imported eagerly. Dynamic-import it so it only
+ * loads when the user clicks Connect for the first time.
+ */
+const LazyConnectFlow = dynamic(() => import('@/components/LazyConnectFlow'), {
+  ssr: false,
+  loading: () => null,
+});
 
 interface InitialPuzzle {
   dayNumber: number;
@@ -136,15 +147,64 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     actions.reset();
   }, [actions]);
 
+  /**
+   * Wallet linking + premium read. Fired once when a wallet connects.
+   * The link endpoint retroactively attributes anonymous solves on this
+   * session to the wallet, then we read the premium status to gate any
+   * future premium-only UI.
+   */
+  const [premium, setPremium] = useState(false);
+  const handleWalletConnect = useCallback(async (address: string) => {
+    try {
+      await fetch('/api/wallet/link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ wallet: address }),
+      });
+      const res = await fetch(`/api/premium/${address}`);
+      if (res.ok) {
+        const data = (await res.json()) as { premium?: boolean };
+        setPremium(!!data.premium);
+      }
+    } catch {
+      // best-effort: connection still succeeds, we just don't backfill
+      // or know about premium status
+    }
+  }, []);
+
+  // walletEnabled gates the dynamic import of the wagmi stack. False
+  // until the user clicks Connect for the first time. Once true, the
+  // LazyConnectFlow chunk is fetched, WalletProvider mounts, and the
+  // connector picker auto-opens (see LazyConnectFlow’s AutoOpener).
+  const [walletEnabled, setWalletEnabled] = useState(false);
+
   return (
     <>
       <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
+        <div className="absolute top-4 right-4">
+          {walletEnabled ? (
+            <LazyConnectFlow onConnect={handleWalletConnect} />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setWalletEnabled(true)}
+              className="bg-brand text-white rounded-pill px-4 py-1.5 text-xs font-bold uppercase tracking-wider hover:bg-brand-600 transition-colors duration-fast"
+            >
+              Connect
+            </button>
+          )}
+        </div>
         <header className="text-center">
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">
             Griddle
           </h1>
           <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums">
             #{initialPuzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
+            {premium && (
+              <span className="ml-2 text-accent" title="Premium unlocked">
+                ◆
+              </span>
+            )}
           </p>
         </header>
 

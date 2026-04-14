@@ -188,10 +188,11 @@ bun dev                          # Start Next.js dev server
 bun run build                    # Build for production
 bun run typecheck                # TypeScript check
 
-# Database (M4)
+# Database (M4a+)
 bun run db:generate              # Generate Drizzle migrations
 bun run db:migrate               # Apply migrations
 bun run db:studio                # Open Drizzle Studio GUI
+bun run db:seed                  # Seed 279 puzzles (idempotent)
 ```
 
 ---
@@ -200,16 +201,22 @@ bun run db:studio                # Open Drizzle Studio GUI
 
 | Variable | Purpose | Milestone |
 |----------|---------|-----------|
-| `DATABASE_URL` | PostgreSQL connection (Neon) | M4 |
-| `NEXT_PUBLIC_WORD_TOKEN_ADDRESS` | $WORD ERC-20 address on Base | M4 |
-| `NEXT_PUBLIC_GRIDDLE_PREMIUM_ADDRESS` | `GriddlePremium.sol` proxy | M4 |
-| `NEXT_PUBLIC_GRIDDLE_REWARDS_ADDRESS` | `GriddleRewards.sol` proxy | M4 |
-| `NEXT_PUBLIC_CHAIN_ID` | `8453` (Base mainnet) | M4 |
-| `ORACLE_API_KEY` | CoinGecko key (shared with LHAW) | M4 |
-| `PUZZLE_SEED_SECRET` | Deterministic daily puzzle selection | M4 |
-| `BOT_THRESHOLD_INELIGIBLE_MS` | Below this server-side solve time, mark ineligible (default `8000`) | M4 |
-| `BOT_THRESHOLD_SUSPICIOUS_MS` | Below this, flag but count (default `15000`) | M4 |
-| `BOT_THRESHOLD_STDDEV_MS` | Keystroke stddev floor for suspicion (default `30`) | M4 |
+| `DATABASE_URL` | Pooled Neon Postgres connection — runtime queries | M4a ✅ |
+| `DATABASE_URL_UNPOOLED` | Unpooled Neon connection — drizzle-kit migrations | M4a ✅ |
+| `KV_REST_API_URL` | Upstash Redis HTTPS endpoint | M4-perf ✅ |
+| `KV_REST_API_TOKEN` | Upstash Redis auth token | M4-perf ✅ |
+| `NEXT_PUBLIC_SITE_URL` | Canonical site URL (driven from `lib/site.ts`) | M2 ✅ |
+| `NEXT_PUBLIC_WORD_TOKEN_ADDRESS` | $WORD ERC-20 address on Base | M4f |
+| `NEXT_PUBLIC_GRIDDLE_PREMIUM_ADDRESS` | `GriddlePremium.sol` escrow proxy | M4e |
+| `NEXT_PUBLIC_GRIDDLE_REWARDS_ADDRESS` | `GriddleRewards.sol` proxy | M4e |
+| `NEXT_PUBLIC_CHAIN_ID` | `8453` (Base mainnet) | M4f |
+| `ORACLE_API_KEY` | CoinGecko key (shared with LHAW) | M4e |
+| `STRIPE_SECRET_KEY` | Stripe API key for the Apple Pay premium path | M4f |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret for `/api/premium/stripe-webhook` | M4f |
+| `OPERATOR_PRIVATE_KEY` | Operator wallet for swap+burn after fiat purchase | M4f |
+| `BOT_THRESHOLD_INELIGIBLE_MS` | Below this server-side solve time, mark ineligible (default `8000`) | M4b ✅ |
+| `BOT_THRESHOLD_SUSPICIOUS_MS` | Below this, flag but count (default `15000`) | M4b ✅ |
+| `BOT_THRESHOLD_STDDEV_MS` | Keystroke stddev floor for suspicion (default `30`) | M4b ✅ |
 
 ---
 
@@ -218,9 +225,22 @@ bun run db:studio                # Open Drizzle Studio GUI
 | | Milestone | Scope | Status |
 |---|-----------|-------|--------|
 | **M1** | Core game loop | Adjacency, scheduler, dictionary, grid UI, telemetry, Drizzle schema file, LHAW design system | ✅ Shipped |
-| **M2** | Visual polish | Solve celebration, mobile tap UX, tutorial, icon + splash | In progress |
-| **M3** | Sharing | Share text, `/api/og` Satori image, Farcaster mini app SDK, `.well-known/farcaster.json`, Web Share API | Planned |
-| **M4** | Onchain + data | Neon DB wiring, `/api/solve` server-side verification, wallet adapters, `GriddlePremium.sol`, `GriddleRewards.sol`, oracle extension, streak milestones, admin anomalies dashboard | Planned |
+| **M2** | Visual polish + deploy prep | Solve celebration, mobile tap UX, tutorial, icon, OG metadata, 404, robots, viewport | ✅ Shipped |
+| **M3** | Social surface | Satori OG image, Farcaster mini app SDK + composeCast, `.well-known/farcaster.json`, PWA manifest | ✅ Shipped (M3a + M3b + M3c) |
+| **M4a** | DB foundation | Neon Postgres, Drizzle migrations, 279-puzzle seed | ✅ Shipped |
+| **M4b** | Server-authoritative game | `/api/puzzle/today`, `/api/solve`, session middleware, useGriddle async refactor, page split into server + client | ✅ Shipped |
+| **M4-perf** | Cache + lazy load | Upstash Redis read-through cache, dictionary lazy-load (-217 kB first-load JS) | ✅ Shipped |
+| **M4c** | Wallet adapters | wagmi 2.x + viem, custom ConnectButton (no RainbowKit), Farcaster wallet connector, Coinbase smart wallet, anonymous → wallet linking, premium status read | In progress |
+| **M4d** | Leaderboard + admin | Daily leaderboard page, `/admin/anomalies` flagged-solve dashboard | Planned |
+| **M4e** | Premium contracts | Foundry project, `GriddlePremium.sol` (escrow-then-burn), `GriddleRewards.sol` (signed streak claims), LHAW oracle extension | Planned |
+| **M4f** | Premium UI + Apple Pay | `PremiumModal.tsx` with two paths — $5 crypto (EIP-2612 permit) and $6 Apple Pay (Stripe → swap → escrow). Buy+burn worker, Stripe webhook, dispute window | Planned |
+
+### Premium pricing (decided 2026-04-13)
+
+- **$5** — direct $WORD permit-burn from a connected wallet
+- **$6** — Stripe Checkout with Apple Pay enabled (the $1 covers Stripe fees ~$0.45, DEX swap fees + slippage buffer, and a small treasury margin)
+
+Both paths land in the same `premium_users` row. Premium status is server-side (DB), not onchain — the contract burn is the deflationary signal, not the access-control mechanism. Both paths use **escrow-then-burn**: tokens go to a hold contract for ~30 days before permanent burn, so a Stripe dispute can recover them back to treasury.
 
 ---
 
