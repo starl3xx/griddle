@@ -723,7 +723,7 @@ async function updateProfileInPlace(
     reason: string | null;
   },
 ): Promise<ProfileRow> {
-  const [updated] = await db
+  const updatedRows = await db
     .update(profiles)
     .set({
       wallet: patch.wallet,
@@ -735,6 +735,17 @@ async function updateProfileInPlace(
     })
     .where(eq(profiles.id, id))
     .returning();
+  // Empty `returning()` means the row we tried to update was
+  // concurrently deleted between the lookup and this write. The
+  // race-recovery path in upsertProfile is the most likely caller
+  // to hit this; surface a named error rather than letting the
+  // destructure blow up as `Cannot read properties of undefined`.
+  if (updatedRows.length === 0) {
+    throw new Error(
+      `updateProfileInPlace: profile ${id} was concurrently deleted`,
+    );
+  }
+  const updated = updatedRows[0];
   return {
     id: updated.id,
     wallet: updated.wallet,
