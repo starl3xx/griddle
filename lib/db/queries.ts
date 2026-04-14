@@ -321,10 +321,14 @@ export interface AdminPulse {
 export async function getAdminPulse(): Promise<AdminPulse> {
   const [row] = await db
     .select({
+      // Successful solves in the last 24h — includes flagged rows. This
+      // is the denominator for `flaggedRatePct`, so the numerator below
+      // MUST also filter on `solved = true` or the ratio skews.
       solves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.solved} = true)::int`,
       solves7d: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '7 days' and ${solves.solved} = true)::int`,
       activeWallets7d: sql<number>`count(distinct ${solves.wallet}) filter (where ${solves.createdAt} >= now() - interval '7 days' and ${solves.wallet} is not null)::int`,
-      flaggedSolves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.flag} is not null)::int`,
+      // Intersection: flagged AND solved=true — matches the denominator.
+      flaggedSolves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.solved} = true and ${solves.flag} is not null)::int`,
     })
     .from(solves);
 
@@ -336,9 +340,7 @@ export async function getAdminPulse(): Promise<AdminPulse> {
   const flagged = row?.flaggedSolves24h ?? 0;
   // Avoid NaN on a zero-solve day.
   const flaggedRatePct =
-    solves24h + flagged === 0
-      ? 0
-      : Math.round((flagged / Math.max(1, solves24h + flagged)) * 1000) / 10;
+    solves24h === 0 ? 0 : Math.round((flagged / solves24h) * 1000) / 10;
 
   return {
     solves24h,
