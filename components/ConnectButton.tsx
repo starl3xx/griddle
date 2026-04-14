@@ -6,6 +6,8 @@ import { useAccount, useConnect, useDisconnect } from 'wagmi';
 interface ConnectButtonProps {
   /** Called once a wallet successfully connects, with the address. */
   onConnect?: (address: string) => void;
+  /** Called once a wallet disconnects (or session expires). */
+  onDisconnect?: () => void;
 }
 
 /**
@@ -22,15 +24,16 @@ interface ConnectButtonProps {
  * elsewhere in the game. Sized to fit in the page header without
  * disrupting the Griddle wordmark layout.
  */
-export function ConnectButton({ onConnect }: ConnectButtonProps) {
+export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
   const { address, isConnected } = useAccount();
   const { connectors, connect, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   // Fire onConnect once on the first time we transition into a connected
-  // state. Track the previously-seen address to avoid double-firing on
-  // reconnect to the same wallet.
+  // state, and onDisconnect on the disconnect transition. Track the
+  // previously-seen address to avoid double-firing on reconnect to the
+  // same wallet.
   const [lastSeen, setLastSeen] = useState<string | null>(null);
   useEffect(() => {
     if (isConnected && address && address !== lastSeen) {
@@ -39,8 +42,9 @@ export function ConnectButton({ onConnect }: ConnectButtonProps) {
     }
     if (!isConnected && lastSeen) {
       setLastSeen(null);
+      onDisconnect?.();
     }
-  }, [isConnected, address, lastSeen, onConnect]);
+  }, [isConnected, address, lastSeen, onConnect, onDisconnect]);
 
   if (isConnected && address) {
     return (

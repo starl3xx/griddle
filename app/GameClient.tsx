@@ -172,6 +172,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     }
   }, []);
 
+  // Reset premium state on disconnect — without this the badge persists
+  // until a full page reload, which is misleading (premium is per-wallet,
+  // not per-session).
+  const handleWalletDisconnect = useCallback(() => {
+    setPremium(false);
+  }, []);
+
   // walletEnabled gates the dynamic import of the wagmi stack. False
   // until the user clicks Connect for the first time. Once true, the
   // LazyConnectFlow chunk is fetched, WalletProvider mounts, and the
@@ -183,7 +190,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
         <div className="absolute top-4 right-4">
           {walletEnabled ? (
-            <LazyConnectFlow onConnect={handleWalletConnect} />
+            <LazyConnectFlow
+              onConnect={handleWalletConnect}
+              onDisconnect={handleWalletDisconnect}
+            />
           ) : (
             <button
               type="button"

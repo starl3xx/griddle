@@ -7,6 +7,7 @@ import { useConnect } from 'wagmi';
 
 interface LazyConnectFlowProps {
   onConnect?: (address: string) => void;
+  onDisconnect?: () => void;
 }
 
 /**
@@ -21,10 +22,10 @@ interface LazyConnectFlowProps {
  * this, they’d click the stub, the chunk would load, and they’d have
  * to click again to actually pick a connector.
  */
-export default function LazyConnectFlow({ onConnect }: LazyConnectFlowProps) {
+export default function LazyConnectFlow({ onConnect, onDisconnect }: LazyConnectFlowProps) {
   return (
     <WalletProvider>
-      <ConnectButton onConnect={onConnect} />
+      <ConnectButton onConnect={onConnect} onDisconnect={onDisconnect} />
       <AutoOpener />
     </WalletProvider>
   );
