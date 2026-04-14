@@ -166,6 +166,19 @@ export const profiles = pgTable(
     // `premium_users` table instead, so there's no duplication.
     grantedBy: varchar('granted_by', { length: 42 }),
     reason: varchar('reason', { length: 200 }),
+    /**
+     * Stripe checkout session id for handle-only fiat buyers. The
+     * wallet-path fiat unlock stores its session id on `premium_users`
+     * (keyed on wallet). A buyer with only a handle has no
+     * `premium_users` row at all, so without this column there's no
+     * DB record of which Stripe session paid for the profile — an
+     * audit + idempotency gap on the handle-only path.
+     *
+     * Nullable because most profile rows don't originate from a
+     * Stripe session (crypto unlocks, admin grants, handle-only
+     * profiles created through a non-checkout account flow).
+     */
+    stripeSessionId: varchar('stripe_session_id', { length: 128 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -176,6 +189,9 @@ export const profiles = pgTable(
     handleLowerIdx: uniqueIndex('profiles_handle_lower_idx')
       .on(sql`lower(${t.handle})`)
       .where(sql`${t.handle} is not null`),
+    stripeSessionIdx: uniqueIndex('profiles_stripe_session_idx')
+      .on(t.stripeSessionId)
+      .where(sql`${t.stripeSessionId} is not null`),
     walletOrHandleRequired: check(
       'profiles_wallet_or_handle_required',
       sql`${t.wallet} is not null or ${t.handle} is not null`,
