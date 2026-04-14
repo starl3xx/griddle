@@ -842,10 +842,12 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
   // profiles. The grant is recorded now so the audit trail is intact.
   const profile = await upsertProfile({
     handle,
-    // `admin_grant` isn't in the declared union but the DB column is
-    // plain varchar(16), so the value stores fine. M4f can add it to
-    // the declared union when the premium-check path starts reading.
-    premiumSource: 'admin_grant' as unknown as 'crypto' | 'fiat',
+    premiumSource: 'admin_grant',
+    // Coalesce nulls to undefined: upsertProfile's type narrows these
+    // non-clearable fields to `string | undefined`, so "omitted" is
+    // the only way to express "keep existing".
+    grantedBy: grantedBy ?? undefined,
+    reason: reason ?? undefined,
   });
   return { kind: 'handle', profileId: profile.id, handle: handle as string };
 }
@@ -857,33 +859,18 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
  *   - `profiles` — grant-by-handle path (no wallet, M4f-facing)
  *
  * The discriminated `identity` field lets the audit UI render both
- * without the client needing to know which table each row came from,
- * and gives handle grants a real audit presence instead of getting
- * dropped on the floor by a wallet-only query.
- *
- * Note: grant-by-handle rows don't carry `grantedBy` or `reason`
- * because `profiles` has no such columns — adding them would couple
- * the profiles table to admin-grant audit data that belongs in its
- * own table. For now the handle-grant audit row is purely "this
- * handle became admin_grant premium at time T". A future iteration
- * can introduce a dedicated `admin_grants` table if the audit story
- * needs more depth.
+ * without the client needing to know which table each row came from.
+ * Both branches carry `grantedBy` + `reason` (wallet branch from
+ * `premium_users`, handle branch from `profiles`) so the audit is
+ * fully attributable regardless of which identity path was used.
  */
-export type PremiumGrantRow =
-  | {
-      identity: { kind: 'wallet'; wallet: string };
-      unlockedAt: Date;
-      source: string;
-      grantedBy: string | null;
-      reason: string | null;
-    }
-  | {
-      identity: { kind: 'handle'; handle: string };
-      unlockedAt: Date;
-      source: 'admin_grant';
-      grantedBy: null;
-      reason: null;
-    };
+export interface PremiumGrantRow {
+  identity: { kind: 'wallet'; wallet: string } | { kind: 'handle'; handle: string };
+  unlockedAt: Date;
+  source: string;
+  grantedBy: string | null;
+  reason: string | null;
+}
 
 /**
  * Recent admin grants for the `/admin` grant tab. Unions the two
@@ -910,6 +897,8 @@ export async function getRecentPremiumGrants(limit = 50): Promise<PremiumGrantRo
       .select({
         handle: profiles.handle,
         unlockedAt: profiles.updatedAt,
+        grantedBy: profiles.grantedBy,
+        reason: profiles.reason,
       })
       .from(profiles)
       .where(
@@ -930,14 +919,21 @@ export async function getRecentPremiumGrants(limit = 50): Promise<PremiumGrantRo
       }),
     ),
     ...handleRows
-      .filter((r): r is { handle: string; unlockedAt: Date } => r.handle !== null)
+      .filter(
+        (r): r is {
+          handle: string;
+          unlockedAt: Date;
+          grantedBy: string | null;
+          reason: string | null;
+        } => r.handle !== null,
+      )
       .map(
         (r): PremiumGrantRow => ({
           identity: { kind: 'handle', handle: r.handle },
           unlockedAt: r.unlockedAt,
           source: 'admin_grant',
-          grantedBy: null,
-          reason: null,
+          grantedBy: r.grantedBy,
+          reason: r.reason,
         }),
       ),
   ];

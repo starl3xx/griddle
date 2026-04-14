@@ -20,24 +20,16 @@ import {
 } from '@/components/ui/table';
 import { Crown, Gift, Loader2, RefreshCw } from 'lucide-react';
 
-// Client-side mirror of the server union in `lib/db/queries.ts`.
+// Client-side mirror of the server type in `lib/db/queries.ts`.
 // `unlockedAt` is a string here because JSON serialization flattens
 // Date → ISO string on the wire; all other fields match.
-type PremiumGrantRow =
-  | {
-      identity: { kind: 'wallet'; wallet: string };
-      unlockedAt: string;
-      source: string;
-      grantedBy: string | null;
-      reason: string | null;
-    }
-  | {
-      identity: { kind: 'handle'; handle: string };
-      unlockedAt: string;
-      source: 'admin_grant';
-      grantedBy: null;
-      reason: null;
-    };
+interface PremiumGrantRow {
+  identity: { kind: 'wallet'; wallet: string } | { kind: 'handle'; handle: string };
+  unlockedAt: string;
+  source: string;
+  grantedBy: string | null;
+  reason: string | null;
+}
 
 type IdentityMode = 'wallet' | 'handle';
 
