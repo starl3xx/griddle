@@ -161,12 +161,24 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * future premium-only UI.
    */
   const [premium, setPremium] = useState(false);
+
+  // Check session-based premium on mount (covers fiat buyers who haven't
+  // connected a wallet yet). This runs once, client-side only.
+  useEffect(() => {
+    fetch('/api/premium/session')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { premium?: boolean } | null) => {
+        if (data?.premium) setPremium(true);
+      })
+      .catch(() => {/* best-effort */});
+  }, []);
+
   const refreshPremium = useCallback(async (wallet: string) => {
     try {
       const res = await fetch(`/api/premium/${wallet}`);
       if (res.ok) {
         const data = (await res.json()) as { premium?: boolean };
-        setPremium(!!data.premium);
+        if (data.premium) setPremium(true);
       }
     } catch {
       // best-effort; leave previous state as-is
@@ -175,7 +187,8 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
   const handleWalletConnect = useCallback(
     async (address: string) => {
-      setSessionWallet(address.toLowerCase());
+      const normalized = address.toLowerCase();
+      setSessionWallet(normalized);
       try {
         await fetch('/api/wallet/link', {
           method: 'POST',
@@ -183,11 +196,33 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           body: JSON.stringify({ wallet: address }),
         });
       } catch {
-        // link is best-effort; premium fetch below is the important part
+        // link is best-effort
       }
-      await refreshPremium(address);
+      // Check wallet premium. If the wallet doesn't have a premium_users
+      // row but the session does (fiat paid before wallet connect), migrate
+      // the session premium to the wallet so future loads use the wallet key.
+      const walletRes = await fetch(`/api/premium/${normalized}`).catch(() => null);
+      const walletData = walletRes?.ok
+        ? ((await walletRes.json()) as { premium?: boolean })
+        : null;
+      if (walletData?.premium) {
+        setPremium(true);
+      } else {
+        // Attempt migration — fire-and-forget; if it fails the session
+        // premium is still readable by the session check above.
+        fetch('/api/premium/migrate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ wallet: normalized }),
+        })
+          .then((r) => r.ok ? r.json() : null)
+          .then((data: { migrated?: boolean } | null) => {
+            if (data?.migrated) setPremium(true);
+          })
+          .catch(() => {/* best-effort */});
+      }
     },
-    [refreshPremium],
+    [],
   );
 
   // Reset premium state on disconnect AND clear the server-side
@@ -243,20 +278,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   }, []);
 
   /**
-   * POST to Stripe checkout and redirect. The connected wallet is
-   * required — the modal disables the fiat tile when no wallet is
-   * bound, so this callback should never fire without one, but we
-   * still guard in case. Errors propagate out so the modal can
-   * surface them inline instead of leaving the user confused.
+   * POST to Stripe checkout and redirect. No wallet required —
+   * premium binds to the session in Upstash and migrates to a wallet
+   * row on first connect. Passing the wallet when available lets the
+   * webhook skip the migration step.
    */
   const handleUnlockFiat = useCallback(async () => {
-    if (!sessionWallet) {
-      throw new Error('Connect a wallet first.');
-    }
     const res = await fetch('/api/stripe/checkout', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ wallet: sessionWallet }),
+      body: JSON.stringify({ wallet: sessionWallet ?? undefined }),
     });
     if (!res.ok) {
       const body = await res.text();
