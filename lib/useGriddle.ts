@@ -134,16 +134,22 @@ export function useGriddle({
     if (candidate === lastFlashedWordRef.current) return;
 
     let cancelled = false;
-    isDictionaryWord(candidate).then((isWord) => {
-      if (cancelled || !isWord) return;
-      // Re-check after await — the user may have backspaced past this
-      // candidate, which would have nulled lastFlashedWordRef. Only
-      // flash if the candidate is still the most recent attempt.
-      if (lastFlashedWordRef.current === candidate) return;
-      lastFlashedWordRef.current = candidate;
-      setFlashWord(candidate);
-      setFlashKey((k) => k + 1);
-    });
+    isDictionaryWord(candidate)
+      .then((isWord) => {
+        if (cancelled || !isWord) return;
+        // Re-check after await — the user may have backspaced past this
+        // candidate, which would have nulled lastFlashedWordRef. Only
+        // flash if the candidate is still the most recent attempt.
+        if (lastFlashedWordRef.current === candidate) return;
+        lastFlashedWordRef.current = candidate;
+        setFlashWord(candidate);
+        setFlashKey((k) => k + 1);
+      })
+      .catch(() => {
+        // Dictionary chunk failed to load — silently skip the flash.
+        // loadDict() resets its memo on rejection, so the next attempt
+        // (next typed letter) will re-fetch automatically.
+      });
     return () => {
       cancelled = true;
     };

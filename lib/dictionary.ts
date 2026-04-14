@@ -25,9 +25,18 @@ let dictPromise: Promise<ReadonlySet<string>> | null = null;
 
 function loadDict(): Promise<ReadonlySet<string>> {
   if (dictPromise === null) {
-    dictPromise = import('@/data/dictionary.json').then(
-      (mod) => new Set(mod.default as string[]) as ReadonlySet<string>,
-    );
+    dictPromise = import('@/data/dictionary.json')
+      .then(
+        (mod) => new Set(mod.default as string[]) as ReadonlySet<string>,
+      )
+      .catch((err) => {
+        // Reset the memo so a transient chunk-download failure (network
+        // blip, CDN hiccup) doesn’t permanently break the shorter-word
+        // flash for the rest of the page session. Next call to loadDict
+        // will fire a fresh dynamic import.
+        dictPromise = null;
+        throw err;
+      });
   }
   return dictPromise;
 }
@@ -36,9 +45,15 @@ function loadDict(): Promise<ReadonlySet<string>> {
  * Kick off the dictionary download without waiting for it. Call this
  * the first time the user starts interacting with the grid so the
  * dictionary is warm by the time they’ve typed 4 letters.
+ *
+ * Swallows any rejection — prefetch is best-effort. The next real call
+ * to `isDictionaryWord` will retry the import (loadDict resets its
+ * memoized promise on failure).
  */
 export function prefetchDictionary(): void {
-  void loadDict();
+  loadDict().catch(() => {
+    // Best-effort prefetch; ignore failures.
+  });
 }
 
 /**
