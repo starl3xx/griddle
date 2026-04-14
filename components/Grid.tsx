@@ -71,8 +71,11 @@ function Cell({ letter, state, sequence, onClick }: CellProps) {
   const stateClasses: Record<CellState, string> = {
     open: 'bg-white border-gray-300 text-gray-900 hover:border-brand shadow-btn',
     available: 'bg-success-50 border-success-200 text-gray-900 hover:border-success-500 shadow-btn',
+    // current = vivid mid blue, scaled up + heavier shadow so it’s the
+    // visual focus of the grid. used = deep navy so previously-typed
+    // letters read as "settled" / "older" but still clearly consumed.
     current: 'bg-brand border-brand text-white scale-105 shadow-card',
-    used: 'bg-brand border-brand text-white shadow-btn',
+    used: 'bg-brand-800 border-brand-800 text-white shadow-btn',
     blocked: 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed',
   };
   const disabled = state === 'blocked';
