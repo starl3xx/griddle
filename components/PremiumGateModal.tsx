@@ -83,13 +83,13 @@ export function PremiumGateModal({
 
         <div className="mt-5 grid grid-cols-2 gap-2.5">
           <PriceTile
-            label="Pay with $WORD"
+            label="Pay with crypto ($WORD)"
             price="$5"
             note="One tap, onchain"
             primary
           />
           <PriceTile
-            label="Pay with Apple Pay"
+            label="Pay with cash (Stripe)"
             price="$6"
             note="Card &amp; Apple Pay"
           />

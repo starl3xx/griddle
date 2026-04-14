@@ -60,7 +60,7 @@ function Tile({ label, onClick, locked = false, children }: TileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="relative bg-white hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-card aspect-square flex flex-col items-center justify-center gap-2 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      className="relative bg-white hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-card aspect-[2/1] flex flex-col items-center justify-center gap-1.5 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
     >
       {children}
       <span className="text-[11px] font-bold uppercase tracking-wider text-gray-600">
