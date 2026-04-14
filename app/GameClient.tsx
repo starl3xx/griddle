@@ -2,12 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
 import { FlashBadge } from '@/components/FlashBadge';
 import { SolveModal } from '@/components/SolveModal';
 import { TutorialModal } from '@/components/TutorialModal';
-import { HowToPlayCard } from '@/components/HowToPlayCard';
+import { HomeTiles } from '@/components/HomeTiles';
+import { FoundWords } from '@/components/FoundWords';
+import { StatsModal } from '@/components/StatsModal';
+import { PremiumGateModal } from '@/components/PremiumGateModal';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
 import { useFarcaster } from '@/lib/farcaster';
@@ -34,7 +38,6 @@ interface GameClientProps {
 }
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
-const HOWTOPLAY_STORAGE_KEY = 'griddle_howtoplay_dismissed_v1';
 
 /**
  * Client wrapper for the game state. The parent `app/page.tsx` is a
@@ -44,19 +47,17 @@ const HOWTOPLAY_STORAGE_KEY = 'griddle_howtoplay_dismissed_v1';
  * on this side of the server/client boundary.
  */
 export default function GameClient({ initialPuzzle }: GameClientProps) {
-  const { inMiniApp } = useFarcaster();
+  const { inMiniApp, pfpUrl, displayName } = useFarcaster();
+  const router = useRouter();
 
   const [showTutorial, setShowTutorial] = useState(false);
-  const [showHowToPlay, setShowHowToPlay] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       setShowTutorial(!window.localStorage.getItem(TUTORIAL_STORAGE_KEY));
-      setShowHowToPlay(!window.localStorage.getItem(HOWTOPLAY_STORAGE_KEY));
     } catch {
       setShowTutorial(true);
-      setShowHowToPlay(true);
     }
   }, []);
 
@@ -69,14 +70,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     setShowTutorial(false);
   }, []);
 
-  const dismissHowToPlay = useCallback(() => {
-    try {
-      window.localStorage.setItem(HOWTOPLAY_STORAGE_KEY, '1');
-    } catch {
-      // noop
-    }
-    setShowHowToPlay(false);
-  }, []);
+  // Reopening the tutorial from the HOW TO PLAY link is an explicit user
+  // action — we deliberately don't re-arm the first-visit flag.
+  const openTutorial = useCallback(() => setShowTutorial(true), []);
 
   const [solveResult, setSolveResult] = useState<{
     solveMs: number;
@@ -155,6 +151,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    */
   const [premium, setPremium] = useState(false);
   const handleWalletConnect = useCallback(async (address: string) => {
+    setSessionWallet(address.toLowerCase());
     try {
       await fetch('/api/wallet/link', {
         method: 'POST',
@@ -176,6 +173,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // session→wallet binding so subsequent solves aren’t silently
   // attributed to the just-disconnected wallet.
   const handleWalletDisconnect = useCallback(() => {
+    setSessionWallet(null);
     setPremium(false);
     fetch('/api/wallet/link', { method: 'DELETE' }).catch(() => {
       // Best-effort: the client UI is already in disconnect state,
@@ -188,7 +186,46 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // until the user clicks Connect for the first time. Once true, the
   // LazyConnectFlow chunk is fetched, WalletProvider mounts, and the
   // connector picker auto-opens (see LazyConnectFlow’s AutoOpener).
+  //
+  // pickerOpenKey force-opens the picker every time it bumps. Needed
+  // because after a disconnect, `walletEnabled` is already true — so
+  // a subsequent `triggerConnect()` wouldn't re-mount LazyConnectFlow
+  // and AutoOpener's effect wouldn't re-fire. Bumping the key from
+  // the parent is the explicit "please open the picker again" signal.
   const [walletEnabled, setWalletEnabled] = useState(false);
+  const [pickerOpenKey, setPickerOpenKey] = useState(0);
+  const triggerConnect = useCallback(() => {
+    setWalletEnabled(true);
+    setPickerOpenKey((k) => k + 1);
+  }, []);
+
+  // Modal state for the three HomeTiles. Only one can be open at a
+  // time — the parent owns the premium-gate decision so the tiles stay
+  // dumb (just emit click events).
+  const [showStats, setShowStats] = useState(false);
+  const [premiumGate, setPremiumGate] =
+    useState<null | 'leaderboard' | 'archive'>(null);
+
+  /** The wallet currently bound to this session, or null if none. */
+  const [sessionWallet, setSessionWallet] = useState<string | null>(null);
+
+  const handleStatsClick = useCallback(() => setShowStats(true), []);
+  const handleLeaderboardClick = useCallback(() => {
+    if (premium) {
+      router.push(`/leaderboard/${initialPuzzle.dayNumber}`);
+    } else {
+      setPremiumGate('leaderboard');
+    }
+  }, [premium, router, initialPuzzle.dayNumber]);
+  const handleArchiveClick = useCallback(() => {
+    if (premium) {
+      router.push('/archive');
+    } else {
+      setPremiumGate('archive');
+    }
+  }, [premium, router]);
+
+  const monogram = sessionWallet ? sessionWallet.slice(2, 3).toUpperCase() : '?';
 
   return (
     <>
@@ -198,11 +235,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
             <LazyConnectFlow
               onConnect={handleWalletConnect}
               onDisconnect={handleWalletDisconnect}
+              openKey={pickerOpenKey}
             />
           ) : (
             <button
               type="button"
-              onClick={() => setWalletEnabled(true)}
+              onClick={triggerConnect}
               className="bg-brand text-white rounded-pill px-4 py-1.5 text-xs font-bold uppercase tracking-wider hover:bg-brand-600 transition-colors duration-fast"
             >
               Connect
@@ -221,6 +259,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
               </span>
             )}
           </p>
+          <button
+            type="button"
+            onClick={openTutorial}
+            className="mt-2 text-[11px] font-bold uppercase tracking-wider text-accent hover:text-accent/80 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+          >
+            How to play
+          </button>
         </header>
 
         <FlashBadge word={state.flashWord} flashKey={state.flashKey} />
@@ -235,6 +280,8 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         />
 
         <WordSlots letters={state.letters} />
+
+        <FoundWords words={state.foundWords} />
 
         <div className="flex gap-3 mt-1">
           <button
@@ -255,14 +302,39 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           </button>
         </div>
 
-        {!showTutorial && showHowToPlay && (
-          <HowToPlayCard onDismiss={dismissHowToPlay} />
-        )}
+        <HomeTiles
+          onStatsClick={handleStatsClick}
+          onLeaderboardClick={handleLeaderboardClick}
+          onArchiveClick={handleArchiveClick}
+          pfpUrl={pfpUrl}
+          monogram={monogram}
+          premium={premium}
+        />
 
         <NextPuzzleCountdown />
       </main>
 
       <TutorialModal open={showTutorial} onDismiss={dismissTutorial} />
+
+      <StatsModal
+        open={showStats}
+        onClose={() => setShowStats(false)}
+        onConnect={() => {
+          setShowStats(false);
+          triggerConnect();
+        }}
+        pfpUrl={pfpUrl}
+        displayName={displayName}
+      />
+
+      <PremiumGateModal
+        open={premiumGate !== null}
+        feature={premiumGate ?? 'leaderboard'}
+        onClose={() => setPremiumGate(null)}
+        onUnlockClick={() => {
+          // Stubbed — M4f wires this up to the actual Stripe / permit-burn flows.
+        }}
+      />
 
       {solveResult && (
         <SolveModal

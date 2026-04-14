@@ -1,6 +1,6 @@
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
-import { puzzles, puzzleLoads, solves } from './schema';
+import { puzzles, puzzleLoads, solves, streaks } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
@@ -291,6 +291,81 @@ export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
     ...r,
     flag: r.flag as 'ineligible' | 'suspicious',
   }));
+}
+
+/**
+ * Per-wallet aggregate stats for the Stats modal. All derived from
+ * `solves` + `streaks`, filtered to eligible rows (solved=true, no
+ * ineligible/suspicious flag). A wallet with zero qualifying rows
+ * returns zero-valued fields rather than null so the UI can render
+ * the modal without branching on undefined fields.
+ */
+export interface WalletStats {
+  totalSolves: number;
+  unassistedSolves: number;
+  fastestMs: number | null;
+  averageMs: number | null;
+  currentStreak: number;
+  longestStreak: number;
+}
+
+export async function getWalletStats(wallet: string): Promise<WalletStats> {
+  const normalized = wallet.toLowerCase();
+
+  const [agg] = await db
+    .select({
+      totalSolves: sql<number>`count(*)::int`,
+      unassistedSolves: sql<number>`count(*) filter (where ${solves.unassisted} = true)::int`,
+      fastestMs: sql<number | null>`min(${solves.serverSolveMs})::int`,
+      averageMs: sql<number | null>`avg(${solves.serverSolveMs})::int`,
+    })
+    .from(solves)
+    .where(
+      and(
+        eq(solves.wallet, normalized),
+        eq(solves.solved, true),
+        isNull(solves.flag),
+        isNotNull(solves.serverSolveMs),
+      ),
+    );
+
+  const [streakRow] = await db
+    .select({
+      currentStreak: streaks.currentStreak,
+      longestStreak: streaks.longestStreak,
+    })
+    .from(streaks)
+    .where(eq(streaks.wallet, normalized))
+    .limit(1);
+
+  return {
+    totalSolves: agg?.totalSolves ?? 0,
+    unassistedSolves: agg?.unassistedSolves ?? 0,
+    fastestMs: agg?.fastestMs ?? null,
+    averageMs: agg?.averageMs ?? null,
+    currentStreak: streakRow?.currentStreak ?? 0,
+    longestStreak: streakRow?.longestStreak ?? 0,
+  };
+}
+
+/**
+ * Archive listing — past puzzle days (excluding today), newest first.
+ * Used by the /archive page. Caller is responsible for premium gating.
+ */
+export interface ArchiveEntry {
+  dayNumber: number;
+  date: string;
+}
+
+export async function getArchiveList(limit = 60): Promise<ArchiveEntry[]> {
+  const today = getCurrentDayNumber();
+  const rows = await db
+    .select({ dayNumber: puzzles.dayNumber, date: puzzles.date })
+    .from(puzzles)
+    .where(sql`${puzzles.dayNumber} < ${today}`)
+    .orderBy(sql`${puzzles.dayNumber} DESC`)
+    .limit(limit);
+  return rows.map((r) => ({ dayNumber: r.dayNumber, date: r.date }));
 }
 
 /**
