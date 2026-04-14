@@ -50,10 +50,11 @@ export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
 
 function TinyGridIllustration() {
   /**
-   * 3×3 diagram: center cell (idx 4) is "current" blue, its four orthogonal
-   * neighbors (1, 3, 5, 7) are "blocked" gray with an X, and the four
-   * diagonal corners (0, 2, 6, 8) are "available" green — a compressed
-   * version of the cell-state story in the real game.
+   * 3×3 diagram: center cell (idx 4) is "current" — solid brand blue.
+   * The four orthogonal neighbors (1, 3, 5, 7) are "blocked" — pale
+   * gray, no X overlay, color alone signals "off-limits". The four
+   * diagonal corners (0, 2, 6, 8) are "available" — pale green tint
+   * signals "go". Same visual story as the real game grid.
    */
   const state = [
     'available',
@@ -69,7 +70,7 @@ function TinyGridIllustration() {
 
   const cls: Record<(typeof state)[number], string> = {
     available: 'bg-success-50 border-success-200',
-    blocked: 'bg-white border-gray-200 opacity-50',
+    blocked: 'bg-gray-100 border-gray-200',
     current: 'bg-brand border-brand',
   };
 
@@ -78,22 +79,8 @@ function TinyGridIllustration() {
       {state.map((s, i) => (
         <div
           key={i}
-          className={`w-11 h-11 rounded-md border-2 flex items-center justify-center relative ${cls[s]}`}
-        >
-          {s === 'blocked' && (
-            <svg
-              className="w-4 h-4 text-gray-400"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              aria-hidden
-            >
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          )}
-        </div>
+          className={`w-11 h-11 rounded-md border-2 ${cls[s]}`}
+        />
       ))}
     </div>
   );

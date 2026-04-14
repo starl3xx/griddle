@@ -53,12 +53,30 @@ interface CellProps {
 function Cell({ letter, state, sequence, onClick }: CellProps) {
   const base =
     'relative w-20 h-20 sm:w-24 sm:h-24 rounded-lg border-4 flex items-center justify-center text-3xl sm:text-4xl font-black uppercase transition-all duration-fast select-none';
+  /**
+   * Visual semantics: dark + white text means "this letter is consumed
+   * (in use or already used)", light + dark text means "this letter is
+   * still in play (available or temporarily off-limits)".
+   *
+   * Sub-distinctions inside each category:
+   *   current (consumed) — scale-105 + shadow-card so it visually pops
+   *                        as the focused / most-recent cell
+   *   used    (consumed) — no scale, smaller shadow, sequence number
+   *                        in the corner showing the typing order
+   *   available (in play) — pale green tint signals "go"
+   *   open    (in play)  — neutral white before any letter is typed
+   *   blocked (in play)  — pale gray, muted text, no X overlay so the
+   *                        letter remains readable for planning ahead
+   */
   const stateClasses: Record<CellState, string> = {
     open: 'bg-white border-gray-300 text-gray-900 hover:border-brand shadow-btn',
     available: 'bg-success-50 border-success-200 text-gray-900 hover:border-success-500 shadow-btn',
+    // current = vivid mid blue, scaled up + heavier shadow so it’s the
+    // visual focus of the grid. used = deep navy so previously-typed
+    // letters read as "settled" / "older" but still clearly consumed.
     current: 'bg-brand border-brand text-white scale-105 shadow-card',
-    used: 'bg-brand-50 border-brand-200 text-brand-700',
-    blocked: 'bg-white border-gray-200 text-gray-300 opacity-40 cursor-not-allowed',
+    used: 'bg-brand-800 border-brand-800 text-white shadow-btn',
+    blocked: 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed',
   };
   const disabled = state === 'blocked';
 
@@ -72,22 +90,9 @@ function Cell({ letter, state, sequence, onClick }: CellProps) {
     >
       <span>{letter.toUpperCase()}</span>
       {state === 'used' && sequence !== null && (
-        <span className="absolute top-1 right-1.5 text-[10px] font-semibold text-brand-500 tabular-nums">
+        <span className="absolute top-1 right-1.5 text-[10px] font-semibold text-white/70 tabular-nums">
           {sequence}
         </span>
-      )}
-      {state === 'blocked' && (
-        <svg
-          className="absolute inset-0 m-auto w-8 h-8 text-gray-400"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          aria-hidden
-        >
-          <path d="M6 6l12 12M18 6L6 18" />
-        </svg>
       )}
     </button>
   );

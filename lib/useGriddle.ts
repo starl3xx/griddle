@@ -16,6 +16,8 @@ export interface GriddleState {
   flashWord: string | null;
   flashKey: number;
   solved: boolean;
+  /** True while an async solve verification is in flight. */
+  pendingSolve: boolean;
 }
 
 export interface GriddleActions {
@@ -25,14 +27,28 @@ export interface GriddleActions {
   reset: () => void;
 }
 
+/**
+ * Verdict returned by the server for a solve attempt. `solved=true` means
+ * the claimed word matched the stored answer — the hook sets solved state
+ * and fires onSolved. `solved=false` triggers a shake and lets the user
+ * backspace / retry.
+ */
+export interface SolveVerdict {
+  solved: boolean;
+  word?: string;
+}
+
 interface UseGriddleOptions {
   grid: string;
   /**
-   * DEV ONLY: M1 verifies solves client-side against a known target word.
-   * M4 will replace this with a server-side /api/solve verification.
+   * Async solve verification callback. Called when the user has laid
+   * down 9 letters on a valid Hamiltonian path. Returns a promise that
+   * resolves to a verdict. In production this POSTs to /api/solve; in
+   * tests it can be stubbed with a local check.
    */
-  devTargetWord: string;
-  onSolve?: (payload: SolvePayload & { unassisted: boolean }) => void;
+  onSolveAttempt: (payload: SolvePayload & { unassisted: boolean }) => Promise<SolveVerdict>;
+  /** Fires after a verdict with solved=true. */
+  onSolved?: (payload: SolvePayload & { unassisted: boolean; word: string }) => void;
   unassisted?: boolean;
   /**
    * When true, all input (keyboard, tap, backspace) is a no-op. Used while
@@ -44,8 +60,8 @@ interface UseGriddleOptions {
 
 export function useGriddle({
   grid,
-  devTargetWord,
-  onSolve,
+  onSolveAttempt,
+  onSolved,
   unassisted = false,
   disabled = false,
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
@@ -54,11 +70,21 @@ export function useGriddle({
   const [flashWord, setFlashWord] = useState<string | null>(null);
   const [flashKey, setFlashKey] = useState(0);
   const [solved, setSolved] = useState(false);
+  const [pendingSolve, setPendingSolve] = useState(false);
 
   const telemetryRef = useRef<SolveTelemetry | null>(null);
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();
 
   const lastFlashedWordRef = useRef<string | null>(null);
+
+  /**
+   * Synchronous re-entry guard for solve attempts. Set to the in-flight
+   * 9-letter attempt while a /api/solve POST is pending. Cleared in the
+   * .finally() of the verify call. Lives in a ref (not state) so reading
+   * it inside an input handler reflects the latest value without needing
+   * a re-render.
+   */
+  const inFlightAttemptRef = useRef<string | null>(null);
 
   const letters = useMemo(() => path.map((i) => grid[i]), [path, grid]);
 
@@ -91,7 +117,9 @@ export function useGriddle({
     setPath([]);
     setFlashWord(null);
     lastFlashedWordRef.current = null;
+    inFlightAttemptRef.current = null;
     setSolved(false);
+    setPendingSolve(false);
     telemetryRef.current?.reset();
   }, []);
 
@@ -109,28 +137,64 @@ export function useGriddle({
     }
   }, [letters]);
 
-  // Solve detection on reaching 9 letters
-  useEffect(() => {
-    if (solved) return;
-    if (letters.length !== 9) return;
-    if (!isValidPath(path)) return;
-    const attempt = letters.join('');
-    if (attempt === devTargetWord) {
-      setSolved(true);
-      const payload = telemetryRef.current!.build(attempt);
-      onSolve?.({ ...payload, unassisted });
-    } else {
-      // 9 letters laid down but not the target — shake + bounce back
-      triggerShake();
-    }
-  }, [letters, path, devTargetWord, solved, onSolve, unassisted, triggerShake]);
+  /**
+   * Imperative solve trigger. Called from `typeLetter` / `tapCell` after
+   * appending the 9th letter, NOT from a useEffect.
+   *
+   * Why imperative? An effect that calls `setPendingSolve(true)` and lists
+   * `pendingSolve` in its dep array cancels its own async work — the
+   * pendingSolve change re-triggers the effect, which fires the previous
+   * cleanup, which sets `cancelled = true`, which short-circuits the
+   * `.finally()` that was supposed to clear pendingSolve. Net result:
+   * pendingSolve gets stuck at `true` and the game freezes after the
+   * first 9-letter attempt. Imperative trigger sidesteps the entire
+   * effect-cleanup-self-cancel cycle.
+   */
+  const triggerSolve = useCallback(
+    (finalPath: number[]) => {
+      if (solved) return;
+      if (finalPath.length !== 9) return;
+      if (!isValidPath(finalPath)) return;
+
+      const finalLetters = finalPath.map((i) => grid[i]).join('');
+      // Re-entry guard: if a verify for the same letters is already in
+      // flight, ignore. inFlightAttemptRef is cleared in finally().
+      if (inFlightAttemptRef.current === finalLetters) return;
+      inFlightAttemptRef.current = finalLetters;
+
+      const payload = telemetryRef.current!.build(finalLetters);
+      setPendingSolve(true);
+
+      onSolveAttempt({ ...payload, unassisted })
+        .then((verdict) => {
+          // Treat "solved without word" as a server contract violation
+          // (the API guarantees `word` is present when solved=true).
+          // If we ever receive solved=true with no word, fall through
+          // to the shake path rather than locking the UI into a
+          // half-solved state with no SolveModal.
+          if (verdict.solved && verdict.word != null) {
+            setSolved(true);
+            onSolved?.({ ...payload, unassisted, word: verdict.word });
+          } else {
+            triggerShake();
+          }
+        })
+        .catch(() => {
+          triggerShake();
+        })
+        .finally(() => {
+          setPendingSolve(false);
+          inFlightAttemptRef.current = null;
+        });
+    },
+    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake],
+  );
 
   const typeLetter = useCallback(
     (letter: string) => {
-      if (solved || disabled) return;
+      if (solved || disabled || pendingSolve) return;
       const lc = letter.toLowerCase();
       if (!/^[a-z]$/.test(lc)) return;
-      // find the cell in grid that matches AND is not yet used AND is not blocked
       const used = new Set(path);
       const current = path[path.length - 1] ?? null;
       const blocked = getBlockedCells(current);
@@ -146,14 +210,16 @@ export function useGriddle({
         return;
       }
       telemetryRef.current?.recordKeystroke();
-      setPath((p) => [...p, foundCell!]);
+      const newPath = [...path, foundCell];
+      setPath(newPath);
+      if (newPath.length === 9) triggerSolve(newPath);
     },
-    [grid, path, solved, disabled, triggerShake],
+    [grid, path, solved, disabled, pendingSolve, triggerShake, triggerSolve],
   );
 
   const tapCell = useCallback(
     (cellIdx: number) => {
-      if (solved || disabled) return;
+      if (solved || disabled || pendingSolve) return;
       if (cellIdx < 0 || cellIdx > 8) return;
       const used = new Set(path);
       const current = path[path.length - 1] ?? null;
@@ -163,22 +229,23 @@ export function useGriddle({
         return;
       }
       telemetryRef.current?.recordKeystroke();
-      setPath((p) => [...p, cellIdx]);
+      const newPath = [...path, cellIdx];
+      setPath(newPath);
+      if (newPath.length === 9) triggerSolve(newPath);
     },
-    [path, solved, disabled, triggerShake],
+    [path, solved, disabled, pendingSolve, triggerShake, triggerSolve],
   );
 
   const backspace = useCallback(() => {
-    if (solved || disabled) return;
+    if (solved || disabled || pendingSolve) return;
     setPath((p) => (p.length === 0 ? p : p.slice(0, -1)));
     lastFlashedWordRef.current = null;
-  }, [solved, disabled]);
+  }, [solved, disabled, pendingSolve]);
 
-  // Global keyboard listener. When disabled, we skip attaching the listener
-  // entirely so the browser handles key events normally while a modal is
-  // open — no preventDefault on keys we’re about to ignore anyway.
+  // Global keyboard listener. Disabled/pending both skip attachment so
+  // the browser handles keys normally during modals + in-flight solves.
   useEffect(() => {
-    if (disabled) return;
+    if (disabled || pendingSolve) return;
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Backspace') {
@@ -193,10 +260,10 @@ export function useGriddle({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [typeLetter, backspace, disabled]);
+  }, [typeLetter, backspace, disabled, pendingSolve]);
 
   return [
-    { letters, path, cellStates, sequenceByCell, shakeSignal, flashWord, flashKey, solved },
+    { letters, path, cellStates, sequenceByCell, shakeSignal, flashWord, flashKey, solved, pendingSolve },
     { typeLetter, tapCell, backspace, reset },
   ];
 }
