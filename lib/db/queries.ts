@@ -759,6 +759,190 @@ async function updateProfileInPlace(
 }
 
 /**
+ * Admin premium grant — comp premium to a wallet or a handle with no
+ * burn, no tx, no Stripe charge. Used by operators from /admin to
+ * resolve support issues, reward contributors, hand out comps for
+ * Farcaster giveaways, etc.
+ *
+ * Two identity modes:
+ *   - `{ wallet }` — inserts a `premium_users` row with `source='admin_grant'`,
+ *     `txHash=null`, `grantedBy`, and an optional `reason`. The wallet
+ *     immediately reads as premium from `/api/premium/[wallet]`.
+ *   - `{ handle }` — upserts a `profiles` row with `premium_source='admin_grant'`
+ *     and no wallet. The handle becomes premium via the profiles-table
+ *     path (wiring up in M4f). For now this creates the profile row so
+ *     the grant is recorded even before the M4f check-path lands.
+ *
+ * Both modes are idempotent: re-granting the same wallet/handle just
+ * updates the existing row.
+ *
+ * Caller is responsible for admin authentication — this function does
+ * NOT check the allowlist. The `/api/admin/grant-premium` route guards
+ * via `requireAdminWallet()` before calling here.
+ */
+export interface GrantPremiumInput {
+  wallet?: string | null;
+  handle?: string | null;
+  /** Admin wallet performing the grant — stored for audit. */
+  grantedBy: string;
+  /** Optional free-form note (max 200 chars). */
+  reason?: string | null;
+}
+
+export type GrantPremiumResult =
+  | { kind: 'wallet'; wallet: string }
+  | { kind: 'handle'; profileId: number; handle: string };
+
+export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremiumResult> {
+  const wallet = normalizeIdentity(input.wallet);
+  const handle = normalizeIdentity(input.handle);
+  const grantedBy = input.grantedBy.toLowerCase();
+  const reason = input.reason?.slice(0, 200) ?? null;
+
+  if (wallet === null && handle === null) {
+    throw new Error('grantPremium requires wallet or handle');
+  }
+  if (wallet !== null && handle !== null) {
+    throw new Error('grantPremium takes exactly one of wallet or handle, not both');
+  }
+
+  if (wallet !== null) {
+    const normalizedWallet = wallet.toLowerCase();
+    await db
+      .insert(premiumUsers)
+      .values({
+        wallet: normalizedWallet,
+        txHash: null,
+        source: 'admin_grant',
+        grantedBy,
+        reason,
+      })
+      .onConflictDoUpdate({
+        target: premiumUsers.wallet,
+        set: {
+          // Explicitly null txHash on conflict — if this wallet
+          // previously paid with crypto, its tx_hash is stale now
+          // that source flips to 'admin_grant'. Leaving the old
+          // hash would leave the audit row internally inconsistent
+          // (claims to be an admin grant, still references a burn tx).
+          txHash: null,
+          source: 'admin_grant',
+          grantedBy,
+          reason,
+          unlockedAt: new Date(),
+        },
+      });
+    return { kind: 'wallet', wallet: normalizedWallet };
+  }
+
+  // Handle path: upsert into profiles with premium_source='admin_grant'.
+  // Note: the game's premium check currently only reads from
+  // premium_users (keyed on wallet). Handle-only premium becomes
+  // effective when M4f wires the leaderboard/premium reads through
+  // profiles. The grant is recorded now so the audit trail is intact.
+  const profile = await upsertProfile({
+    handle,
+    premiumSource: 'admin_grant',
+    // Coalesce nulls to undefined: upsertProfile's type narrows these
+    // non-clearable fields to `string | undefined`, so "omitted" is
+    // the only way to express "keep existing".
+    grantedBy: grantedBy ?? undefined,
+    reason: reason ?? undefined,
+  });
+  return { kind: 'handle', profileId: profile.id, handle: handle as string };
+}
+
+/**
+ * One row in the admin grant audit list. Grants live in two different
+ * tables depending on identity kind:
+ *   - `premium_users` — grant-by-wallet path
+ *   - `profiles` — grant-by-handle path (no wallet, M4f-facing)
+ *
+ * The discriminated `identity` field lets the audit UI render both
+ * without the client needing to know which table each row came from.
+ * Both branches carry `grantedBy` + `reason` (wallet branch from
+ * `premium_users`, handle branch from `profiles`) so the audit is
+ * fully attributable regardless of which identity path was used.
+ */
+export interface PremiumGrantRow {
+  identity: { kind: 'wallet'; wallet: string } | { kind: 'handle'; handle: string };
+  unlockedAt: Date;
+  source: string;
+  grantedBy: string | null;
+  reason: string | null;
+}
+
+/**
+ * Recent admin grants for the `/admin` grant tab. Unions the two
+ * storage sources, filters to `source='admin_grant'` so paid unlocks
+ * don't clutter the list, and returns rows newest-first. Uses two
+ * DB queries rather than a SQL UNION so each side can stay on its
+ * own Drizzle builder without raw SQL.
+ */
+export async function getRecentPremiumGrants(limit = 50): Promise<PremiumGrantRow[]> {
+  const [walletRows, handleRows] = await Promise.all([
+    db
+      .select({
+        wallet: premiumUsers.wallet,
+        unlockedAt: premiumUsers.unlockedAt,
+        source: premiumUsers.source,
+        grantedBy: premiumUsers.grantedBy,
+        reason: premiumUsers.reason,
+      })
+      .from(premiumUsers)
+      .where(eq(premiumUsers.source, 'admin_grant'))
+      .orderBy(sql`${premiumUsers.unlockedAt} DESC`)
+      .limit(limit),
+    db
+      .select({
+        handle: profiles.handle,
+        unlockedAt: profiles.updatedAt,
+        grantedBy: profiles.grantedBy,
+        reason: profiles.reason,
+      })
+      .from(profiles)
+      .where(
+        and(eq(profiles.premiumSource, 'admin_grant'), isNotNull(profiles.handle)),
+      )
+      .orderBy(sql`${profiles.updatedAt} DESC`)
+      .limit(limit),
+  ]);
+
+  const merged: PremiumGrantRow[] = [
+    ...walletRows.map(
+      (r): PremiumGrantRow => ({
+        identity: { kind: 'wallet', wallet: r.wallet },
+        unlockedAt: r.unlockedAt,
+        source: r.source,
+        grantedBy: r.grantedBy,
+        reason: r.reason,
+      }),
+    ),
+    ...handleRows
+      .filter(
+        (r): r is {
+          handle: string;
+          unlockedAt: Date;
+          grantedBy: string | null;
+          reason: string | null;
+        } => r.handle !== null,
+      )
+      .map(
+        (r): PremiumGrantRow => ({
+          identity: { kind: 'handle', handle: r.handle },
+          unlockedAt: r.unlockedAt,
+          source: 'admin_grant',
+          grantedBy: r.grantedBy,
+          reason: r.reason,
+        }),
+      ),
+  ];
+
+  merged.sort((a, b) => b.unlockedAt.getTime() - a.unlockedAt.getTime());
+  return merged.slice(0, limit);
+}
+
+/**
  * Fetch the loaded_at timestamp for a (session, puzzle) pair. Returns
  * null if the session never called /api/puzzle/today for this puzzle
  * before submitting a solve.
