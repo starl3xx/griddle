@@ -18,6 +18,14 @@ export interface GriddleState {
   solved: boolean;
   /** True while an async solve verification is in flight. */
   pendingSolve: boolean;
+  /**
+   * Every valid 4–8 letter English word the player has constructed
+   * during this attempt, newest first. Persists across backspaces so
+   * the player can see their progress; cleared only on `reset()` or
+   * when a solve is confirmed. De-duped — a word found twice only
+   * appears once.
+   */
+  foundWords: string[];
 }
 
 export interface GriddleActions {
@@ -71,6 +79,7 @@ export function useGriddle({
   const [flashKey, setFlashKey] = useState(0);
   const [solved, setSolved] = useState(false);
   const [pendingSolve, setPendingSolve] = useState(false);
+  const [foundWords, setFoundWords] = useState<string[]>([]);
 
   const telemetryRef = useRef<SolveTelemetry | null>(null);
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();
@@ -120,6 +129,7 @@ export function useGriddle({
     inFlightAttemptRef.current = null;
     setSolved(false);
     setPendingSolve(false);
+    setFoundWords([]);
     telemetryRef.current?.reset();
   }, []);
 
@@ -144,6 +154,10 @@ export function useGriddle({
         lastFlashedWordRef.current = candidate;
         setFlashWord(candidate);
         setFlashKey((k) => k + 1);
+        // Persist the find for the duration of the attempt. Dedup via
+        // the state update callback so rapid re-finds of the same word
+        // don't create duplicate entries even under React batching.
+        setFoundWords((prev) => (prev.includes(candidate) ? prev : [candidate, ...prev]));
       })
       .catch(() => {
         // Dictionary chunk failed to load — silently skip the flash.
@@ -285,7 +299,18 @@ export function useGriddle({
   }, [typeLetter, backspace, disabled, pendingSolve]);
 
   return [
-    { letters, path, cellStates, sequenceByCell, shakeSignal, flashWord, flashKey, solved, pendingSolve },
+    {
+      letters,
+      path,
+      cellStates,
+      sequenceByCell,
+      shakeSignal,
+      flashWord,
+      flashKey,
+      solved,
+      pendingSolve,
+      foundWords,
+    },
     { typeLetter, tapCell, backspace, reset },
   ];
 }

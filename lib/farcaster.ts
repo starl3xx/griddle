@@ -31,6 +31,10 @@ export interface FarcasterState {
   inMiniApp: boolean;
   /** True once the detection check has resolved (either way). */
   hydrated: boolean;
+  /** Profile picture URL if the user is authed inside a Farcaster client. */
+  pfpUrl: string | null;
+  /** Display name if the user is authed inside a Farcaster client. */
+  displayName: string | null;
 }
 
 const CONTEXT_TIMEOUT_MS = 2000;
@@ -39,6 +43,8 @@ export function useFarcaster(): FarcasterState {
   const [state, setState] = useState<FarcasterState>({
     inMiniApp: false,
     hydrated: false,
+    pfpUrl: null,
+    displayName: null,
   });
 
   useEffect(() => {
@@ -49,7 +55,9 @@ export function useFarcaster(): FarcasterState {
         ({ sdk } = await import('@farcaster/miniapp-sdk'));
       } catch {
         // Dynamic import failed — definitely not in Farcaster.
-        if (!cancelled) setState({ inMiniApp: false, hydrated: true });
+        if (!cancelled) {
+          setState({ inMiniApp: false, hydrated: true, pfpUrl: null, displayName: null });
+        }
         return;
       }
 
@@ -71,10 +79,17 @@ export function useFarcaster(): FarcasterState {
         const context = await Promise.race([sdk.context, timeoutPromise]);
         const clientFid = context?.client?.clientFid;
         if (!cancelled) {
-          setState({ inMiniApp: clientFid != null, hydrated: true });
+          setState({
+            inMiniApp: clientFid != null,
+            hydrated: true,
+            pfpUrl: context?.user?.pfpUrl ?? null,
+            displayName: context?.user?.displayName ?? null,
+          });
         }
       } catch {
-        if (!cancelled) setState({ inMiniApp: false, hydrated: true });
+        if (!cancelled) {
+          setState({ inMiniApp: false, hydrated: true, pfpUrl: null, displayName: null });
+        }
       }
     })();
     return () => {
