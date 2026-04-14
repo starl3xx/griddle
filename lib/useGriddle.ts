@@ -137,10 +137,10 @@ export function useGriddle({
     isDictionaryWord(candidate)
       .then((isWord) => {
         if (cancelled || !isWord) return;
-        // Re-check after await — the user may have backspaced past this
-        // candidate, which would have nulled lastFlashedWordRef. Only
-        // flash if the candidate is still the most recent attempt.
-        if (lastFlashedWordRef.current === candidate) return;
+        // No post-await dedup guard needed: any mutation to letters
+        // (typeLetter, backspace, reset) changes the effect deps and
+        // fires the cleanup, which sets cancelled=true. The cancelled
+        // check above is the complete staleness defense.
         lastFlashedWordRef.current = candidate;
         setFlashWord(candidate);
         setFlashKey((k) => k + 1);
