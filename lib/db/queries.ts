@@ -996,6 +996,13 @@ export async function recordCryptoUnlock(
         source: 'crypto',
         grantedBy: null,
         reason: null,
+        // Explicitly null stripeSessionId on conflict — if this wallet
+        // previously paid via fiat, its session id is stale now that
+        // source flips to 'crypto'. Leaving the old id would leave the
+        // row internally inconsistent (claims to be a crypto unlock,
+        // still references a Stripe session). Matches the existing
+        // txHash / grantedBy / reason clearing pattern above.
+        stripeSessionId: null,
         unlockedAt: new Date(),
       },
     });
