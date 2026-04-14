@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { claimAndClearSessionPremium } from '@/lib/session-premium';
+import { claimAndClearSessionPremium, setSessionPremium } from '@/lib/session-premium';
 import { recordFiatUnlock } from '@/lib/db/queries';
 import { isValidAddress } from '@/lib/address';
 
@@ -52,10 +52,24 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ migrated: false, reason: 'no session premium' });
   }
 
-  await recordFiatUnlock({
-    stripeSessionId: sessionPremium.stripeSessionId,
-    wallet: wallet.toLowerCase(),
-  });
+  try {
+    await recordFiatUnlock({
+      stripeSessionId: sessionPremium.stripeSessionId,
+      wallet: wallet.toLowerCase(),
+    });
+  } catch (err) {
+    // DB write failed — restore the session key so the user doesn't lose
+    // their premium record. They can retry migration later (on next wallet
+    // connect) and the session check still works in the meantime.
+    console.error('[premium/migrate] DB write failed, restoring session key', err);
+    await setSessionPremium(sessionId, sessionPremium.stripeSessionId).catch(() => {
+      // Best-effort restore. If this also fails, the Stripe session id is
+      // still on the profiles row (via the webhook's upsertProfile call),
+      // so the audit trail is intact even if the migration needs a retry.
+      console.error('[premium/migrate] failed to restore session key');
+    });
+    return NextResponse.json({ error: 'migration failed, retry on next connect' }, { status: 500 });
+  }
 
   return NextResponse.json({ migrated: true });
 }

@@ -208,8 +208,8 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       if (walletData?.premium) {
         setPremium(true);
       } else {
-        // Attempt migration — fire-and-forget; if it fails the session
-        // premium is still readable by the session check above.
+        // Attempt migration — fire-and-forget. On failure the migrate
+        // route restores the session key so the next connect can retry.
         fetch('/api/premium/migrate', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

@@ -74,17 +74,20 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    // Always bind premium to the browser session first — works regardless
-    // of whether a wallet is connected.
-    await setSessionPremium(sessionId, session.id);
-
-    // If a wallet was connected at checkout time, also write premium_users
-    // so the wallet-keyed check works without a separate migration step.
     if (wallet) {
+      // Wallet present: bind premium to the wallet row only. Skipping
+      // setSessionPremium here is intentional — if we also set the session
+      // key, a second wallet could later call /api/premium/migrate and claim
+      // the key, creating two premium_users rows from one payment. The wallet
+      // row is the source of truth; refreshPremium on reconnect reads it.
       await recordFiatUnlock({
         stripeSessionId: session.id,
         wallet,
       });
+    } else {
+      // No wallet: bind premium to the browser session. The session key is
+      // the only record until the user connects a wallet and migration runs.
+      await setSessionPremium(sessionId, session.id);
     }
   } catch (err) {
     console.error('[stripe/webhook] failed to record unlock', err);
