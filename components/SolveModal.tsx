@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Diamond, Confetti, ShareNetwork, ArrowCounterClockwise } from '@phosphor-icons/react';
+import { Diamond, Medal, ShareNetwork, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
@@ -100,7 +100,7 @@ export function SolveModal({
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in">
       <div className="modal-sheet sm:rounded-card animate-slide-up text-center">
         <div className="flex justify-center mb-2" aria-hidden>
-          <Confetti className="w-12 h-12 text-accent" weight="fill" />
+          <Medal className="w-12 h-12 text-accent" weight="fill" />
         </div>
         <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-gray-900">
           Solved!
