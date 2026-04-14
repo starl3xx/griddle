@@ -46,13 +46,21 @@ export function StatsModal({
   pfpUrl,
   displayName,
 }: StatsModalProps) {
+  // Default to loading=true + data=null so the first paint of a fresh
+  // open renders the skeleton, not the no-wallet CTA. The previous
+  // (loading=false, data=null) default produced a one-frame flash of
+  // "Connect wallet" before the useEffect switched into loading — and
+  // on reopen, stale `data` from the previous fetch would flash for
+  // one frame. Resetting both in the effect on every open keeps the
+  // render deterministic across repeated opens.
   const [data, setData] = useState<StatsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setLoading(true);
+    setData(null);
     fetch('/api/stats')
       .then((r) => (r.ok ? r.json() : null))
       .then((j: StatsResponse | null) => {
