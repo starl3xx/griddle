@@ -3,6 +3,7 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { solves } from '@/lib/db/schema';
 import { getSessionId } from '@/lib/session';
+import { isValidAddress } from '@/lib/address';
 
 /**
  * POST /api/wallet/link
@@ -55,13 +56,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     .where(and(eq(solves.sessionId, sessionId), isNull(solves.wallet)))
     .returning({ id: solves.id });
 
+  // Intentionally do NOT include sessionId in the response. The session
+  // cookie is httpOnly precisely so client-side JS can't read it; echoing
+  // it in the response body would defeat that protection and let any
+  // script on the page (including via XSS) lift the session id.
   return NextResponse.json({
     wallet: normalized,
-    sessionId,
     linked: result.length,
   });
-}
-
-function isValidAddress(s: string): boolean {
-  return /^0x[a-fA-F0-9]{40}$/.test(s);
 }

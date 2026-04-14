@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { premiumUsers } from '@/lib/db/schema';
+import { isValidAddress } from '@/lib/address';
 
 /**
  * GET /api/premium/[wallet]
@@ -38,8 +39,4 @@ export async function GET(
     .limit(1);
 
   return NextResponse.json({ wallet: normalized, premium: rows.length > 0 });
-}
-
-function isValidAddress(s: string): boolean {
-  return /^0x[a-fA-F0-9]{40}$/.test(s);
 }
