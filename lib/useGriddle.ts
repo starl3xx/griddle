@@ -13,17 +13,16 @@ export interface GriddleState {
   cellStates: CellState[];
   sequenceByCell: Array<number | null>;
   shakeSignal: number;
-  flashWord: string | null;
-  flashKey: number;
   solved: boolean;
   /** True while an async solve verification is in flight. */
   pendingSolve: boolean;
   /**
    * Every valid 4–8 letter English word the player has constructed
-   * during this attempt, newest first. Persists across backspaces so
-   * the player can see their progress; cleared only on `reset()` or
-   * when a solve is confirmed. De-duped — a word found twice only
-   * appears once.
+   * during this attempt, newest first. Persists across backspaces AND
+   * across Reset button clicks so a mis-path retry doesn't erase the
+   * player's collected progress. Cleared only on a confirmed solve
+   * (via `triggerSolve`) or a full page reload. De-duped — a word
+   * found twice only appears once.
    */
   foundWords: string[];
 }
@@ -75,8 +74,6 @@ export function useGriddle({
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
   const [path, setPath] = useState<number[]>([]);
   const [shakeSignal, setShakeSignal] = useState(0);
-  const [flashWord, setFlashWord] = useState<string | null>(null);
-  const [flashKey, setFlashKey] = useState(0);
   const [solved, setSolved] = useState(false);
   const [pendingSolve, setPendingSolve] = useState(false);
   const [foundWords, setFoundWords] = useState<string[]>([]);
@@ -84,7 +81,11 @@ export function useGriddle({
   const telemetryRef = useRef<SolveTelemetry | null>(null);
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();
 
-  const lastFlashedWordRef = useRef<string | null>(null);
+  // Dedup ref for the real-time dictionary check — prevents re-
+  // enqueueing the same candidate when the effect re-fires on an
+  // identical letters state (which shouldn't happen normally but
+  // did when FlashBadge was a separate consumer).
+  const lastFoundWordRef = useRef<string | null>(null);
 
   /**
    * Synchronous re-entry guard for solve attempts. Set to the in-flight
@@ -124,12 +125,16 @@ export function useGriddle({
 
   const reset = useCallback(() => {
     setPath([]);
-    setFlashWord(null);
-    lastFlashedWordRef.current = null;
     inFlightAttemptRef.current = null;
     setSolved(false);
     setPendingSolve(false);
-    setFoundWords([]);
+    // Deliberately NOT clearing foundWords here — the player's
+    // collected shorter words persist across Reset so a mis-path
+    // and retry doesn't erase their progress. The only thing that
+    // clears the list is a confirmed solve (handled in the
+    // triggerSolve success branch below) or a full page reload.
+    // `lastFoundWordRef` also intentionally persists so retyping a
+    // previously-found word after Reset doesn't re-enqueue it.
     telemetryRef.current?.reset();
   }, []);
 
@@ -141,7 +146,7 @@ export function useGriddle({
   useEffect(() => {
     if (letters.length < 4 || letters.length > 8) return;
     const candidate = letters.join('');
-    if (candidate === lastFlashedWordRef.current) return;
+    if (candidate === lastFoundWordRef.current) return;
 
     let cancelled = false;
     isDictionaryWord(candidate)
@@ -151,16 +156,14 @@ export function useGriddle({
         // (typeLetter, backspace, reset) changes the effect deps and
         // fires the cleanup, which sets cancelled=true. The cancelled
         // check above is the complete staleness defense.
-        lastFlashedWordRef.current = candidate;
-        setFlashWord(candidate);
-        setFlashKey((k) => k + 1);
+        lastFoundWordRef.current = candidate;
         // Persist the find for the duration of the attempt. Dedup via
         // the state update callback so rapid re-finds of the same word
         // don't create duplicate entries even under React batching.
         setFoundWords((prev) => (prev.includes(candidate) ? prev : [candidate, ...prev]));
       })
       .catch(() => {
-        // Dictionary chunk failed to load — silently skip the flash.
+        // Dictionary chunk failed to load — silently skip.
         // loadDict() resets its memo on rejection, so the next attempt
         // (next typed letter) will re-fetch automatically.
       });
@@ -212,6 +215,7 @@ export function useGriddle({
             // the modal without Play Again) isn't cluttered with the
             // leftover shorter-word pills.
             setFoundWords([]);
+            lastFoundWordRef.current = null;
             onSolved?.({ ...payload, unassisted, word: verdict.word });
           } else {
             triggerShake();
@@ -281,7 +285,9 @@ export function useGriddle({
   const backspace = useCallback(() => {
     if (solved || disabled || pendingSolve) return;
     setPath((p) => (p.length === 0 ? p : p.slice(0, -1)));
-    lastFlashedWordRef.current = null;
+    // Reset the found-word dedup so typing back up to the same
+    // word after a backspace re-animates the pill via the useEffect.
+    lastFoundWordRef.current = null;
   }, [solved, disabled, pendingSolve]);
 
   // Global keyboard listener. Disabled/pending both skip attachment so
@@ -311,8 +317,6 @@ export function useGriddle({
       cellStates,
       sequenceByCell,
       shakeSignal,
-      flashWord,
-      flashKey,
       solved,
       pendingSolve,
       foundWords,

@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
-import { FlashBadge } from '@/components/FlashBadge';
 import { SolveModal } from '@/components/SolveModal';
 import { TutorialModal } from '@/components/TutorialModal';
 import { HomeTiles } from '@/components/HomeTiles';
@@ -268,7 +267,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           </button>
         </header>
 
-        <FlashBadge word={state.flashWord} flashKey={state.flashKey} />
+        <FoundWords words={state.foundWords} />
 
         <Grid
           grid={initialPuzzle.grid}
@@ -280,8 +279,6 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         />
 
         <WordSlots letters={state.letters} />
-
-        <FoundWords words={state.foundWords} />
 
         <div className="flex gap-3 mt-1">
           <button

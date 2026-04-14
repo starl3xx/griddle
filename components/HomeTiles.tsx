@@ -1,5 +1,6 @@
 'use client';
 
+import { Trophy, Archive } from 'lucide-react';
 import { Avatar } from './Avatar';
 
 interface HomeTilesProps {
@@ -32,17 +33,13 @@ export function HomeTiles({
   return (
     <div className="w-full max-w-[420px] grid grid-cols-3 gap-3">
       <Tile label="Stats" onClick={onStatsClick}>
-        <Avatar pfpUrl={pfpUrl} monogram={monogram} size="sm" />
+        <Avatar pfpUrl={pfpUrl} monogram={monogram} size="xs" />
       </Tile>
       <Tile label="Leaderboard" onClick={onLeaderboardClick} locked={!premium}>
-        <span className="text-2xl leading-none" aria-hidden>
-          🏆
-        </span>
+        <Trophy className="w-5 h-5 text-accent" strokeWidth={2.5} aria-hidden />
       </Tile>
       <Tile label="Archive" onClick={onArchiveClick} locked={!premium}>
-        <span className="text-2xl leading-none" aria-hidden>
-          🗃️
-        </span>
+        <Archive className="w-5 h-5 text-accent" strokeWidth={2.5} aria-hidden />
       </Tile>
     </div>
   );
@@ -60,7 +57,7 @@ function Tile({ label, onClick, locked = false, children }: TileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="relative bg-white hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-card aspect-[2/1] flex flex-col items-center justify-center gap-1.5 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      className="relative bg-white hover:bg-brand-50 border border-gray-200 hover:border-brand-200 rounded-card px-3 py-3 flex flex-col items-center justify-center gap-1.5 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
     >
       {children}
       <span className="text-[11px] font-bold uppercase tracking-wider text-gray-600">

@@ -13,8 +13,9 @@ interface AvatarProps {
    * mistaken for the player's initial.
    */
   monogram?: string;
-  /** Size preset. `sm` is used in HomeTiles, `md` in StatsModal. */
-  size?: 'sm' | 'md';
+  /** Size preset. `xs` is the tight-padding tile icon, `sm` fits a row,
+   *  `md` is the StatsModal header. */
+  size?: 'xs' | 'sm' | 'md';
 }
 
 /**
@@ -25,8 +26,10 @@ interface AvatarProps {
  * surfaces in lockstep.
  */
 export function Avatar({ pfpUrl, size = 'md' }: AvatarProps) {
-  const sizeClass = size === 'sm' ? 'w-9 h-9' : 'w-11 h-11';
-  const iconClass = size === 'sm' ? 'w-5 h-5' : 'w-6 h-6';
+  const sizeClass =
+    size === 'xs' ? 'w-7 h-7' : size === 'sm' ? 'w-9 h-9' : 'w-11 h-11';
+  const iconClass =
+    size === 'xs' ? 'w-4 h-4' : size === 'sm' ? 'w-5 h-5' : 'w-6 h-6';
   if (pfpUrl) {
     // eslint-disable-next-line @next/next/no-img-element
     return (
