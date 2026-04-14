@@ -6,6 +6,7 @@ import {
   getPuzzleLoadedAt,
   getPuzzleWordByDayNumber,
 } from '@/lib/db/queries';
+import { getCurrentDayNumber } from '@/lib/scheduler';
 
 /**
  * POST /api/solve
@@ -80,6 +81,18 @@ export async function POST(
     !Number.isFinite(body.keystrokeCount)
   ) {
     return NextResponse.json({ error: 'malformed solve payload' }, { status: 400 });
+  }
+
+  // Clamp dayNumber to today’s puzzle. M4b only allows submitting solves
+  // for the current day — past puzzles bypass anti-bot timing checks
+  // (no puzzle_loads → null serverSolveMs → no flag). M5 will relax
+  // this when the premium archive feature ships, gated by wallet auth.
+  const todayDayNumber = getCurrentDayNumber();
+  if (body.dayNumber !== todayDayNumber) {
+    return NextResponse.json(
+      { error: 'solve only accepted for today’s puzzle' },
+      { status: 403 },
+    );
   }
 
   const sessionId = await getSessionId();

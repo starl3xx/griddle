@@ -98,7 +98,14 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         });
         if (!res.ok) return { solved: false };
         const data = (await res.json()) as { solved: boolean; word?: string };
-        return { solved: !!data.solved, word: data.word };
+        // Strict contract: only return solved=true if the server also
+        // returned a string `word`. Anything else is a verification
+        // failure from the client’s perspective, which causes a shake
+        // instead of locking the UI into a half-solved state.
+        if (data.solved === true && typeof data.word === 'string') {
+          return { solved: true, word: data.word };
+        }
+        return { solved: false };
       } catch {
         return { solved: false };
       }

@@ -167,11 +167,14 @@ export function useGriddle({
 
       onSolveAttempt({ ...payload, unassisted })
         .then((verdict) => {
-          if (verdict.solved) {
+          // Treat "solved without word" as a server contract violation
+          // (the API guarantees `word` is present when solved=true).
+          // If we ever receive solved=true with no word, fall through
+          // to the shake path rather than locking the UI into a
+          // half-solved state with no SolveModal.
+          if (verdict.solved && verdict.word != null) {
             setSolved(true);
-            if (verdict.word != null) {
-              onSolved?.({ ...payload, unassisted, word: verdict.word });
-            }
+            onSolved?.({ ...payload, unassisted, word: verdict.word });
           } else {
             triggerShake();
           }
