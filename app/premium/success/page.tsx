@@ -28,7 +28,7 @@ export default function PremiumSuccessPage() {
       </h1>
       <p className="text-sm font-medium text-gray-500 max-w-sm">
         Thanks for supporting Griddle. Your leaderboard, archive, and stats are
-        live the next time you open the game.
+        unlocked — tap below to start playing.
       </p>
       <Link
         href="/"
