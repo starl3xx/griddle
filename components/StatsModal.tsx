@@ -117,7 +117,11 @@ export function StatsModal({
 
   const wallet = statsData?.wallet ?? null;
   const stats = statsData?.stats;
-  const hasAccount = !!wallet;
+  // hasAccount: wallet connected OR session-premium (fiat buyer not yet linked
+  // to a wallet). A fiat premium user without a wallet has premium=true and
+  // wallet=null; treating them as anonymous would show "Unlock" CTAs to
+  // someone who already paid.
+  const hasAccount = !!wallet || premium;
   const monogram = wallet ? wallet.slice(2, 3).toUpperCase() : '?';
   const label = displayName ?? (wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Anonymous');
 
