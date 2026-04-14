@@ -45,7 +45,7 @@ function toFullWidth(s: string): string {
  *   ＬＲＷ
  *
  *   Solved in 3:24 ◆ unassisted
- *   griddle-fun.vercel.app
+ *   griddle.fun
  */
 export function formatShareText({
   dayNumber,
