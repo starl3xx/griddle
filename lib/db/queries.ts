@@ -43,20 +43,44 @@ const PUBLIC_KEY = (dayNumber: number) => `griddle:puzzle:public:${dayNumber}`;
 const ANSWER_KEY = (dayNumber: number) => `griddle:puzzle:answer:${dayNumber}`;
 
 /**
+ * Cache-safe wrappers around Upstash. Every kv.get / kv.set call goes
+ * through these so a transient Upstash failure (network blip, rate
+ * limit, brief outage) never breaks the request — we just log and fall
+ * through to the DB. The cache is a performance optimization, NOT an
+ * availability dependency. The non-cached version of these queries
+ * worked fine; the cached version must never be *less* resilient.
+ */
+async function safeKvGet<T>(key: string): Promise<T | null> {
+  try {
+    return await kv.get<T>(key);
+  } catch (err) {
+    console.warn(`[kv] get failed for ${key}:`, err);
+    return null;
+  }
+}
+
+async function safeKvSet<T>(key: string, value: T, ttl: number): Promise<void> {
+  try {
+    await kv.set(key, value, { ex: ttl });
+  } catch (err) {
+    console.warn(`[kv] set failed for ${key}:`, err);
+  }
+}
+
+/**
  * Read today's puzzle row. Returns null if no puzzle is seeded for the
- * current day. Reads from Upstash first; on miss, queries Neon and
- * populates BOTH the public and answer caches in a single roundtrip
- * so the next /api/solve hit also gets a cache hit.
+ * current day. Reads from Upstash first; on miss (or kv error), queries
+ * Neon and populates BOTH the public and answer caches in a single
+ * roundtrip so the next /api/solve hit also gets a cache hit.
  */
 export async function getTodayPuzzle(): Promise<TodayPuzzlePayload | null> {
   const dayNumber = getCurrentDayNumber();
 
-  const cached = await kv.get<TodayPuzzlePayload>(PUBLIC_KEY(dayNumber));
+  const cached = await safeKvGet<TodayPuzzlePayload>(PUBLIC_KEY(dayNumber));
   if (cached) return cached;
 
-  return refreshCacheForDay(dayNumber).then((row) =>
-    row ? toPublicPayload(row) : null,
-  );
+  const row = await refreshCacheForDay(dayNumber);
+  return row ? toPublicPayload(row) : null;
 }
 
 /**
@@ -67,7 +91,7 @@ export async function getTodayPuzzle(): Promise<TodayPuzzlePayload | null> {
 export async function getPuzzleWordByDayNumber(
   dayNumber: number,
 ): Promise<PuzzleAnswer | null> {
-  const cached = await kv.get<PuzzleAnswer>(ANSWER_KEY(dayNumber));
+  const cached = await safeKvGet<PuzzleAnswer>(ANSWER_KEY(dayNumber));
   if (cached) return cached;
 
   const row = await refreshCacheForDay(dayNumber);
@@ -109,12 +133,13 @@ async function refreshCacheForDay(dayNumber: number): Promise<{
   // second as midnight, fall back to a 60-second TTL.
   const ttl = Math.max(60, secondsUntilUtcMidnight());
 
-  // Two cache keys, populated in parallel. Public key intentionally
-  // omits the word — type-level word stripping carried over from the
-  // non-cached version.
+  // Two cache keys, populated in parallel via safeKvSet so a transient
+  // Upstash failure can never block returning the freshly-fetched row.
+  // Public key intentionally omits the word — type-level word stripping
+  // carried over from the non-cached version.
   await Promise.all([
-    kv.set(PUBLIC_KEY(dayNumber), toPublicPayload(row), { ex: ttl }),
-    kv.set(ANSWER_KEY(dayNumber), { id: row.id, word: row.word }, { ex: ttl }),
+    safeKvSet(PUBLIC_KEY(dayNumber), toPublicPayload(row), ttl),
+    safeKvSet(ANSWER_KEY(dayNumber), { id: row.id, word: row.word }, ttl),
   ]);
 
   return row;
