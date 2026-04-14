@@ -1,6 +1,13 @@
 import { and, asc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
-import { puzzles, puzzleLoads, solves, streaks, premiumUsers } from './schema';
+import {
+  puzzles,
+  puzzleLoads,
+  solves,
+  streaks,
+  premiumUsers,
+  profiles,
+} from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
@@ -433,6 +440,322 @@ export async function getArchiveList(limit = 60): Promise<ArchiveEntry[]> {
     .orderBy(sql`${puzzles.dayNumber} DESC`)
     .limit(limit);
   return rows.map((r) => ({ dayNumber: r.dayNumber, date: r.date }));
+}
+
+/**
+ * Player profile queries — scaffolding for the inclusive leaderboard in
+ * M4f. A profile is identified by a wallet, a handle, or both; the UI
+ * renders `handle` when set and falls back to a truncated wallet.
+ *
+ * These helpers are safe to call before M4f's UI ships — nothing in the
+ * game currently reads from `profiles`, so an empty table is a no-op
+ * for existing flows. The leaderboard render path will start consuming
+ * these once the profile-collection UI lands.
+ */
+export interface ProfileRow {
+  id: number;
+  wallet: string | null;
+  handle: string | null;
+  premiumSource: 'crypto' | 'fiat' | 'admin_grant' | null;
+  /** Admin wallet that granted premium (only set for `premiumSource='admin_grant'`). */
+  grantedBy: string | null;
+  /** Optional operator note (only set for `premiumSource='admin_grant'`). */
+  reason: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Lookup by wallet address. Normalized to lowercase before the query so
+ * mixed-case input (e.g. the checksummed form from wagmi) hits the same
+ * row as the lowercased form stored on write.
+ */
+export async function getProfileByWallet(wallet: string): Promise<ProfileRow | null> {
+  const normalized = wallet.toLowerCase();
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.wallet, normalized))
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    wallet: r.wallet,
+    handle: r.handle,
+    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: r.grantedBy,
+    reason: r.reason,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * Lookup by handle, case-insensitive. Uses `lower(handle)` to hit the
+ * `profiles_handle_lower_idx` unique index rather than scanning.
+ */
+export async function getProfileByHandle(handle: string): Promise<ProfileRow | null> {
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.handle}) = lower(${handle})`)
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    id: r.id,
+    wallet: r.wallet,
+    handle: r.handle,
+    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: r.grantedBy,
+    reason: r.reason,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * Upsert a profile. Used by both premium unlock paths:
+ *
+ *   - **Crypto**: `upsertProfile({ wallet, premiumSource: 'crypto' })` —
+ *     creates or updates the wallet-keyed profile on unlock.
+ *   - **Fiat**: `upsertProfile({ handle, premiumSource: 'fiat' })` —
+ *     creates the handle-keyed profile during Stripe checkout, before
+ *     the player has connected a wallet.
+ *
+ * If both `wallet` and `handle` are provided, attempts to match an
+ * existing row on wallet first (updating handle in place) so that a
+ * previously handle-only profile can pick up a wallet on first connect
+ * without creating a duplicate row. Callers performing that "merge"
+ * path should look up by handle first via `getProfileByHandle`, then
+ * call `upsertProfile` with both.
+ *
+ * Constraint enforcement (wallet OR handle required) lives in the DB
+ * `profiles_wallet_or_handle_required` CHECK. Passing both as null will
+ * throw; callers should never do this.
+ */
+/**
+ * `wallet` and `handle` accept `null` so callers can pass through
+ * normalized input that may have been emptied out — `normalizeIdentity`
+ * treats `null`, `undefined`, and empty-string the same.
+ *
+ * The other three fields are `T | undefined` only (not `| null`): the
+ * implementation below collapses undefined into "keep existing", and
+ * there's no current need for a caller to explicitly clear a
+ * `premiumSource` / `grantedBy` / `reason`. Admin grant audit fields
+ * in particular are append-only — once recorded, they're part of the
+ * audit trail forever. If a future caller ever needs to clear them,
+ * the type contract will flag it and we can add the distinction then.
+ */
+export interface UpsertProfileInput {
+  wallet?: string | null;
+  handle?: string | null;
+  premiumSource?: 'crypto' | 'fiat' | 'admin_grant';
+  /** Admin wallet, only for `premiumSource='admin_grant'`. Audit trail. */
+  grantedBy?: string;
+  /** Operator note, only for `premiumSource='admin_grant'`. */
+  reason?: string;
+}
+
+/**
+ * Thrown by `upsertProfile` when the wallet and handle passed in
+ * already identify two different existing profile rows. See the note
+ * on that function for why the merge itself is deferred to M4f.
+ */
+export class MergeConflictError extends Error {
+  constructor(
+    public readonly walletProfileId: number,
+    public readonly handleProfileId: number,
+  ) {
+    super(
+      `upsertProfile: wallet and handle point at different rows (${walletProfileId}, ${handleProfileId}); merge deferred`,
+    );
+    this.name = 'MergeConflictError';
+  }
+}
+
+/**
+ * Normalize a possibly-empty / whitespace-only string to null. Used so
+ * `upsertProfile({ handle: '' })` is treated the same as omitting
+ * `handle` entirely — an empty string is never a valid identity, so
+ * accepting it would both bypass the "wallet OR handle required" guard
+ * AND fail the lookup paths (since `''` is falsy in the `if (handle)`
+ * branches below).
+ */
+function normalizeIdentity(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  const trimmed = s.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileRow> {
+  const walletNorm = normalizeIdentity(input.wallet);
+  const wallet = walletNorm ? walletNorm.toLowerCase() : null;
+  const handle = normalizeIdentity(input.handle);
+  const premiumSource = input.premiumSource ?? null;
+  const grantedBy = input.grantedBy ? input.grantedBy.toLowerCase() : null;
+  const reason = input.reason ?? null;
+
+  if (wallet === null && handle === null) {
+    throw new Error('upsertProfile requires at least one of wallet or handle');
+  }
+
+  // Look up BOTH identities before deciding what to do. The two unique
+  // partial indexes on `profiles` mean we can't catch duplicates via
+  // `onConflictDoUpdate` against both columns at once, and we also need
+  // to detect the "merge" case — where wallet and handle each already
+  // own a different row — before we try to write to either.
+  const [byWallet, byHandle] = await Promise.all([
+    wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
+    handle ? getProfileByHandle(handle) : Promise.resolve(null),
+  ]);
+
+  // Merge case: wallet and handle each point at DIFFERENT existing rows.
+  // This is the "handle-only fiat profile later connects a wallet that
+  // already has a crypto profile" scenario. The cross-row merge needs
+  // to atomically DELETE the handle-only row and UPDATE the wallet row
+  // to pick up the handle — but the runtime `db` client uses the
+  // stateless neon-http driver, which does not support interactive
+  // `db.transaction()`. Implementing this atomically requires a single
+  // raw-SQL CTE (one HTTP round trip = one implicit server transaction).
+  //
+  // Rather than ship a half-right merge in the scaffolding PR, detect
+  // the case and throw an explicit `MergeConflictError`. M4f will add
+  // a dedicated `mergeProfiles(walletId, handleId)` helper that runs
+  // the CTE when it actually needs this path (wallet-link flow from
+  // the handle-only Apple Pay path). No call sites hit upsertProfile
+  // yet, so throwing here is a safe contract for the scaffolding.
+  if (byWallet && byHandle && byWallet.id !== byHandle.id) {
+    throw new MergeConflictError(byWallet.id, byHandle.id);
+  }
+
+  // Single-row update: either wallet or handle matched an existing row,
+  // OR they both matched the same row. Update in place.
+  const existing = byWallet ?? byHandle;
+  if (existing) {
+    return updateProfileInPlace(existing.id, {
+      wallet: wallet ?? existing.wallet,
+      handle: handle ?? existing.handle,
+      premiumSource: premiumSource ?? existing.premiumSource,
+      grantedBy: grantedBy ?? existing.grantedBy,
+      reason: reason ?? existing.reason,
+    });
+  }
+
+  // Insert-fresh path with TOCTOU protection. Between the parallel
+  // lookup above and this insert, a concurrent `upsertProfile` call
+  // with the same wallet/handle could race us to the insert and win
+  // — a bare insert would then throw an unhandled unique constraint
+  // violation from one of the two partial unique indexes.
+  //
+  // `onConflictDoNothing()` targets any unique conflict: if someone
+  // inserted first, we get an empty `returning()` array instead of
+  // a thrown error. We then re-run the lookup and apply our update
+  // against the row the concurrent request created, giving the
+  // caller the same "last writer wins" semantics as the no-race
+  // path without needing to surface raw DB errors.
+  const insertedRows = await db
+    .insert(profiles)
+    .values({ wallet, handle, premiumSource, grantedBy, reason })
+    .onConflictDoNothing()
+    .returning();
+
+  if (insertedRows.length > 0) {
+    const r = insertedRows[0];
+    return {
+      id: r.id,
+      wallet: r.wallet,
+      handle: r.handle,
+      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+      grantedBy: r.grantedBy,
+      reason: r.reason,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    };
+  }
+
+  // Race: a concurrent upsert created the row we wanted to insert.
+  // Re-query and update in place. We intentionally do NOT recurse
+  // into `upsertProfile` — recursion would double the lookup + risk
+  // re-entering the merge-conflict branch if the race winner happened
+  // to combine wallet+handle differently than we expected.
+  const [retryByWallet, retryByHandle] = await Promise.all([
+    wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
+    handle ? getProfileByHandle(handle) : Promise.resolve(null),
+  ]);
+  const raceWinner = retryByWallet ?? retryByHandle;
+  if (!raceWinner) {
+    throw new Error(
+      'upsertProfile: insert rejected by unique constraint but row not findable on re-query',
+    );
+  }
+  // Check for merge-conflict across the race: if the concurrent
+  // insert landed with one identity and we wanted the other, we'd
+  // still hit the cross-row merge case we already guard above.
+  if (
+    retryByWallet &&
+    retryByHandle &&
+    retryByWallet.id !== retryByHandle.id
+  ) {
+    throw new MergeConflictError(retryByWallet.id, retryByHandle.id);
+  }
+  return updateProfileInPlace(raceWinner.id, {
+    wallet: wallet ?? raceWinner.wallet,
+    handle: handle ?? raceWinner.handle,
+    premiumSource: premiumSource ?? raceWinner.premiumSource,
+    grantedBy: grantedBy ?? raceWinner.grantedBy,
+    reason: reason ?? raceWinner.reason,
+  });
+}
+
+/**
+ * Shared "UPDATE profiles SET ... RETURNING *" step used by both the
+ * normal update path and the race-recovery path in `upsertProfile`.
+ */
+async function updateProfileInPlace(
+  id: number,
+  patch: {
+    wallet: string | null;
+    handle: string | null;
+    premiumSource: ProfileRow['premiumSource'];
+    grantedBy: string | null;
+    reason: string | null;
+  },
+): Promise<ProfileRow> {
+  const updatedRows = await db
+    .update(profiles)
+    .set({
+      wallet: patch.wallet,
+      handle: patch.handle,
+      premiumSource: patch.premiumSource,
+      grantedBy: patch.grantedBy,
+      reason: patch.reason,
+      updatedAt: new Date(),
+    })
+    .where(eq(profiles.id, id))
+    .returning();
+  // Empty `returning()` means the row we tried to update was
+  // concurrently deleted between the lookup and this write. The
+  // race-recovery path in upsertProfile is the most likely caller
+  // to hit this; surface a named error rather than letting the
+  // destructure blow up as `Cannot read properties of undefined`.
+  if (updatedRows.length === 0) {
+    throw new Error(
+      `updateProfileInPlace: profile ${id} was concurrently deleted`,
+    );
+  }
+  const updated = updatedRows[0];
+  return {
+    id: updated.id,
+    wallet: updated.wallet,
+    handle: updated.handle,
+    premiumSource: updated.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: updated.grantedBy,
+    reason: updated.reason,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+  };
 }
 
 /**
