@@ -61,7 +61,10 @@ export async function POST(req: Request): Promise<NextResponse> {
       sessionId,
       wallet: wallet ?? '',
     },
-    success_url: `${SITE_URL}/premium/success?session_id={CHECKOUT_SESSION_ID}`,
+    // Include wallet in the success URL so the success page can poll
+    // /api/premium/[wallet] for wallet-connected buyers (who don't get
+    // a session-premium KV key — their premium is in premium_users).
+    success_url: `${SITE_URL}/premium/success?session_id={CHECKOUT_SESSION_ID}${wallet ? `&wallet=${wallet}` : ''}`,
     cancel_url: `${SITE_URL}/?premium=cancelled`,
   });
 

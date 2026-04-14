@@ -1,43 +1,43 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Diamond, CircleNotch } from '@phosphor-icons/react';
+import { isValidAddress } from '@/lib/address';
 
-/**
- * Post-Stripe redirect landing page.
- *
- * Stripe redirects here after checkout with `?session_id=cs_...`.
- * We poll `/api/premium/session` until the webhook has fired and set
- * the session-premium key in Upstash (typically < 2s). Once confirmed,
- * we auto-redirect back to the game so the user lands with premium
- * already visible — no stale gate on return.
- *
- * Falls back to a manual "Back to puzzle" link after 10s in case the
- * webhook is delayed or the session key takes longer than expected.
- */
 export const dynamic = 'force-dynamic';
 
-export default function PremiumSuccessPage() {
+/**
+ * Inner component that reads search params — must be wrapped in Suspense
+ * because useSearchParams() suspends during static rendering in Next 14.
+ */
+function SuccessInner() {
   const router = useRouter();
+  const params = useSearchParams();
+  const walletParam = params.get('wallet');
+  const wallet = walletParam && isValidAddress(walletParam) ? walletParam : null;
+
   const [confirmed, setConfirmed] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
-    const MAX_ATTEMPTS = 10; // 10 × 1s = 10s max wait
+    const MAX_ATTEMPTS = 10;
+
+    // Wallet-connected buyers: webhook writes premium_users, not a session
+    // key. Poll the wallet endpoint instead so confirmation always works.
+    const pollUrl = wallet ? `/api/premium/${wallet}` : '/api/premium/session';
 
     const poll = async () => {
       if (cancelled) return;
       try {
-        const res = await fetch('/api/premium/session');
+        const res = await fetch(pollUrl);
         if (res.ok) {
           const data = (await res.json()) as { premium?: boolean };
           if (data.premium) {
             if (!cancelled) {
               setConfirmed(true);
-              // Brief pause so the user sees the success state, then go.
               setTimeout(() => { if (!cancelled) router.push('/'); }, 800);
             }
             return;
@@ -56,7 +56,7 @@ export default function PremiumSuccessPage() {
 
     poll();
     return () => { cancelled = true; };
-  }, [router]);
+  }, [router, wallet]);
 
   return (
     <main className="flex-1 flex flex-col items-center justify-center px-4 py-12 gap-4 text-center">
@@ -83,5 +83,20 @@ export default function PremiumSuccessPage() {
         </a>
       )}
     </main>
+  );
+}
+
+export default function PremiumSuccessPage() {
+  return (
+    <Suspense fallback={
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-12 gap-4 text-center">
+        <div className="w-16 h-16 rounded-full bg-accent/15 text-accent flex items-center justify-center">
+          <CircleNotch className="w-8 h-8 animate-spin" weight="bold" aria-hidden />
+        </div>
+        <h1 className="text-3xl font-black tracking-tight text-gray-900">Confirming payment…</h1>
+      </main>
+    }>
+      <SuccessInner />
+    </Suspense>
   );
 }
