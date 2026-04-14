@@ -1,29 +1,59 @@
 'use client';
 
+import { useState } from 'react';
 import { Diamond } from '@phosphor-icons/react';
 
 interface PremiumGateModalProps {
   open: boolean;
   /** What the user tried to open — shapes the modal headline. */
   feature: 'leaderboard' | 'archive';
+  /**
+   * Wallet address currently bound to this session, or null. When null
+   * the crypto path is disabled (wallet is required for permit signing)
+   * and the fiat path prompts for a handle up front so the buyer still
+   * gets leaderboard presence.
+   */
+  sessionWallet: string | null;
   onClose: () => void;
-  /** CTA is stubbed until M4f wires in the Stripe + permit-burn flows. */
-  onUnlockClick: () => void;
+  /** Fires when the user clicks "Pay with crypto" — parent opens the flow. */
+  onUnlockCrypto: () => void;
+  /**
+   * Fires when the user clicks "Pay with cash". The parent POSTs to
+   * /api/stripe/checkout with the wallet (if any) or handle and redirects
+   * to the returned session URL. A rejected promise surfaces the error
+   * inline inside the modal.
+   */
+  onUnlockFiat: (handle: string | null) => Promise<void> | void;
 }
 
 /**
- * Premium-gate modal. Shown when a non-premium user taps the Leaderboard
- * or Archive tile. The Unlock CTA is intentionally stubbed for now — the
- * actual Stripe / Apple Pay / permit-burn paths land in M4f, and the
- * skeleton here already has the two pricing tiers laid out so M4f only
- * has to wire the handlers.
+ * Premium-gate modal. Two unlock paths:
+ *
+ *  - **Crypto ($5)** — requires a connected wallet. Clicking opens the
+ *    lazy-loaded PremiumCryptoFlow inside the parent, which quotes the
+ *    oracle, signs an ERC-2612 permit, calls `unlockWithPermit`, and
+ *    asks the server to verify the burn before flipping premium state.
+ *  - **Cash ($6)** — Stripe Checkout. If a wallet is connected, premium
+ *    binds to that wallet. Otherwise we require a handle up front so
+ *    the fiat buyer still gets leaderboard presence; on first wallet
+ *    connect those rows merge.
+ *
+ * The two tiles are click targets, not labels next to an action button.
+ * No "Unlock" button below them — a user who clicked a tile clearly
+ * intends to pay, so an extra confirmation step is friction.
  */
 export function PremiumGateModal({
   open,
   feature,
+  sessionWallet,
   onClose,
-  onUnlockClick,
+  onUnlockCrypto,
+  onUnlockFiat,
 }: PremiumGateModalProps) {
+  const [handle, setHandle] = useState('');
+  const [fiatSubmitting, setFiatSubmitting] = useState(false);
+  const [fiatError, setFiatError] = useState<string | null>(null);
+
   if (!open) return null;
 
   const headline =
@@ -32,6 +62,28 @@ export function PremiumGateModal({
     feature === 'leaderboard'
       ? 'Premium unlocks every day’s ranked leaderboard — see who solved fastest, who went unassisted, and how you stack up.'
       : 'Premium unlocks the full puzzle archive — replay any past day and climb its leaderboard.';
+
+  const needsHandle = !sessionWallet;
+  const trimmedHandle = handle.trim();
+  const handleValid = /^[A-Za-z0-9_\-]{1,32}$/.test(trimmedHandle);
+
+  const handleFiatClick = async () => {
+    setFiatError(null);
+    if (needsHandle && !handleValid) {
+      setFiatError('Pick a handle (1–32 chars, letters/numbers/_/-).');
+      return;
+    }
+    setFiatSubmitting(true);
+    try {
+      await onUnlockFiat(needsHandle ? trimmedHandle : null);
+    } catch (err) {
+      setFiatError(err instanceof Error ? err.message : 'Checkout failed');
+      setFiatSubmitting(false);
+    }
+    // On success the parent redirects to Stripe — we deliberately leave
+    // the spinner spinning rather than reset, so a fast redirect doesn't
+    // flash "idle" state.
+  };
 
   return (
     <div
@@ -83,31 +135,64 @@ export function PremiumGateModal({
           <Benefit>Streak protection + unassisted mode</Benefit>
         </ul>
 
-        <div className="mt-5 grid grid-cols-2 gap-2.5">
-          <PriceTile
-            label="Pay with crypto ($WORD)"
-            price="$5"
-            note="One tap, onchain"
-            primary
-          />
-          <PriceTile
-            label="Pay with cash (Stripe)"
-            price="$6"
-            note="Card &amp; Apple Pay"
-          />
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={onUnlockCrypto}
+            disabled={!sessionWallet}
+            className="rounded-md border-2 border-brand bg-brand-50 px-3 py-3 text-left hover:bg-brand-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title={sessionWallet ? undefined : 'Connect a wallet first'}
+          >
+            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              Pay with crypto ($WORD)
+            </div>
+            <div className="text-xl font-black text-gray-900 tabular-nums mt-0.5">$5</div>
+            <div className="text-[11px] font-medium text-gray-500 mt-0.5">
+              {sessionWallet ? 'One tap, onchain' : 'Connect wallet first'}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleFiatClick}
+            disabled={fiatSubmitting}
+            className="rounded-md border-2 border-gray-200 bg-white px-3 py-3 text-left hover:border-gray-300 hover:bg-gray-50 disabled:opacity-60 transition-colors"
+          >
+            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              Pay with cash (Stripe)
+            </div>
+            <div className="text-xl font-black text-gray-900 tabular-nums mt-0.5">$6</div>
+            <div className="text-[11px] font-medium text-gray-500 mt-0.5">
+              {fiatSubmitting ? 'Opening checkout…' : 'Card & Apple Pay'}
+            </div>
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={onUnlockClick}
-          className="btn-primary w-full mt-5"
-          disabled
-          title="Unlock flow ships with M4f"
-        >
-          Unlock soon
-        </button>
-        <p className="text-[11px] font-medium text-gray-400 text-center mt-2">
-          Checkout lands shortly. One-time, no subscription.
+        {needsHandle && (
+          <div className="mt-4">
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+              Pick a handle for the leaderboard
+            </label>
+            <input
+              type="text"
+              value={handle}
+              onChange={(e) => setHandle(e.target.value)}
+              placeholder="alice"
+              maxLength={32}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Required for cash checkout. Connect a wallet to skip this step.
+            </p>
+          </div>
+        )}
+
+        {fiatError && (
+          <p className="text-[11px] font-semibold text-error-700 mt-2">{fiatError}</p>
+        )}
+
+        <p className="text-[11px] font-medium text-gray-400 text-center mt-3">
+          One-time, no subscription.
         </p>
       </div>
     </div>
@@ -120,33 +205,5 @@ function Benefit({ children }: { children: React.ReactNode }) {
       <span className="text-brand font-bold mt-0.5">✓</span>
       <span>{children}</span>
     </li>
-  );
-}
-
-function PriceTile({
-  label,
-  price,
-  note,
-  primary = false,
-}: {
-  label: string;
-  price: string;
-  note: string;
-  primary?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-md border-2 px-3 py-2.5 ${
-        primary ? 'border-brand bg-brand-50' : 'border-gray-200 bg-white'
-      }`}
-    >
-      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-        {label}
-      </div>
-      <div className="text-xl font-black text-gray-900 tabular-nums mt-0.5">
-        {price}
-      </div>
-      <div className="text-[11px] font-medium text-gray-500 mt-0.5">{note}</div>
-    </div>
   );
 }

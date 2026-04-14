@@ -943,6 +943,112 @@ export async function getRecentPremiumGrants(limit = 50): Promise<PremiumGrantRo
 }
 
 /**
+ * Record a paid premium unlock from the crypto path (direct permit-burn).
+ * Called by `/api/premium/verify` after the server independently confirms
+ * the `UnlockedWithBurn` event on the GriddlePremium contract. Idempotent
+ * on wallet — a replayed verify re-runs the same upsert with the same
+ * txHash and ends up at identical state.
+ */
+export async function recordCryptoUnlock(
+  wallet: string,
+  txHash: string,
+): Promise<void> {
+  const normalized = wallet.toLowerCase();
+  await db
+    .insert(premiumUsers)
+    .values({
+      wallet: normalized,
+      txHash,
+      source: 'crypto',
+      grantedBy: null,
+      reason: null,
+      stripeSessionId: null,
+    })
+    .onConflictDoUpdate({
+      target: premiumUsers.wallet,
+      set: {
+        txHash,
+        source: 'crypto',
+        grantedBy: null,
+        reason: null,
+        unlockedAt: new Date(),
+      },
+    });
+
+  // Mirror into profiles so the leaderboard / archive reads can eventually
+  // resolve premium status by handle as well. Intentionally a fire-and-
+  // forget pattern from the caller's point of view — if the profile
+  // upsert races another writer, the error is surfaced here and retried
+  // at the verify endpoint level, not silently swallowed.
+  await upsertProfile({ wallet: normalized, premiumSource: 'crypto' });
+}
+
+/**
+ * Record a paid premium unlock from the fiat path (Stripe checkout).
+ * Called by the `checkout.session.completed` webhook after signature
+ * verification. `stripeSessionId` is the idempotency key — a replayed
+ * webhook matches the partial unique index on `stripe_session_id` and
+ * no-ops instead of double-granting.
+ *
+ * Both `wallet` and `handle` are optional here but at least one must be
+ * present (validated at the caller). If a wallet is present the grant
+ * lands in `premium_users` keyed on that wallet; if only a handle is
+ * present it lands in `profiles` with `premium_source='fiat'` and the
+ * wallet-keyed read path will pick it up once the player connects.
+ */
+export interface RecordFiatUnlockInput {
+  stripeSessionId: string;
+  wallet?: string | null;
+  handle?: string | null;
+}
+
+export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<void> {
+  const wallet = normalizeIdentity(input.wallet);
+  const handle = normalizeIdentity(input.handle);
+  if (!wallet && !handle) {
+    throw new Error('recordFiatUnlock requires at least one of wallet or handle');
+  }
+
+  if (wallet) {
+    const normalizedWallet = wallet.toLowerCase();
+    // Wallet path: insert into premium_users with stripe_session_id set.
+    // Idempotency has two layers:
+    //   1. The partial unique index on stripe_session_id means a webhook
+    //      replay for the same session id can't create a duplicate row.
+    //   2. onConflictDoUpdate targeting wallet handles the rare case
+    //      where the same wallet already has a row from a prior unlock —
+    //      we refresh it to reflect the newer fiat purchase.
+    await db
+      .insert(premiumUsers)
+      .values({
+        wallet: normalizedWallet,
+        txHash: null,
+        source: 'fiat',
+        grantedBy: null,
+        reason: null,
+        stripeSessionId: input.stripeSessionId,
+      })
+      .onConflictDoUpdate({
+        target: premiumUsers.wallet,
+        set: {
+          txHash: null,
+          source: 'fiat',
+          grantedBy: null,
+          reason: null,
+          stripeSessionId: input.stripeSessionId,
+          unlockedAt: new Date(),
+        },
+      });
+  }
+
+  await upsertProfile({
+    wallet: wallet ?? undefined,
+    handle: handle ?? undefined,
+    premiumSource: 'fiat',
+  });
+}
+
+/**
  * Fetch the loaded_at timestamp for a (session, puzzle) pair. Returns
  * null if the session never called /api/puzzle/today for this puzzle
  * before submitting a solve.

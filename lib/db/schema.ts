@@ -72,14 +72,29 @@ export const solves = pgTable(
  * window, so the hash isn't known at unlock time. `grantedBy` + `reason`
  * carry the audit trail for admin grants; they're null for paid unlocks.
  */
-export const premiumUsers = pgTable('premium_users', {
-  wallet: varchar('wallet', { length: 42 }).primaryKey(),
-  unlockedAt: timestamp('unlocked_at').defaultNow().notNull(),
-  txHash: varchar('tx_hash', { length: 66 }),
-  source: varchar('source', { length: 16 }).default('crypto').notNull(),
-  grantedBy: varchar('granted_by', { length: 42 }),
-  reason: varchar('reason', { length: 200 }),
-});
+export const premiumUsers = pgTable(
+  'premium_users',
+  {
+    wallet: varchar('wallet', { length: 42 }).primaryKey(),
+    unlockedAt: timestamp('unlocked_at').defaultNow().notNull(),
+    txHash: varchar('tx_hash', { length: 66 }),
+    source: varchar('source', { length: 16 }).default('crypto').notNull(),
+    grantedBy: varchar('granted_by', { length: 42 }),
+    reason: varchar('reason', { length: 200 }),
+    /**
+     * Stripe checkout session id for the fiat path. Used as an idempotency
+     * key on the webhook — a replayed `checkout.session.completed` event
+     * matches the existing row and no-ops instead of double-granting.
+     * Null on crypto and admin_grant rows.
+     */
+    stripeSessionId: varchar('stripe_session_id', { length: 128 }),
+  },
+  (t) => ({
+    stripeSessionIdx: uniqueIndex('premium_users_stripe_session_idx')
+      .on(t.stripeSessionId)
+      .where(sql`${t.stripeSessionId} is not null`),
+  }),
+);
 
 export const streaks = pgTable('streaks', {
   wallet: varchar('wallet', { length: 42 }).primaryKey(),
