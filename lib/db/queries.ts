@@ -456,7 +456,11 @@ export interface ProfileRow {
   id: number;
   wallet: string | null;
   handle: string | null;
-  premiumSource: 'crypto' | 'fiat' | null;
+  premiumSource: 'crypto' | 'fiat' | 'admin_grant' | null;
+  /** Admin wallet that granted premium (only set for `premiumSource='admin_grant'`). */
+  grantedBy: string | null;
+  /** Optional operator note (only set for `premiumSource='admin_grant'`). */
+  reason: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -479,7 +483,9 @@ export async function getProfileByWallet(wallet: string): Promise<ProfileRow | n
     id: r.id,
     wallet: r.wallet,
     handle: r.handle,
-    premiumSource: r.premiumSource as 'crypto' | 'fiat' | null,
+    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: r.grantedBy,
+    reason: r.reason,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -501,7 +507,9 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
     id: r.id,
     wallet: r.wallet,
     handle: r.handle,
-    premiumSource: r.premiumSource as 'crypto' | 'fiat' | null,
+    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: r.grantedBy,
+    reason: r.reason,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -530,7 +538,11 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
 export interface UpsertProfileInput {
   wallet?: string | null;
   handle?: string | null;
-  premiumSource?: 'crypto' | 'fiat' | null;
+  premiumSource?: 'crypto' | 'fiat' | 'admin_grant' | null;
+  /** Admin wallet, only for `premiumSource='admin_grant'`. Audit trail. */
+  grantedBy?: string | null;
+  /** Operator note, only for `premiumSource='admin_grant'`. */
+  reason?: string | null;
 }
 
 /**
@@ -569,6 +581,8 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   const wallet = walletNorm ? walletNorm.toLowerCase() : null;
   const handle = normalizeIdentity(input.handle);
   const premiumSource = input.premiumSource ?? null;
+  const grantedBy = input.grantedBy ? input.grantedBy.toLowerCase() : null;
+  const reason = input.reason ?? null;
 
   if (wallet === null && handle === null) {
     throw new Error('upsertProfile requires at least one of wallet or handle');
@@ -611,6 +625,8 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
       wallet: wallet ?? existing.wallet,
       handle: handle ?? existing.handle,
       premiumSource: premiumSource ?? existing.premiumSource,
+      grantedBy: grantedBy ?? existing.grantedBy,
+      reason: reason ?? existing.reason,
     });
   }
 
@@ -628,7 +644,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // path without needing to surface raw DB errors.
   const insertedRows = await db
     .insert(profiles)
-    .values({ wallet, handle, premiumSource })
+    .values({ wallet, handle, premiumSource, grantedBy, reason })
     .onConflictDoNothing()
     .returning();
 
@@ -638,7 +654,9 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
       id: r.id,
       wallet: r.wallet,
       handle: r.handle,
-      premiumSource: r.premiumSource as 'crypto' | 'fiat' | null,
+      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+      grantedBy: r.grantedBy,
+      reason: r.reason,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };
@@ -673,6 +691,8 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
     wallet: wallet ?? raceWinner.wallet,
     handle: handle ?? raceWinner.handle,
     premiumSource: premiumSource ?? raceWinner.premiumSource,
+    grantedBy: grantedBy ?? raceWinner.grantedBy,
+    reason: reason ?? raceWinner.reason,
   });
 }
 
@@ -685,7 +705,9 @@ async function updateProfileInPlace(
   patch: {
     wallet: string | null;
     handle: string | null;
-    premiumSource: 'crypto' | 'fiat' | null;
+    premiumSource: ProfileRow['premiumSource'];
+    grantedBy: string | null;
+    reason: string | null;
   },
 ): Promise<ProfileRow> {
   const [updated] = await db
@@ -694,6 +716,8 @@ async function updateProfileInPlace(
       wallet: patch.wallet,
       handle: patch.handle,
       premiumSource: patch.premiumSource,
+      grantedBy: patch.grantedBy,
+      reason: patch.reason,
       updatedAt: new Date(),
     })
     .where(eq(profiles.id, id))
@@ -702,7 +726,9 @@ async function updateProfileInPlace(
     id: updated.id,
     wallet: updated.wallet,
     handle: updated.handle,
-    premiumSource: updated.premiumSource as 'crypto' | 'fiat' | null,
+    premiumSource: updated.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: updated.grantedBy,
+    reason: updated.reason,
     createdAt: updated.createdAt,
     updatedAt: updated.updatedAt,
   };

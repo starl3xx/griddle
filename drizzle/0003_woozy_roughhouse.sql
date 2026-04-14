@@ -3,6 +3,8 @@ CREATE TABLE "profiles" (
 	"wallet" varchar(42),
 	"handle" varchar(32),
 	"premium_source" varchar(16),
+	"granted_by" varchar(42),
+	"reason" varchar(200),
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "profiles_wallet_or_handle_required" CHECK ("profiles"."wallet" is not null or "profiles"."handle" is not null),

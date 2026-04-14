@@ -1,5 +1,5 @@
 {
-  "id": "9d10aa77-c1a5-41bf-8f44-d39c022a51a7",
+  "id": "d9264565-2fc7-43df-9ddb-883202112467",
   "prevId": "5da77468-92e6-4b99-8987-ae254010dbc6",
   "version": "7",
   "dialect": "postgresql",
@@ -127,6 +127,18 @@
         "premium_source": {
           "name": "premium_source",
           "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "granted_by": {
+          "name": "granted_by",
+          "type": "varchar(42)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": false
         },

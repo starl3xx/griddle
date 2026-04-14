@@ -128,7 +128,14 @@ export const profiles = pgTable(
     id: serial('id').primaryKey(),
     wallet: varchar('wallet', { length: 42 }),
     handle: varchar('handle', { length: 32 }),
-    premiumSource: varchar('premium_source', { length: 16 }), // 'crypto' | 'fiat' | null
+    // 'crypto' | 'fiat' | 'admin_grant' | null
+    premiumSource: varchar('premium_source', { length: 16 }),
+    // For admin_grant rows, the admin wallet that performed the grant
+    // and the operator's optional free-form note. Null on all other
+    // rows. Paid unlocks (crypto / fiat) carry their audit in the
+    // `premium_users` table instead, so there's no duplication.
+    grantedBy: varchar('granted_by', { length: 42 }),
+    reason: varchar('reason', { length: 200 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
