@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Diamond } from '@phosphor-icons/react/dist/ssr';
 import { getDailyLeaderboard } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatMs } from '@/lib/format';
@@ -58,11 +59,11 @@ export default async function LeaderboardPage({
                 </span>
                 {e.unassisted && (
                   <span
-                    className="text-accent text-sm font-bold mr-2"
+                    className="text-accent mr-2 inline-flex items-center"
                     title="Unassisted solve"
                     aria-label="unassisted"
                   >
-                    ◆
+                    <Diamond className="w-3.5 h-3.5" weight="fill" aria-hidden />
                   </span>
                 )}
                 <span className="text-sm font-bold text-gray-900 tabular-nums">

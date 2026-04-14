@@ -1,6 +1,6 @@
 'use client';
 
-import { Trophy, Archive } from '@phosphor-icons/react';
+import { Trophy, Archive, Diamond } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
 
 interface HomeTilesProps {
@@ -65,11 +65,11 @@ function Tile({ label, onClick, locked = false, children }: TileProps) {
       </span>
       {locked && (
         <span
-          className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-accent/15 text-accent flex items-center justify-center text-[9px]"
+          className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-accent/15 text-accent flex items-center justify-center"
           aria-label="Premium"
           title="Premium"
         >
-          ◆
+          <Diamond className="w-2.5 h-2.5" weight="fill" aria-hidden />
         </span>
       )}
     </button>
