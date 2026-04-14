@@ -206,6 +206,12 @@ export function useGriddle({
           // half-solved state with no SolveModal.
           if (verdict.solved && verdict.word != null) {
             setSolved(true);
+            // Clear the mid-attempt found-words strip on confirmed solve
+            // so the post-solve grid (which stays visible while the
+            // SolveModal is up, and still visible if the player closes
+            // the modal without Play Again) isn't cluttered with the
+            // leftover shorter-word pills.
+            setFoundWords([]);
             onSolved?.({ ...payload, unassisted, word: verdict.word });
           } else {
             triggerShake();
