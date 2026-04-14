@@ -820,6 +820,12 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
       .onConflictDoUpdate({
         target: premiumUsers.wallet,
         set: {
+          // Explicitly null txHash on conflict — if this wallet
+          // previously paid with crypto, its tx_hash is stale now
+          // that source flips to 'admin_grant'. Leaving the old
+          // hash would leave the audit row internally inconsistent
+          // (claims to be an admin grant, still references a burn tx).
+          txHash: null,
           source: 'admin_grant',
           grantedBy,
           reason,
@@ -844,32 +850,100 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
   return { kind: 'handle', profileId: profile.id, handle: handle as string };
 }
 
-export interface PremiumGrantRow {
-  wallet: string;
-  unlockedAt: Date;
-  source: string;
-  grantedBy: string | null;
-  reason: string | null;
-}
+/**
+ * One row in the admin grant audit list. Grants live in two different
+ * tables depending on identity kind:
+ *   - `premium_users` — grant-by-wallet path
+ *   - `profiles` — grant-by-handle path (no wallet, M4f-facing)
+ *
+ * The discriminated `identity` field lets the audit UI render both
+ * without the client needing to know which table each row came from,
+ * and gives handle grants a real audit presence instead of getting
+ * dropped on the floor by a wallet-only query.
+ *
+ * Note: grant-by-handle rows don't carry `grantedBy` or `reason`
+ * because `profiles` has no such columns — adding them would couple
+ * the profiles table to admin-grant audit data that belongs in its
+ * own table. For now the handle-grant audit row is purely "this
+ * handle became admin_grant premium at time T". A future iteration
+ * can introduce a dedicated `admin_grants` table if the audit story
+ * needs more depth.
+ */
+export type PremiumGrantRow =
+  | {
+      identity: { kind: 'wallet'; wallet: string };
+      unlockedAt: Date;
+      source: string;
+      grantedBy: string | null;
+      reason: string | null;
+    }
+  | {
+      identity: { kind: 'handle'; handle: string };
+      unlockedAt: Date;
+      source: 'admin_grant';
+      grantedBy: null;
+      reason: null;
+    };
 
 /**
- * Recent admin grants for the /admin grant tab. Filters to
- * `source='admin_grant'` so paid unlocks don't clutter the audit list.
+ * Recent admin grants for the `/admin` grant tab. Unions the two
+ * storage sources, filters to `source='admin_grant'` so paid unlocks
+ * don't clutter the list, and returns rows newest-first. Uses two
+ * DB queries rather than a SQL UNION so each side can stay on its
+ * own Drizzle builder without raw SQL.
  */
 export async function getRecentPremiumGrants(limit = 50): Promise<PremiumGrantRow[]> {
-  const rows = await db
-    .select({
-      wallet: premiumUsers.wallet,
-      unlockedAt: premiumUsers.unlockedAt,
-      source: premiumUsers.source,
-      grantedBy: premiumUsers.grantedBy,
-      reason: premiumUsers.reason,
-    })
-    .from(premiumUsers)
-    .where(eq(premiumUsers.source, 'admin_grant'))
-    .orderBy(sql`${premiumUsers.unlockedAt} DESC`)
-    .limit(limit);
-  return rows;
+  const [walletRows, handleRows] = await Promise.all([
+    db
+      .select({
+        wallet: premiumUsers.wallet,
+        unlockedAt: premiumUsers.unlockedAt,
+        source: premiumUsers.source,
+        grantedBy: premiumUsers.grantedBy,
+        reason: premiumUsers.reason,
+      })
+      .from(premiumUsers)
+      .where(eq(premiumUsers.source, 'admin_grant'))
+      .orderBy(sql`${premiumUsers.unlockedAt} DESC`)
+      .limit(limit),
+    db
+      .select({
+        handle: profiles.handle,
+        unlockedAt: profiles.updatedAt,
+      })
+      .from(profiles)
+      .where(
+        and(eq(profiles.premiumSource, 'admin_grant'), isNotNull(profiles.handle)),
+      )
+      .orderBy(sql`${profiles.updatedAt} DESC`)
+      .limit(limit),
+  ]);
+
+  const merged: PremiumGrantRow[] = [
+    ...walletRows.map(
+      (r): PremiumGrantRow => ({
+        identity: { kind: 'wallet', wallet: r.wallet },
+        unlockedAt: r.unlockedAt,
+        source: r.source,
+        grantedBy: r.grantedBy,
+        reason: r.reason,
+      }),
+    ),
+    ...handleRows
+      .filter((r): r is { handle: string; unlockedAt: Date } => r.handle !== null)
+      .map(
+        (r): PremiumGrantRow => ({
+          identity: { kind: 'handle', handle: r.handle },
+          unlockedAt: r.unlockedAt,
+          source: 'admin_grant',
+          grantedBy: null,
+          reason: null,
+        }),
+      ),
+  ];
+
+  merged.sort((a, b) => b.unlockedAt.getTime() - a.unlockedAt.getTime());
+  return merged.slice(0, limit);
 }
 
 /**

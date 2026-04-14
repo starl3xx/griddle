@@ -20,13 +20,24 @@ import {
 } from '@/components/ui/table';
 import { Crown, Gift, Loader2, RefreshCw } from 'lucide-react';
 
-interface PremiumGrantRow {
-  wallet: string;
-  unlockedAt: string;
-  source: string;
-  grantedBy: string | null;
-  reason: string | null;
-}
+// Client-side mirror of the server union in `lib/db/queries.ts`.
+// `unlockedAt` is a string here because JSON serialization flattens
+// Date → ISO string on the wire; all other fields match.
+type PremiumGrantRow =
+  | {
+      identity: { kind: 'wallet'; wallet: string };
+      unlockedAt: string;
+      source: string;
+      grantedBy: string | null;
+      reason: string | null;
+    }
+  | {
+      identity: { kind: 'handle'; handle: string };
+      unlockedAt: string;
+      source: 'admin_grant';
+      grantedBy: null;
+      reason: null;
+    };
 
 type IdentityMode = 'wallet' | 'handle';
 
@@ -265,30 +276,37 @@ export function GrantTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>When</TableHead>
-                  <TableHead>Wallet</TableHead>
+                  <TableHead>Identity</TableHead>
                   <TableHead>Granted by</TableHead>
                   <TableHead>Reason</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {grants.map((g) => (
-                  <TableRow key={`${g.wallet}-${g.unlockedAt}`}>
-                    <TableCell className="font-mono text-xs whitespace-nowrap">
-                      {new Date(g.unlockedAt).toISOString().replace('T', ' ').slice(0, 19)}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {g.wallet.slice(0, 6)}…{g.wallet.slice(-4)}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-gray-500">
-                      {g.grantedBy
-                        ? `${g.grantedBy.slice(0, 6)}…${g.grantedBy.slice(-4)}`
-                        : '—'}
-                    </TableCell>
-                    <TableCell className="text-xs text-gray-600 max-w-xs truncate">
-                      {g.reason ?? '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {grants.map((g) => {
+                  const identityLabel =
+                    g.identity.kind === 'wallet'
+                      ? `${g.identity.wallet.slice(0, 6)}…${g.identity.wallet.slice(-4)}`
+                      : `@${g.identity.handle}`;
+                  const rowKey = `${g.identity.kind}-${
+                    g.identity.kind === 'wallet' ? g.identity.wallet : g.identity.handle
+                  }-${g.unlockedAt}`;
+                  return (
+                    <TableRow key={rowKey}>
+                      <TableCell className="font-mono text-xs whitespace-nowrap">
+                        {new Date(g.unlockedAt).toISOString().replace('T', ' ').slice(0, 19)}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{identityLabel}</TableCell>
+                      <TableCell className="font-mono text-xs text-gray-500">
+                        {g.grantedBy
+                          ? `${g.grantedBy.slice(0, 6)}…${g.grantedBy.slice(-4)}`
+                          : '—'}
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-600 max-w-xs truncate">
+                        {g.reason ?? '—'}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
