@@ -112,6 +112,15 @@ export const leaderboard = pgTable(
  *
  * Handle uniqueness is case-insensitive — `Alice` and `alice` would
  * collide. Enforced with a `uniqueIndex` on `lower(handle)`.
+ *
+ * Wallet canonicalization: Ethereum addresses are case-insensitive
+ * (EIP-55 mixed-case is a display checksum, not identity), so
+ * storing `0xABC…` and `0xabc…` as separate rows would split a
+ * single player's identity. The application lowercases on write,
+ * but we also enforce it at the DB level with a CHECK so any
+ * future write path — direct SQL, bulk import, manual fix — can't
+ * bypass the invariant. Reads then compare against the canonical
+ * lowercase form with no extra normalization needed at query time.
  */
 export const profiles = pgTable(
   'profiles',
@@ -133,6 +142,10 @@ export const profiles = pgTable(
     walletOrHandleRequired: check(
       'profiles_wallet_or_handle_required',
       sql`${t.wallet} is not null or ${t.handle} is not null`,
+    ),
+    walletLowercase: check(
+      'profiles_wallet_lowercase',
+      sql`${t.wallet} is null or ${t.wallet} = lower(${t.wallet})`,
     ),
   }),
 );

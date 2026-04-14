@@ -1,5 +1,5 @@
 {
-  "id": "a7f0a368-f41e-462b-9bd9-05164ea73112",
+  "id": "9d10aa77-c1a5-41bf-8f44-d39c022a51a7",
   "prevId": "5da77468-92e6-4b99-8987-ae254010dbc6",
   "version": "7",
   "dialect": "postgresql",
@@ -187,6 +187,10 @@
         "profiles_wallet_or_handle_required": {
           "name": "profiles_wallet_or_handle_required",
           "value": "\"profiles\".\"wallet\" is not null or \"profiles\".\"handle\" is not null"
+        },
+        "profiles_wallet_lowercase": {
+          "name": "profiles_wallet_lowercase",
+          "value": "\"profiles\".\"wallet\" is null or \"profiles\".\"wallet\" = lower(\"profiles\".\"wallet\")"
         }
       },
       "isRLSEnabled": false
