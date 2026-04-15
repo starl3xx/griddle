@@ -117,9 +117,12 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     // another user could immediately claim it, and the leaderboard uses
     // handle as display identity. Validate the slug shape either way.
     const handle = body.handle.trim().toLowerCase().slice(0, 32);
-    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(handle) || handle.length < 2) {
+    // Lowercase letters, digits, underscores. No hyphens, no unicode,
+    // no special characters. Mirrors SettingsModal's client-side check
+    // and the slugifier in /api/profile/create.
+    if (!/^[a-z0-9_]+$/.test(handle) || handle.length < 2) {
       return NextResponse.json(
-        { error: 'handle must be 2–32 chars, lowercase letters, numbers, or hyphens' },
+        { error: 'handle must be 2–32 chars, lowercase letters, numbers, or underscores' },
         { status: 400 },
       );
     }
