@@ -4,6 +4,8 @@ import { base } from 'viem/chains';
 import { griddlePremiumAbi } from '@/lib/contracts/griddlePremiumAbi';
 import { getGriddlePremiumAddress } from '@/lib/contracts/addresses';
 import { recordCryptoUnlock } from '@/lib/db/queries';
+import { recordFunnelEvent } from '@/lib/funnel/record';
+import { getSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
 
 /**
@@ -131,6 +133,15 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 500 },
     );
   }
+
+  // checkout_completed — idempotency key = tx hash, so client retries
+  // (which are common while waiting for RPC indexing) can't double-
+  // count the unlock in the funnel.
+  const sessionId = await getSessionId();
+  await recordFunnelEvent(
+    { name: 'checkout_completed', method: 'crypto' },
+    { sessionId, wallet, idempotencyKey: `crypto:${txHash}` },
+  );
 
   return NextResponse.json({ premium: true, wallet, txHash });
 }

@@ -17,6 +17,7 @@ import { PremiumGateModal } from '@/components/PremiumGateModal';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
 import { useFarcaster } from '@/lib/farcaster';
+import { trackEvent } from '@/lib/funnel/client';
 import type { SolvePayload } from '@/lib/telemetry';
 
 /**
@@ -268,6 +269,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       } catch {
         // link is best-effort — proceed even on failure so UI updates
       }
+      // Emit profile_identified after the link POST so the server-side
+      // session → wallet binding exists when the event row is written.
+      trackEvent({ name: 'profile_identified', method: 'wallet_connected' });
 
       // Farcaster miniapp: upsert a rich profile using FID + username + pfp.
       // The API auto-merges with any existing wallet profile and binds the
@@ -396,6 +400,8 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const [showCryptoFlow, setShowCryptoFlow] = useState(false);
 
   const handleUnlockCrypto = useCallback(() => {
+    trackEvent({ name: 'upgrade_clicked', method: 'crypto' });
+    trackEvent({ name: 'checkout_started', method: 'crypto' });
     setShowCryptoFlow(true);
   }, []);
 
@@ -406,18 +412,32 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * webhook skip the migration step.
    */
   const handleUnlockFiat = useCallback(async () => {
-    const res = await fetch('/api/stripe/checkout', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ wallet: sessionWallet ?? undefined }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Checkout failed: ${body}`);
+    trackEvent({ name: 'upgrade_clicked', method: 'fiat' });
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ wallet: sessionWallet ?? undefined }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        trackEvent({ name: 'checkout_failed', method: 'fiat', reason: `http_${res.status}` });
+        throw new Error(`Checkout failed: ${body}`);
+      }
+      const data = (await res.json()) as { url?: string };
+      if (!data.url) {
+        trackEvent({ name: 'checkout_failed', method: 'fiat', reason: 'no_url' });
+        throw new Error('Checkout did not return a URL');
+      }
+      // checkout_started fires right before the redirect — the fiat
+      // checkout_completed is emitted server-side from the Stripe
+      // webhook so it's not gated on the user returning to the app.
+      trackEvent({ name: 'checkout_started', method: 'fiat' });
+      window.location.href = data.url;
+    } catch (err) {
+      trackEvent({ name: 'checkout_failed', method: 'fiat', reason: 'exception' });
+      throw err;
     }
-    const data = (await res.json()) as { url?: string };
-    if (!data.url) throw new Error('Checkout did not return a URL');
-    window.location.href = data.url;
   }, [sessionWallet]);
 
   const handleCryptoUnlocked = useCallback(
@@ -429,11 +449,19 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     [refreshPremium],
   );
 
-  const handleStatsClick = useCallback(() => setShowStats(true), []);
+  const handleStatsClick = useCallback(() => {
+    // variant depends on current identity state — sessionWallet or
+    // premium both imply "account"; premium adds a premium-state tag
+    // so we can see how often each group opens stats.
+    const variant = premium ? 'premium' : sessionWallet ? 'account' : 'anon';
+    trackEvent({ name: 'stats_opened', variant });
+    setShowStats(true);
+  }, [premium, sessionWallet]);
   const handleLeaderboardClick = useCallback(() => {
     if (premium) {
       router.push(`/leaderboard/${initialPuzzle.dayNumber}`);
     } else {
+      trackEvent({ name: 'premium_gate_shown', feature: 'leaderboard' });
       setPremiumGate('leaderboard');
     }
   }, [premium, router, initialPuzzle.dayNumber]);
@@ -441,6 +469,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     if (premium) {
       router.push('/archive');
     } else {
+      trackEvent({ name: 'premium_gate_shown', feature: 'archive' });
       setPremiumGate('archive');
     }
   }, [premium, router]);
@@ -547,7 +576,11 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         onToggleDark={toggleDark}
         onClose={() => setShowStats(false)}
         onConnect={() => { setShowStats(false); triggerConnect(); }}
-        onUpgrade={() => { setShowStats(false); setPremiumGate('premium'); }}
+        onUpgrade={() => {
+          setShowStats(false);
+          trackEvent({ name: 'premium_gate_shown', feature: 'premium' });
+          setPremiumGate('premium');
+        }}
         onRefreshPremium={() => { if (sessionWallet) void refreshPremium(sessionWallet); }}
         pfpUrl={pfpUrl}
         displayName={displayName}

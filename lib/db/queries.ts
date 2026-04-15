@@ -9,6 +9,7 @@ import {
   profiles,
   userSettings,
   magicLinks,
+  funnelEvents,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
@@ -1580,5 +1581,142 @@ export async function upsertUserSettings(
     unassistedModeEnabled: r.unassistedModeEnabled,
     darkModeEnabled: r.darkModeEnabled,
     updatedAt: r.updatedAt,
+  };
+}
+
+// ─── Funnel telemetry rollups ──────────────────────────────────────
+
+export type FunnelWindow = '24h' | '7d' | '30d' | 'all';
+
+/**
+ * Per-stage stats for the admin Funnel tab. `sessions` is distinct
+ * sessions that fired the event at least once in the window — the
+ * user-count denominator for conversion rates. `total` is the raw
+ * event count (useful to spot stuck retry loops, etc.).
+ */
+export interface FunnelStageRow {
+  eventName: string;
+  sessions: number;
+  total: number;
+}
+
+export interface FunnelBreakdownRow {
+  eventName: string;
+  bucket: string;
+  sessions: number;
+  total: number;
+}
+
+export interface FunnelStats {
+  window: FunnelWindow;
+  stages: FunnelStageRow[];
+  /**
+   * Event × metadata-bucket breakdown. Lets the Funnel tab split
+   * `upgrade_clicked` and `checkout_*` by method, `premium_gate_shown`
+   * by feature, etc., without re-scanning the table per dimension.
+   */
+  breakdown: FunnelBreakdownRow[];
+  /** Median ms from upgrade_clicked to checkout_completed, per method. */
+  medianTimeToConvertMs: { method: 'crypto' | 'fiat'; ms: number | null }[];
+}
+
+/** SQL interval string for a FunnelWindow. `all` returns null = no bound. */
+function windowIntervalSql(window: FunnelWindow) {
+  switch (window) {
+    case '24h': return sql`now() - interval '1 day'`;
+    case '7d':  return sql`now() - interval '7 days'`;
+    case '30d': return sql`now() - interval '30 days'`;
+    case 'all': return null;
+  }
+}
+
+export async function getFunnelStats(window: FunnelWindow = '7d'): Promise<FunnelStats> {
+  const since = windowIntervalSql(window);
+  const timeBound = since
+    ? sql`${funnelEvents.createdAt} >= ${since}`
+    : sql`true`;
+
+  // Stage rollup — distinct sessions and total events per event_name.
+  const stageRows = await db
+    .select({
+      eventName: funnelEvents.eventName,
+      sessions: sql<number>`count(distinct ${funnelEvents.sessionId})::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(funnelEvents)
+    .where(timeBound)
+    .groupBy(funnelEvents.eventName);
+
+  // Breakdown — second group key is the metadata discriminator we care
+  // about (`method` for upgrade/checkout, `feature` for gates,
+  // `variant` for stats_opened). Pull both keys in one pass and coalesce
+  // to a single "bucket" column for a flat shape on the wire.
+  const breakdownRows = await db
+    .select({
+      eventName: funnelEvents.eventName,
+      bucket: sql<string>`coalesce(
+        ${funnelEvents.metadata}->>'method',
+        ${funnelEvents.metadata}->>'feature',
+        ${funnelEvents.metadata}->>'variant',
+        ${funnelEvents.metadata}->>'reason',
+        'n/a'
+      )`,
+      sessions: sql<number>`count(distinct ${funnelEvents.sessionId})::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(funnelEvents)
+    .where(timeBound)
+    .groupBy(
+      funnelEvents.eventName,
+      sql`coalesce(
+        ${funnelEvents.metadata}->>'method',
+        ${funnelEvents.metadata}->>'feature',
+        ${funnelEvents.metadata}->>'variant',
+        ${funnelEvents.metadata}->>'reason',
+        'n/a'
+      )`,
+    );
+
+  // Median time-to-convert per method. For each session we compute the
+  // gap between its earliest upgrade_clicked and its earliest
+  // checkout_completed of the same method, then take the median via
+  // percentile_cont. Sessions that never converted don't appear — we're
+  // measuring speed, not rate (that's what the stages query is for).
+  const ttcRows = await db.execute<{ method: string; median_ms: number | null }>(sql`
+    WITH paired AS (
+      SELECT
+        uc.session_id,
+        uc.metadata->>'method' AS method,
+        extract(epoch FROM (min(cc.created_at) - min(uc.created_at))) * 1000 AS gap_ms
+      FROM funnel_events uc
+      JOIN funnel_events cc
+        ON cc.session_id = uc.session_id
+       AND cc.event_name = 'checkout_completed'
+       AND cc.metadata->>'method' = uc.metadata->>'method'
+       AND cc.created_at >= uc.created_at
+      WHERE uc.event_name = 'upgrade_clicked'
+        AND ${timeBound}
+      GROUP BY uc.session_id, uc.metadata->>'method'
+    )
+    SELECT method,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY gap_ms)::float AS median_ms
+    FROM paired
+    WHERE gap_ms >= 0
+    GROUP BY method
+  `);
+
+  const ttcArr = Array.isArray(ttcRows) ? ttcRows : ttcRows.rows;
+  const medianTimeToConvertMs: FunnelStats['medianTimeToConvertMs'] = (['crypto', 'fiat'] as const).map(
+    (method) => {
+      const row = ttcArr.find((r) => r.method === method);
+      return { method, ms: row?.median_ms ?? null };
+    },
+  );
+
+  return {
+    window,
+    stages: stageRows,
+    breakdown: breakdownRows,
+    medianTimeToConvertMs,
   };
 }
