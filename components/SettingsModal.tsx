@@ -498,8 +498,19 @@ export function SettingsModal({
               value={profile?.email ?? null}
               verified={!!profile?.emailVerifiedAt}
             />
-            {/* Inline add-email for users who don't have one yet */}
-            {!profile?.email && (
+            {/* Inline add-email flow. Only shown when the user
+                already has a saved profile row (hasIdentity). Gating
+                on hasIdentity (not hasIdentity || sessionWallet)
+                prevents a race where a wallet-only user sees both
+                the Complete-profile form and this email form at the
+                same time, fires the email first, and clicks the
+                magic link before completing the profile — the
+                verify route would then create an email-only profile
+                with no wallet (because no wallet-linked row exists
+                to merge into), orphaning the session wallet. For
+                wallet-only users we show a hint telling them to
+                complete the profile first. */}
+            {hasIdentity && !profile?.email && (
               <div className="space-y-2">
                 {emailSentTo ? (
                   <p className="text-[12px] text-gray-600 dark:text-gray-400 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md px-3 py-2">
@@ -532,6 +543,11 @@ export function SettingsModal({
                   </>
                 )}
               </div>
+            )}
+            {!hasIdentity && sessionWallet && (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                Complete your profile above first, then you can add an email to sign in from other devices.
+              </p>
             )}
 
             <IdentityRow
