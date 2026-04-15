@@ -57,23 +57,27 @@ Connecting a wallet unlocks optional extras: streak tracking, personal archive, 
 
 ## Do I need a wallet to buy Premium?
 
-**No.** You have three ways to create an account and unlock Premium:
+**No.** You have three ways to sign in and unlock Premium:
 
 1. **Connect a wallet** — $5 in $WORD, permit-signed and burned in one transaction
 2. **Apple Pay or card** — $6 via Stripe Checkout, no wallet needed. Your unlock binds to your browser session and automatically migrates to a wallet-keyed record the first time you connect one
 3. **Magic-link email** — drop in your email, click the link we send, and you have a profile immediately. You can pay to upgrade later, or just use it for streak tracking
 
-Each path produces a real profile in our database. The leaderboard shows your handle (or a shortened wallet if you have one) regardless of how you signed up.
+Sign-in and sign-up are the same button on purpose — the magic-link flow is a find-or-create, so existing users get merged back into their profile and new users get one created. Each path produces a real profile in our database. The leaderboard shows your display name (or handle, or a shortened wallet) regardless of how you signed in.
+
+Connected a wallet but never completed your profile? The gear icon shows a **"Complete your profile"** form that pre-fills from your connected wallet and lets you set a display name + avatar in one step. Adding an email after that merges both identities into the same profile row automatically.
 
 ---
 
 ## How does email sign-in work?
 
-Open **Stats** → **Create profile**. Enter your email and optionally a display name. We send you a one-time magic link that expires in 15 minutes. Click it, and you’re signed in on that browser. We rate-limit to 5 magic link emails per hour per address.
+Tap the **gear icon** in the top-right (it becomes your avatar once you upload one) → **Sign in**. Enter your email and optionally a display name. We send you a one-time magic link that expires in 15 minutes. Click it, and you’re signed in on that browser. We rate-limit to 5 magic link emails per hour per address.
+
+The same button handles both new and returning users — the magic-link flow is a find-or-create under the hood, so "Sign in" and "Sign up" are the same button on purpose. If you already have a profile, we merge you back into it. If you don’t, we create one when you verify.
 
 No passwords. No authenticator apps. The token is single-use — once you click it, it’s dead — and we only store a SHA-256 hash of it on our side, never the raw token. Your session binds to your profile in our edge cache with a 1-year TTL, so clearing cookies will make you re-authenticate.
 
-If you opened the link on a different device than the one you submitted from, your display name won’t follow the link (it’s stashed in the original browser’s localStorage). Re-enter it from your Stats panel after you sign in.
+If you opened the link on a different device than the one you submitted from, your display name won’t follow the link (it’s stashed in the original browser’s localStorage). Re-enter it from the Settings gear after you sign in.
 
 ---
 
@@ -131,15 +135,19 @@ Once unlocked, you’re Premium **forever**. No renewals.
 
 ## What settings do I have?
 
-Settings live in your Stats panel (click the **Stats** tile on the home screen). Everyone gets:
+Tap the **gear icon** in the top-right of any screen — it opens your Settings panel. (Once you upload an avatar, the gear becomes your avatar.) Everyone gets:
 
+- **Profile editor** — display name, handle, avatar URL (edits go through `PATCH /api/profile` with live 409 handling on handle collisions)
+- **Sign-in methods** — add an email if you signed up with a wallet; connect a wallet if you signed up with email. Both paths atomically merge into one profile if you later combine identities
 - **Dark mode** toggle — persisted per-wallet when connected, otherwise stored locally
 - **FAQ** link
 
-Premium users additionally get:
+Premium features (**Streak protection** and **Unassisted mode**) appear in the same panel for everyone — non-premium users see them dimmed with a "Premium" badge as a preview of what unlocking gets you:
 
-- **Streak protection** — arm a one-shot save that covers a missed day. 7-day cooldown after use
-- **Unassisted mode** — hide the green/dimmed cell hints during play so the game is pure recall. Solves in unassisted mode earn the **Ace** Wordmark
+- **Streak protection** — arm a one-shot save that covers a missed day. 7-day cooldown after use.
+- **Unassisted mode** — hide the green/dimmed cell hints during play so the game is pure recall. Solves in unassisted mode earn the **Ace** Wordmark.
+
+Stats (the home-tile chart-bar icon) is now a pure read-only dashboard — your streaks, fastest/average solves, and Wordmarks. All editing and settings live in the gear panel above.
 
 ---
 
