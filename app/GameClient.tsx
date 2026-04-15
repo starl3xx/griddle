@@ -370,10 +370,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
       <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
         <header className="text-center">
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900">
+          <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100">
             Griddle
           </h1>
-          <p className="text-sm font-medium text-gray-500 mt-1 tabular-nums flex items-center justify-center gap-1.5">
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1 tabular-nums flex items-center justify-center gap-1.5">
             <span>
               #{initialPuzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
             </span>
@@ -451,6 +451,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         onUpgrade={() => {
           setShowStats(false);
           setPremiumGate('premium');
+        }}
+        onRefreshPremium={() => {
+          if (sessionWallet) void refreshPremium(sessionWallet);
         }}
         pfpUrl={pfpUrl}
         displayName={displayName}

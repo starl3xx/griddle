@@ -59,24 +59,21 @@ function Cell({ letter, state, sequence, onClick }: CellProps) {
    * still in play (available or temporarily off-limits)".
    *
    * Sub-distinctions inside each category:
-   *   current (consumed) — scale-105 + shadow-card so it visually pops
+   *   current (consumed)  -  scale-105 + shadow-card so it visually pops
    *                        as the focused / most-recent cell
-   *   used    (consumed) — no scale, smaller shadow, sequence number
+   *   used    (consumed)  -  no scale, smaller shadow, sequence number
    *                        in the corner showing the typing order
-   *   available (in play) — pale green tint signals "go"
-   *   open    (in play)  — neutral white before any letter is typed
-   *   blocked (in play)  — pale gray, muted text, no X overlay so the
+   *   available (in play)  -  pale green tint signals "go"
+   *   open    (in play)   -  neutral white before any letter is typed
+   *   blocked (in play)   -  pale gray, muted text, no X overlay so the
    *                        letter remains readable for planning ahead
    */
   const stateClasses: Record<CellState, string> = {
-    open: 'bg-white border-gray-300 text-gray-900 hover:border-brand shadow-btn',
-    available: 'bg-success-50 border-success-200 text-gray-900 hover:border-success-500 shadow-btn',
-    // current = vivid mid blue, scaled up + heavier shadow so it’s the
-    // visual focus of the grid. used = deep navy so previously-typed
-    // letters read as "settled" / "older" but still clearly consumed.
+    open: 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:border-brand dark:hover:border-brand-400 shadow-btn',
+    available: 'bg-success-50 dark:bg-success-900/30 border-success-200 dark:border-success-700 text-gray-900 dark:text-gray-100 hover:border-success-500 shadow-btn',
     current: 'bg-brand border-brand text-white scale-105 shadow-card',
     used: 'bg-brand-800 border-brand-800 text-white shadow-btn',
-    blocked: 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed',
+    blocked: 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed',
   };
   const disabled = state === 'blocked';
 

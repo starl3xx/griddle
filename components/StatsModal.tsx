@@ -28,6 +28,12 @@ interface StatsModalProps {
   onConnect: () => void;
   /** Opens the premium gate modal for users who want to upgrade. */
   onUpgrade: () => void;
+  /**
+   * Re-checks premium status server-side. Surfaced as a "Refresh" button
+   * for users who just paid but whose wallet hasn't flipped to premium yet
+   * (race between Stripe webhook and page load).
+   */
+  onRefreshPremium: () => void;
   pfpUrl: string | null;
   displayName: string | null;
 }
@@ -54,6 +60,7 @@ export function StatsModal({
   onClose,
   onConnect,
   onUpgrade,
+  onRefreshPremium,
   pfpUrl,
   displayName,
 }: StatsModalProps) {
@@ -198,13 +205,23 @@ export function StatsModal({
         {!premium && hasAccount && (
           <div className="mt-4 border border-accent/30 rounded-md p-3 flex items-center gap-3">
             <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock premium</p>
               <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
             </div>
-            <button type="button" onClick={onUpgrade} className="btn-accent py-1.5 px-3 text-xs flex-shrink-0">
-              Upgrade
-            </button>
+            <div className="flex gap-1.5 flex-shrink-0">
+              <button
+                type="button"
+                onClick={onRefreshPremium}
+                title="Already paid? Tap to refresh"
+                className="py-1.5 px-2 text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded transition-colors"
+              >
+                Refresh
+              </button>
+              <button type="button" onClick={onUpgrade} className="btn-accent py-1.5 px-3 text-xs">
+                Upgrade
+              </button>
+            </div>
           </div>
         )}
 
