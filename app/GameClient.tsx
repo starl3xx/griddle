@@ -237,16 +237,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
   // Post-magic-link: /?auth=ok means the verify endpoint just bound a
   // session profile (and possibly merged it into a wallet profile, see
-  // /api/auth/verify). Open Settings so the user lands on the new
-  // identity state, strip the query param so a reload doesn't re-pop
-  // the modal, and apply any pending display name from localStorage.
-  // Also refetch the profile so the UI reflects the server state.
+  // /api/auth/verify). Apply any pending display name from localStorage,
+  // refetch the profile, THEN open Settings. Order matters: opening the
+  // modal before the refetch resolves flashes the anonymous CTA for a
+  // frame while the async GET is in flight. Strip the query param first
+  // so a reload can't re-pop this flow.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') !== 'ok') return;
 
-    setShowSettings(true);
     params.delete('auth');
     const qs = params.toString();
     window.history.replaceState(
@@ -270,6 +270,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         } catch {/* best-effort */}
       }
       await refetchProfile();
+      setShowSettings(true);
     })();
   }, [refetchProfile]);
 
@@ -659,8 +660,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         <CreateProfileModal
           onClose={() => { setShowCreateProfile(false); setShowSettings(true); }}
           onConnectWallet={() => { setShowCreateProfile(false); triggerConnect(); }}
-          onProfileCreated={() => {
-            void refetchProfile();
+          onProfileCreated={async () => {
+            // Await the refetch BEFORE opening Settings so the modal
+            // renders with the new profile already in hand. Firing
+            // refetchProfile() fire-and-forget then opening the modal
+            // synchronously flashes the anonymous CTA for a frame while
+            // the async GET is in flight.
+            await refetchProfile();
             setShowCreateProfile(false);
             setShowSettings(true);
           }}

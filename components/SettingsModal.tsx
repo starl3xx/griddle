@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Moon,
   Sun,
@@ -116,26 +116,36 @@ export function SettingsModal({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSentTo, setEmailSentTo] = useState<string | null>(null);
 
-  // Reset all edit state on every *open* transition, not every profile
-  // change. Previously this effect depended on `profile` too, which meant
-  // the post-save refetch cleared the "Saved." confirmation before the
-  // user could see it (saveProfile → onProfileChanged → parent refetch →
-  // new profile prop → this effect → setProfileSavedAt(null)). Splitting
-  // `open` (reset everything) from `profile` (seed drafts only if the
-  // user hasn't started editing) keeps the confirmation stable across
-  // refetches and also protects in-flight edits from being clobbered.
+  // Reset status state on every *open* transition — error banner,
+  // saved confirmation, email draft. Previously this also seeded the
+  // profile drafts which caused two bugs: (a) the post-save refetch
+  // cleared the "Saved." confirmation before the user could read it,
+  // and (b) any mid-edit refetch clobbered in-flight draft edits.
   useEffect(() => {
     if (!open) return;
-    setDisplayNameDraft(profile?.displayName ?? '');
-    setHandleDraft(profile?.handle ?? '');
-    setAvatarUrlDraft(profile?.avatarUrl ?? '');
     setProfileError(null);
     setProfileSavedAt(null);
     setEmailDraft('');
     setEmailError(null);
     setEmailSentTo(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Seed profile drafts from the incoming profile, but only *once* per
+  // open cycle. A ref-flag handles the edge case where the modal is
+  // opened BEFORE the async profile fetch resolves (the onProfileCreated
+  // and ?auth=ok paths) — we wait for profile to become non-null and
+  // then seed. The ref resets on close so the next open cycle can seed
+  // fresh from whatever the current profile is.
+  const seededOpenRef = useRef(false);
+  useEffect(() => {
+    if (!open) { seededOpenRef.current = false; return; }
+    if (seededOpenRef.current) return;
+    if (!profile) return; // wait for profile
+    setDisplayNameDraft(profile.displayName ?? '');
+    setHandleDraft(profile.handle ?? '');
+    setAvatarUrlDraft(profile.avatarUrl ?? '');
+    seededOpenRef.current = true;
+  }, [open, profile]);
 
   // Auto-dismiss the "Saved." confirmation after 2.5s. Beats leaving it
   // stuck until the next modal open, and gives the user enough time to
