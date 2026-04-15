@@ -407,7 +407,7 @@ export function SettingsModal({
         {!hasIdentity && !sessionWallet && premium && (
           <div className="py-2 space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
-              You’re premium. Sign in so your access follows you across devices.
+              You’re Premium. Sign in so your access follows you across devices.
             </p>
             <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
               Sign in
@@ -654,7 +654,7 @@ export function SettingsModal({
               <div className="border border-accent/30 rounded-md p-3 flex items-center gap-3">
                 <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock premium</p>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock Premium</p>
                   <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
                 </div>
                 <div className="flex gap-1.5 flex-shrink-0">
