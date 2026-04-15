@@ -5,9 +5,12 @@ import { getSessionId } from '@/lib/session';
 import {
   getPuzzleLoadedAt,
   getPuzzleWordByDayNumber,
+  updateStreakForSolve,
+  getLifetimeSolveCount,
 } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { getSessionWallet } from '@/lib/wallet-session';
+import { awardWordmarks } from '@/lib/wordmarks/award';
 
 /**
  * POST /api/solve
@@ -40,6 +43,15 @@ const SUSPICIOUS_STDDEV_MS = parseInt(process.env.BOT_THRESHOLD_STDDEV_MS ?? '30
 // and we reject it outright rather than try to process it.
 const MAX_KEYSTROKE_INTERVALS = 1000;
 
+// Wordmarks fields — bounds match the UI surface. A real attempt
+// tops out at maybe a few dozen Crumbs and a hundred backspaces;
+// these caps are deliberately generous so we don't reject real
+// edge-case play but small enough to reject obviously malformed
+// payloads without a DB round-trip.
+const MAX_FOUND_WORDS = 200;
+const MAX_BACKSPACE_COUNT = 2000;
+const MAX_RESET_COUNT = 200;
+
 interface SolveRequestBody {
   dayNumber: number;
   claimedWord: string;
@@ -47,6 +59,15 @@ interface SolveRequestBody {
   keystrokeIntervalsMs: number[];
   keystrokeCount: number;
   unassisted?: boolean;
+  /**
+   * Wordmark-driving fields added in M5j. All optional for
+   * backwards-compatibility with older client bundles mid-deploy —
+   * a null/missing field just means "don't award wordmarks that
+   * depend on this counter" rather than a hard rejection.
+   */
+  backspaceCount?: number;
+  resetCount?: number;
+  foundWords?: string[];
 }
 
 interface SolveResponseBody {
@@ -55,6 +76,12 @@ interface SolveResponseBody {
   flag: 'ineligible' | 'suspicious' | null;
   /** Present only on a successful solve. */
   word?: string;
+  /**
+   * Wordmark ids earned by this solve — newly inserted, not
+   * historical. Empty array on a failed or non-awarding solve.
+   * Used by the SolveModal earn toast.
+   */
+  earnedWordmarks?: string[];
 }
 
 export async function POST(
@@ -83,6 +110,34 @@ export async function POST(
   ) {
     return NextResponse.json({ error: 'malformed solve payload' }, { status: 400 });
   }
+
+  // Wordmark fields — optional, but if provided must be the right
+  // shape. Rejecting here (rather than sanitizing) keeps the contract
+  // strict: a client bug is louder than a silent zero.
+  if (
+    (body.backspaceCount !== undefined &&
+      (typeof body.backspaceCount !== 'number' ||
+        !Number.isInteger(body.backspaceCount) ||
+        body.backspaceCount < 0 ||
+        body.backspaceCount > MAX_BACKSPACE_COUNT)) ||
+    (body.resetCount !== undefined &&
+      (typeof body.resetCount !== 'number' ||
+        !Number.isInteger(body.resetCount) ||
+        body.resetCount < 0 ||
+        body.resetCount > MAX_RESET_COUNT)) ||
+    (body.foundWords !== undefined &&
+      (!Array.isArray(body.foundWords) ||
+        body.foundWords.length > MAX_FOUND_WORDS ||
+        !body.foundWords.every(
+          (w) => typeof w === 'string' && w.length >= 4 && w.length <= 8,
+        )))
+  ) {
+    return NextResponse.json({ error: 'malformed wordmark payload' }, { status: 400 });
+  }
+
+  const backspaceCount = body.backspaceCount ?? 0;
+  const resetCount = body.resetCount ?? 0;
+  const foundWords = body.foundWords ?? [];
 
   // Clamp dayNumber to today’s puzzle. M4b only allows submitting solves
   // for the current day — past puzzles bypass anti-bot timing checks
@@ -147,15 +202,52 @@ export async function POST(
     keystrokeCount: body.keystrokeCount,
     keystrokeStddevMs,
     keystrokeMinMs,
+    backspaceCount,
+    resetCount,
+    foundWords,
     unassisted: body.unassisted ?? false,
     flag,
   });
+
+  // Wordmarks are only awarded on a successful, wallet-attributed
+  // solve. Anonymous solves + failed attempts bypass the award
+  // pipeline entirely — no DB writes, no response payload churn.
+  let earnedWordmarks: string[] = [];
+  if (solved && wallet) {
+    try {
+      const [{ currentStreak }, lifetimeSolves] = await Promise.all([
+        updateStreakForSolve(wallet, body.dayNumber),
+        getLifetimeSolveCount(wallet),
+      ]);
+      earnedWordmarks = await awardWordmarks({
+        wallet,
+        puzzleId: puzzle.id,
+        puzzleWord: puzzle.word,
+        solveTimeMs: serverSolveMs,
+        unassisted: body.unassisted ?? false,
+        backspaceCount,
+        resetCount,
+        foundWords,
+        lifetimeSolves,
+        currentStreak,
+        botFlagged: flag !== null,
+      });
+    } catch (err) {
+      // Wordmark awarding is a best-effort side channel. A failure
+      // MUST NOT surface as a 500 — the solve row is already
+      // committed above and the player's primary feedback (solved +
+      // time) is what matters. Log for debugging and return empty.
+      console.error('[solve] wordmark awarding failed', err);
+      earnedWordmarks = [];
+    }
+  }
 
   return NextResponse.json({
     solved,
     serverSolveMs,
     flag,
     word: solved ? puzzle.word : undefined,
+    earnedWordmarks,
   });
 }
 

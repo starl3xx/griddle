@@ -13,6 +13,16 @@ export interface SolvePayload {
   keystrokeIntervalsMs: number[];
   firstKeystrokeAt: number | null;
   keystrokeCount: number;
+  /**
+   * Wordmark-driving counters added in M5j. Populated by useGriddle
+   * from its own action counters (telemetry doesn't track these — it
+   * only knows about keystrokes). The server uses them to evaluate
+   * Blameless (both zero), Wordsmith (foundWords.length >= 9), and
+   * Labyrinth (an 8-letter Crumb not prefixing the solution).
+   */
+  backspaceCount: number;
+  resetCount: number;
+  foundWords: string[];
 }
 
 export class SolveTelemetry {
@@ -49,6 +59,15 @@ export class SolveTelemetry {
       keystrokeIntervalsMs: [...this.intervals],
       firstKeystrokeAt: this.firstKeystrokeAt,
       keystrokeCount: this.firstKeystrokeAt === null ? 0 : this.intervals.length + 1,
+      // Wordmark counters are tracked in useGriddle (not this class)
+      // because they correspond to player actions, not keystroke
+      // telemetry. We return zeros here as defaults; useGriddle
+      // always overrides them with its own counters before sending
+      // to /api/solve. If you're writing a test that stubs telemetry
+      // directly and skips useGriddle, override these fields too.
+      backspaceCount: 0,
+      resetCount: 0,
+      foundWords: [],
     };
   }
 }

@@ -6,6 +6,7 @@ import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
 import { SITE_URL } from '@/lib/site';
+import { WORDMARK_BY_ID, isWordmarkId } from '@/lib/wordmarks/catalog';
 
 interface SolveModalProps {
   dayNumber: number;
@@ -13,6 +14,12 @@ interface SolveModalProps {
   grid: string;
   solveMs: number;
   unassisted?: boolean;
+  /**
+   * Wordmarks newly earned by this solve — returned from /api/solve.
+   * Rendered as an earn strip beneath the time. Empty array = no
+   * new badges, no strip shown.
+   */
+  earnedWordmarks?: readonly string[];
   /**
    * True when the app is running inside a Farcaster mini-app container.
    * Passed down from page.tsx’s single `useFarcaster()` call so we don’t
@@ -31,10 +38,16 @@ export function SolveModal({
   grid,
   solveMs,
   unassisted = false,
+  earnedWordmarks = [],
   inMiniApp,
   onPlayAgain,
   onClose,
 }: SolveModalProps) {
+  // Narrow the raw id list to typed catalog entries. Unknown ids
+  // (future-compat or stale rows) are dropped silently.
+  const earnedBadges = earnedWordmarks
+    .filter(isWordmarkId)
+    .map((id) => WORDMARK_BY_ID[id]);
   type ShareStatus = 'idle' | 'copied' | 'error';
   const [shareStatus, setShareStatus] = useState<ShareStatus>('idle');
 
@@ -43,6 +56,16 @@ export function SolveModal({
     const t = setTimeout(() => setShareStatus('idle'), 1800);
     return () => clearTimeout(t);
   }, [shareStatus]);
+
+  // Fire-and-forget Megaphone award on any confirmed share success.
+  // Server dedups via the (wallet, wordmark_id) unique index, so
+  // spamming Share doesn't create duplicate rows. Non-blocking so the
+  // UX doesn't wait on a network round-trip after a cast/native-share.
+  const awardMegaphone = () => {
+    fetch('/api/wordmarks/megaphone', { method: 'POST' }).catch(() => {
+      /* silent — share already happened, wordmark is a nice-to-have */
+    });
+  };
 
   const handleShare = async () => {
     const text = formatShareText({
@@ -59,7 +82,7 @@ export function SolveModal({
     // the cast, so recipients can tap and play without leaving Farcaster.
     if (inMiniApp) {
       const result = await composeCast(text, embedUrl);
-      if (result === 'cast') return;
+      if (result === 'cast') { awardMegaphone(); return; }
       if (result === 'cancelled') return;
       // result === 'failed' → SDK threw or unavailable. Fall through to
       // the Web Share / clipboard chain so there’s still a share surface.
@@ -69,6 +92,7 @@ export function SolveModal({
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({ title: `Griddle #${dayNumber}`, text, url: embedUrl });
+        awardMegaphone();
         return;
       } catch (err) {
         // AbortError = user cancelled the native sheet, not a failure
@@ -85,6 +109,7 @@ export function SolveModal({
       try {
         await navigator.clipboard.writeText(text);
         setShareStatus('copied');
+        awardMegaphone();
         return;
       } catch {
         // clipboard denied (insecure context, permissions, Firefox default) → error
@@ -130,6 +155,28 @@ export function SolveModal({
             </span>
           )}
         </div>
+
+        {/* Wordmarks earned on THIS solve. Small pill strip beneath
+            the time; absent when nothing new was earned. A user who
+            already holds every wordmark solves and sees nothing new
+            here — correct and intentional. */}
+        {earnedBadges.length > 0 && (
+          <div className="mt-4 inline-flex flex-wrap items-center justify-center gap-1.5 animate-fade-in">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+              Earned
+            </span>
+            {earnedBadges.map((w) => (
+              <span
+                key={w.id}
+                className="inline-flex items-center gap-1 rounded-pill bg-accent/10 text-accent-800 dark:text-accent-200 border border-accent/30 px-2 py-0.5 text-[11px] font-bold"
+                title={w.description}
+              >
+                <span aria-hidden>{w.emoji}</span>
+                {w.name}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-2 mt-6">
           <button

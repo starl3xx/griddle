@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Diamond, Trophy } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
 import { Avatar } from '../Avatar';
+import { LexiconGrid } from './LexiconGrid';
 import type { WalletStats } from '@/lib/db/queries';
 
 interface StatsResponse {
@@ -133,16 +134,11 @@ export function StatsPanel({
         <PremiumTeaser onUpgrade={onUpgrade} />
       )}
 
-      {hasAccount && (
-        <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
-            Wordmarks
-          </p>
-          <p className="text-xs text-gray-400 italic">
-            Coming soon — achievements for your best solves.
-          </p>
-        </div>
-      )}
+      {/* Lexicon — full Wordmarks grid. Earned wordmarks in color,
+          locked ones grayed out. Modeled on LHAW's Lexicon panel.
+          Replaces the old "Coming soon — achievements for your best
+          solves" placeholder. */}
+      {hasAccount && <LexiconGrid wallet={wallet} />}
     </>
   );
 }
