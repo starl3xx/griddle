@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
 import { recordFunnelEvent } from '@/lib/funnel/record';
@@ -19,40 +18,53 @@ import type { FunnelEvent } from '@/lib/funnel/events';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Event names the server accepts. Hard-coded instead of derived from
-// the TypeScript union because we don't ship the type catalog at
-// runtime and we want a cheap allow-list check to discard garbage
-// from malformed clients / bots before writing to the DB.
-const KNOWN_EVENTS = new Set<string>([
+// Events the CLIENT endpoint accepts. Intentionally narrower than
+// the full FunnelEvent union: `checkout_completed` and `profile_created`
+// are authoritative conversion signals emitted only from server paths
+// (Stripe webhook, crypto tx verify, future profile endpoints) with
+// idempotency keys. Accepting them here would let any unauthenticated
+// caller POST forged conversion events straight into the funnel —
+// client events have no idempotency key, so dedupe can't save us.
+const CLIENT_ALLOWED_EVENTS = new Set<string>([
   'stats_opened',
   'premium_gate_shown',
   'upgrade_clicked',
   'checkout_started',
-  'checkout_completed',
   'checkout_failed',
-  'profile_created',
   'profile_identified',
 ]);
 
 export async function POST(req: Request): Promise<Response> {
-  let event: FunnelEvent | null = null;
+  // Every step of this handler must be exception-safe: the docstring
+  // promises "always 204" and telemetry must never break a user-facing
+  // flow. getSessionId throws if middleware didn't run, so it gets the
+  // same try/catch as everything else.
   try {
-    const body = (await req.json()) as FunnelEvent;
-    if (body && typeof body === 'object' && typeof body.name === 'string' && KNOWN_EVENTS.has(body.name)) {
-      event = body;
+    let event: FunnelEvent | null = null;
+    try {
+      const body = (await req.json()) as FunnelEvent;
+      if (
+        body &&
+        typeof body === 'object' &&
+        typeof body.name === 'string' &&
+        CLIENT_ALLOWED_EVENTS.has(body.name)
+      ) {
+        event = body;
+      }
+    } catch {
+      // malformed JSON — fall through to no-op 204
     }
-  } catch {
-    // malformed JSON — fall through to no-op 204
+
+    if (!event) {
+      return new Response(null, { status: 204 });
+    }
+
+    const sessionId = await getSessionId();
+    const wallet = await getSessionWallet(sessionId);
+    await recordFunnelEvent(event, { sessionId, wallet });
+  } catch (err) {
+    console.warn('[telemetry/event] ingest failed', err);
   }
-
-  if (!event) {
-    return new Response(null, { status: 204 });
-  }
-
-  const sessionId = await getSessionId();
-  const wallet = await getSessionWallet(sessionId);
-
-  await recordFunnelEvent(event, { sessionId, wallet });
 
   return new Response(null, { status: 204 });
 }
