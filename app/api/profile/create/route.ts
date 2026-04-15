@@ -171,11 +171,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
 
     // Not a wallet conflict — assume handle collision, retry with a
-    // 4-digit random suffix. Strip a trailing hyphen from the base
-    // before appending so we never produce "xxx--1234".
+    // 4-digit random suffix. Strip a trailing underscore from the
+    // base before appending so we never produce "xxx__1234", and
+    // so the resulting handle always matches the PATCH validator's
+    // /^[a-z0-9_]+$/ — a hyphen separator here would produce a
+    // handle the PATCH endpoint rejects, leaving the profile
+    // uneditable.
     const suffix = Math.floor(Math.random() * 9000 + 1000).toString();
-    const base = handle.slice(0, 27).replace(/-+$/, '');
-    const fallbackHandle = `${base}-${suffix}`;
+    const base = handle.slice(0, 27).replace(/_+$/, '');
+    const fallbackHandle = `${base}_${suffix}`;
     const retry = await db
       .insert(profiles)
       .values({ ...baseValues, handle: fallbackHandle })
