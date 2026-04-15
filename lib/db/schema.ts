@@ -188,6 +188,14 @@ export const profiles = pgTable(
     displayName: varchar('display_name', { length: 50 }),
     /** URL to the user's avatar image (Farcaster pfp, uploaded, etc.). */
     avatarUrl: varchar('avatar_url', { length: 500 }),
+    /**
+     * Farcaster user id (numeric). Set when the user connects via the
+     * Farcaster miniapp connector. Partial unique index so null rows
+     * don't conflict (same pattern as wallet / email).
+     */
+    farcasterFid: integer('farcaster_fid'),
+    /** Farcaster @username (without the @). */
+    farcasterUsername: varchar('farcaster_username', { length: 50 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -204,11 +212,13 @@ export const profiles = pgTable(
     emailLowerIdx: uniqueIndex('profiles_email_lower_idx')
       .on(sql`lower(${t.email})`)
       .where(sql`${t.email} is not null`),
-    // Relaxed to allow email-only profiles (magic link auth users who
-    // haven't yet connected a wallet or chosen a handle).
+    farcasterFidIdx: uniqueIndex('profiles_farcaster_fid_idx')
+      .on(t.farcasterFid)
+      .where(sql`${t.farcasterFid} is not null`),
+    // At least one identity anchor required (wallet, email, handle, or FID).
     walletOrHandleOrEmailRequired: check(
       'profiles_identity_required',
-      sql`${t.wallet} is not null or ${t.handle} is not null or ${t.email} is not null`,
+      sql`${t.wallet} is not null or ${t.handle} is not null or ${t.email} is not null or ${t.farcasterFid} is not null`,
     ),
     walletLowercase: check(
       'profiles_wallet_lowercase',

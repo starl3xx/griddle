@@ -64,6 +64,13 @@
       "when": 1776211665143,
       "tag": "0008_bouncy_korath",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1776212872543,
+      "tag": "0009_misty_risque",
+      "breakpoints": true
     }
   ]
 }

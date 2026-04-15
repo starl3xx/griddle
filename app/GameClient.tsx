@@ -59,7 +59,7 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
  * on this side of the server/client boundary.
  */
 export default function GameClient({ initialPuzzle }: GameClientProps) {
-  const { inMiniApp, pfpUrl, displayName } = useFarcaster();
+  const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
   const router = useRouter();
 
   /** The wallet currently bound to this session, or null if none. */
@@ -208,6 +208,24 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       } catch {
         // link is best-effort — proceed even on failure so UI updates
       }
+
+      // Farcaster miniapp: upsert a rich profile using FID + username + pfp.
+      // The API auto-merges with any existing wallet profile and binds the
+      // result to the session so /api/profile reads correctly.
+      if (inMiniApp && fid) {
+        fetch('/api/profile/farcaster', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            fid,
+            username: username ?? null,
+            displayName: displayName ?? null,
+            avatarUrl: pfpUrl ?? null,
+            wallet: normalized,
+          }),
+        }).catch(() => {/* best-effort */});
+      }
+
       setSessionWallet(normalized);
       // Check wallet premium. If the wallet doesn't have a premium_users
       // row but the session does (fiat paid before wallet connect), migrate

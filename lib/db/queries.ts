@@ -477,6 +477,10 @@ export interface ProfileRow {
   displayName: string | null;
   /** URL to the user's avatar image. */
   avatarUrl: string | null;
+  /** Farcaster user id. Set when connected via Farcaster miniapp. */
+  farcasterFid: number | null;
+  /** Farcaster @username. */
+  farcasterUsername: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -507,6 +511,8 @@ export async function getProfileByWallet(wallet: string): Promise<ProfileRow | n
     emailVerifiedAt: r.emailVerifiedAt ?? null,
     displayName: r.displayName ?? null,
     avatarUrl: r.avatarUrl ?? null,
+    farcasterFid: r.farcasterFid ?? null,
+    farcasterUsername: r.farcasterUsername ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -536,6 +542,8 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
     emailVerifiedAt: r.emailVerifiedAt ?? null,
     displayName: r.displayName ?? null,
     avatarUrl: r.avatarUrl ?? null,
+    farcasterFid: r.farcasterFid ?? null,
+    farcasterUsername: r.farcasterUsername ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -722,6 +730,8 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
       emailVerifiedAt: r.emailVerifiedAt ?? null,
       displayName: r.displayName ?? null,
       avatarUrl: r.avatarUrl ?? null,
+      farcasterFid: r.farcasterFid ?? null,
+      farcasterUsername: r.farcasterUsername ?? null,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };
@@ -813,6 +823,8 @@ async function updateProfileInPlace(
     emailVerifiedAt: updated.emailVerifiedAt ?? null,
     displayName: updated.displayName ?? null,
     avatarUrl: updated.avatarUrl ?? null,
+    farcasterFid: updated.farcasterFid ?? null,
+    farcasterUsername: updated.farcasterUsername ?? null,
     createdAt: updated.createdAt,
     updatedAt: updated.updatedAt,
   };
@@ -1230,6 +1242,183 @@ export async function verifyMagicLink(
 }
 
 /**
+ * Auto-merge two profile rows into one. The older row (by createdAt) is
+ * kept as the "survivor" — its id, createdAt, and any non-null identity
+ * fields are preserved. Non-null fields from the newer row fill in any
+ * gaps. The newer row is then deleted.
+ *
+ * Implemented as a raw-SQL CTE so both the DELETE and the UPDATE land in
+ * a single implicit server transaction on the neon-http driver (one HTTP
+ * roundtrip = one transaction on the serverless HTTP protocol).
+ *
+ * Callers receive the merged survivor ProfileRow.
+ */
+export async function mergeProfiles(
+  idA: number,
+  idB: number,
+): Promise<ProfileRow> {
+  // Determine which is older (survivor) vs newer (donor).
+  const [rowA, rowB] = await Promise.all([
+    db.select().from(profiles).where(eq(profiles.id, idA)).limit(1),
+    db.select().from(profiles).where(eq(profiles.id, idB)).limit(1),
+  ]);
+  if (!rowA[0] || !rowB[0]) {
+    throw new Error('mergeProfiles: one or both profiles not found');
+  }
+  const older = rowA[0].createdAt <= rowB[0].createdAt ? rowA[0] : rowB[0];
+  const newer = older.id === rowA[0].id ? rowB[0] : rowA[0];
+
+  // Build the merged patch: survivor keeps its fields; donor fills gaps.
+  const merged = {
+    wallet:           older.wallet          ?? newer.wallet,
+    handle:           older.handle          ?? newer.handle,
+    email:            older.email           ?? newer.email,
+    emailVerifiedAt:  older.emailVerifiedAt ?? newer.emailVerifiedAt,
+    displayName:      older.displayName     ?? newer.displayName,
+    avatarUrl:        older.avatarUrl       ?? newer.avatarUrl,
+    farcasterFid:     older.farcasterFid    ?? newer.farcasterFid,
+    farcasterUsername:older.farcasterUsername ?? newer.farcasterUsername,
+    premiumSource:    older.premiumSource   ?? newer.premiumSource,
+    grantedBy:        older.grantedBy       ?? newer.grantedBy,
+    reason:           older.reason          ?? newer.reason,
+    stripeSessionId:  older.stripeSessionId ?? newer.stripeSessionId,
+    updatedAt:        new Date(),
+  };
+
+  // Single CTE: delete the donor row, update the survivor in one round-trip.
+  // Using raw sql`` to stay within the neon-http "one implicit tx per call"
+  // guarantee — db.transaction() is unavailable on the HTTP driver.
+  await db.execute(sql`
+    WITH deleted AS (
+      DELETE FROM profiles WHERE id = ${newer.id}
+    )
+    UPDATE profiles
+    SET
+      wallet            = ${merged.wallet},
+      handle            = ${merged.handle},
+      email             = ${merged.email},
+      email_verified_at = ${merged.emailVerifiedAt},
+      display_name      = ${merged.displayName},
+      avatar_url        = ${merged.avatarUrl},
+      farcaster_fid     = ${merged.farcasterFid},
+      farcaster_username= ${merged.farcasterUsername},
+      premium_source    = ${merged.premiumSource},
+      granted_by        = ${merged.grantedBy},
+      reason            = ${merged.reason},
+      stripe_session_id = ${merged.stripeSessionId},
+      updated_at        = ${merged.updatedAt}
+    WHERE id = ${older.id}
+  `);
+
+  const result = await db.select().from(profiles).where(eq(profiles.id, older.id)).limit(1);
+  const r = result[0];
+  return {
+    id: r.id,
+    wallet: r.wallet,
+    handle: r.handle,
+    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: r.grantedBy,
+    reason: r.reason,
+    stripeSessionId: r.stripeSessionId,
+    email: r.email ?? null,
+    emailVerifiedAt: r.emailVerifiedAt ?? null,
+    displayName: r.displayName ?? null,
+    avatarUrl: r.avatarUrl ?? null,
+    farcasterFid: (r as { farcasterFid?: number | null }).farcasterFid ?? null,
+    farcasterUsername: (r as { farcasterUsername?: string | null }).farcasterUsername ?? null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * Upsert a profile for a Farcaster miniapp user. Called from GameClient
+ * when a wallet connects and `inMiniApp === true`.
+ *
+ * Strategy:
+ *   1. Look up by Farcaster FID — if found, bind session and return.
+ *   2. Look up by wallet — if found, add FID/username/pfp and return.
+ *   3. If both exist as different rows → auto-merge.
+ *   4. If neither exists → create a new profile with all Farcaster data.
+ */
+export async function upsertProfileForFarcaster(input: {
+  fid: number;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  wallet: string | null;
+}): Promise<ProfileRow> {
+  const wallet = input.wallet ? input.wallet.toLowerCase() : null;
+
+  const [byFid, byWallet] = await Promise.all([
+    db.select().from(profiles)
+      .where(eq(profiles.farcasterFid, input.fid)).limit(1),
+    wallet ? db.select().from(profiles)
+      .where(eq(profiles.wallet, wallet)).limit(1)
+      : Promise.resolve([] as typeof profiles.$inferSelect[]),
+  ]);
+
+  const fidRow  = byFid[0]   ?? null;
+  const walletRow = byWallet[0] ?? null;
+
+  // Auto-merge if two different rows
+  if (fidRow && walletRow && fidRow.id !== walletRow.id) {
+    return mergeProfiles(fidRow.id, walletRow.id);
+  }
+
+  const existing = fidRow ?? walletRow ?? null;
+
+  const patch = {
+    farcasterFid:      input.fid,
+    farcasterUsername: input.username ?? existing?.farcasterUsername ?? null,
+    displayName:       existing?.displayName ?? input.displayName ?? null,
+    avatarUrl:         existing?.avatarUrl   ?? input.avatarUrl   ?? null,
+    wallet:            wallet ?? existing?.wallet ?? null,
+    updatedAt:         new Date(),
+  };
+
+  if (existing) {
+    const rows = await db
+      .update(profiles)
+      .set(patch)
+      .where(eq(profiles.id, existing.id))
+      .returning();
+    const r = rows[0];
+    return {
+      id: r.id, wallet: r.wallet, handle: r.handle,
+      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+      grantedBy: r.grantedBy, reason: r.reason, stripeSessionId: r.stripeSessionId,
+      email: r.email ?? null, emailVerifiedAt: r.emailVerifiedAt ?? null,
+      displayName: r.displayName ?? null, avatarUrl: r.avatarUrl ?? null,
+      farcasterFid: r.farcasterFid ?? null,
+      farcasterUsername: r.farcasterUsername ?? null,
+      createdAt: r.createdAt, updatedAt: r.updatedAt,
+    };
+  }
+
+  // New profile
+  const rows = await db.insert(profiles).values({
+    farcasterFid: input.fid,
+    farcasterUsername: input.username ?? null,
+    displayName: input.displayName ?? null,
+    avatarUrl: input.avatarUrl ?? null,
+    wallet,
+    updatedAt: new Date(),
+  }).returning();
+  const r = rows[0];
+  return {
+    id: r.id, wallet: r.wallet, handle: r.handle,
+    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: r.grantedBy, reason: r.reason, stripeSessionId: r.stripeSessionId,
+    email: r.email ?? null, emailVerifiedAt: r.emailVerifiedAt ?? null,
+    displayName: r.displayName ?? null, avatarUrl: r.avatarUrl ?? null,
+    farcasterFid: r.farcasterFid ?? null,
+    farcasterUsername: r.farcasterUsername ?? null,
+    createdAt: r.createdAt, updatedAt: r.updatedAt,
+  };
+}
+
+/**
  * Get or create a profile keyed on email. Used after magic link
  * verification to give the user a profile they can enrich later.
  */
@@ -1266,6 +1455,8 @@ export async function getOrCreateProfileByEmail(
       emailVerifiedAt: r.emailVerifiedAt ?? new Date(),
       displayName: r.displayName,
       avatarUrl: r.avatarUrl,
+      farcasterFid: r.farcasterFid ?? null,
+      farcasterUsername: r.farcasterUsername ?? null,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };
@@ -1294,6 +1485,8 @@ export async function getOrCreateProfileByEmail(
     emailVerifiedAt: r.emailVerifiedAt ?? null,
     displayName: r.displayName ?? null,
     avatarUrl: r.avatarUrl ?? null,
+    farcasterFid: r.farcasterFid ?? null,
+    farcasterUsername: r.farcasterUsername ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
