@@ -611,11 +611,13 @@ export function SettingsModal({
           />
         </Section>
 
-        {/* Premium status — upsell if not premium but has an account,
-            badge if already premium. Anonymous users see the onboarding
-            CTAs above and don't need this section at all, so skip it
+        {/* Premium status — upsell if not premium but has an account
+            OR a connected wallet (covers the "wallet connected, no
+            profile row yet" path that the Complete-profile flow
+            created). Fully anonymous users see the onboarding CTAs
+            above and don't need this section at all, so skip it
             entirely to avoid an orphaned "PREMIUM" header with no body. */}
-        {(premium || hasIdentity) && (
+        {(premium || hasIdentity || sessionWallet) && (
           <Section title="Premium">
             {premium ? (
               <div className="flex items-center gap-3 bg-accent/10 border border-accent/20 rounded-md p-3">
