@@ -13,9 +13,11 @@ import {
   CircleNotch,
   Check,
   Gear,
+  Camera,
 } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
 import { FaqAccordion } from './FaqAccordion';
+import { uploadAvatar } from '@/lib/avatar-upload';
 
 /**
  * Shape of the profile object surfaced by GET /api/profile. Kept narrow
@@ -123,6 +125,33 @@ export function SettingsModal({
   const [emailSending, setEmailSending] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSentTo, setEmailSentTo] = useState<string | null>(null);
+
+  // Avatar upload state. `avatarUploading` drives the spinner on the
+  // upload button; `avatarUploadError` surfaces resize/network errors
+  // inline. The actual resulting URL is written to `avatarUrlDraft`
+  // so it flows through the existing Save / Complete profile button
+  // and gets persisted atomically with any display-name changes.
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+
+  const handleAvatarFilePick = async (file: File) => {
+    setAvatarUploadError(null);
+    setAvatarUploading(true);
+    try {
+      const url = await uploadAvatar(file);
+      setAvatarUrlDraft(url);
+    } catch (err) {
+      setAvatarUploadError(
+        err instanceof Error ? err.message : 'Upload failed',
+      );
+    } finally {
+      setAvatarUploading(false);
+      // Reset the file input so re-selecting the same file fires
+      // `onChange` again — browsers otherwise suppress duplicates.
+      if (avatarFileInputRef.current) avatarFileInputRef.current.value = '';
+    }
+  };
 
   // Reset status state on every *open* transition — error banner,
   // saved confirmation, email draft. Previously this also seeded the
@@ -448,15 +477,25 @@ export function SettingsModal({
                 hint="2–32 chars, a–z, 0–9, hyphens"
               />
             )}
-            <LabeledInput
-              label="Avatar URL"
-              value={avatarUrlDraft}
-              onChange={setAvatarUrlDraft}
-              placeholder="https://…"
-              maxLength={500}
-              hint={hasIdentity
-                ? 'Leave blank to use the default silhouette'
-                : 'Optional — we’ll use a silhouette if you skip'}
+            <AvatarUploadRow
+              avatarUrl={avatarUrlDraft}
+              uploading={avatarUploading}
+              error={avatarUploadError}
+              premiumLocked={!premium}
+              fileInputRef={avatarFileInputRef}
+              onFilePick={handleAvatarFilePick}
+              onUpgrade={onUpgrade}
+              onClear={() => {
+                setAvatarUrlDraft('');
+                setAvatarUploadError(null);
+              }}
+              hint={
+                !premium
+                  ? 'Upload a custom photo with Premium'
+                  : hasIdentity
+                    ? 'Tap to upload a new photo'
+                    : 'Optional — we’ll use a silhouette if you skip'
+              }
             />
 
             {profileError && (
@@ -683,6 +722,125 @@ export function SettingsModal({
           <FaqAccordion />
         </Section>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Avatar picker row. Shows the current avatar (or the default
+ * silhouette when unset) as a circular thumbnail with an "Upload
+ * photo" button next to it. Clicking the button triggers a hidden
+ * file input with `accept="image/*"`, which on mobile prompts the
+ * user's native "Take photo or choose from library" picker.
+ *
+ * The uploaded URL is handed back to the parent via `onFilePick`,
+ * which runs the resize-and-upload helper and writes the result into
+ * `avatarUrlDraft` — so the existing Save / Complete profile button
+ * persists the new URL alongside any other field edits.
+ */
+function AvatarUploadRow({
+  avatarUrl,
+  uploading,
+  error,
+  premiumLocked,
+  fileInputRef,
+  onFilePick,
+  onUpgrade,
+  onClear,
+  hint,
+}: {
+  avatarUrl: string;
+  uploading: boolean;
+  error: string | null;
+  /** When true, the upload button is disabled and a Premium badge is shown. */
+  premiumLocked: boolean;
+  fileInputRef: React.RefObject<HTMLInputElement>;
+  onFilePick: (file: File) => void | Promise<void>;
+  /** Called when a locked user clicks the Upload button — opens the gate. */
+  onUpgrade: () => void;
+  onClear: () => void;
+  hint?: string;
+}) {
+  const hasAvatar = avatarUrl.trim().length > 0;
+  const handleUploadClick = () => {
+    if (premiumLocked) {
+      onUpgrade();
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-2">
+        <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+          Photo
+        </label>
+        {premiumLocked && (
+          <span className="text-[9px] font-bold uppercase tracking-wider text-accent bg-accent/10 rounded px-1.5 py-0.5 inline-flex items-center gap-0.5">
+            <Diamond className="w-2.5 h-2.5" weight="fill" aria-hidden />
+            Premium
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <div
+          className={`w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/30 border border-gray-200 dark:border-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0 ${premiumLocked ? 'opacity-70' : ''}`}
+        >
+          {hasAvatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={avatarUrl}
+              alt="Your avatar"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <Camera className="w-5 h-5 text-brand" weight="bold" aria-hidden />
+          )}
+        </div>
+        <div className="flex-1 min-w-0 flex flex-col gap-1">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={handleUploadClick}
+              className={`text-xs py-2 px-3 inline-flex items-center gap-1.5 ${premiumLocked ? 'btn-secondary opacity-70' : 'btn-secondary'}`}
+            >
+              {uploading ? (
+                <CircleNotch className="w-3.5 h-3.5 animate-spin" weight="bold" aria-hidden />
+              ) : (
+                <Camera className="w-3.5 h-3.5" weight="bold" aria-hidden />
+              )}
+              {hasAvatar ? 'Change photo' : 'Upload photo'}
+            </button>
+            {hasAvatar && !uploading && !premiumLocked && (
+              <button
+                type="button"
+                onClick={onClear}
+                className="text-xs font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          {hint && !error && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500">{hint}</p>
+          )}
+          {error && (
+            <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>
+          )}
+        </div>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        disabled={premiumLocked}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onFilePick(f);
+        }}
+      />
     </div>
   );
 }
