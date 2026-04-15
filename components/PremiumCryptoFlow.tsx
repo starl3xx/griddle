@@ -10,6 +10,7 @@ import {
   getWordTokenAddress,
   CHAIN_ID,
 } from '@/lib/contracts/addresses';
+import { trackEvent } from '@/lib/funnel/client';
 
 interface PremiumCryptoFlowProps {
   /** Called once /api/premium/verify confirms the unlock server-side. */
@@ -174,6 +175,12 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
 
       // --- Step 3: submit tx ---------------------------------------------
       setPhase('submitting');
+
+      // checkout_started fires here (after the permit is signed, just
+      // before the on-chain write) so the crypto path has a meaningful
+      // intermediate stage — clicking "Pay with crypto" no longer maps
+      // 1:1 to started, which matched fiat and skewed the funnel.
+      trackEvent({ name: 'checkout_started', method: 'crypto' });
 
       const txHash = await writeContractAsync({
         address: premiumAddress,

@@ -401,7 +401,11 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
   const handleUnlockCrypto = useCallback(() => {
     trackEvent({ name: 'upgrade_clicked', method: 'crypto' });
-    trackEvent({ name: 'checkout_started', method: 'crypto' });
+    // checkout_started fires from PremiumCryptoFlow at the actual
+    // permit-signed / tx-broadcast moment, not here — otherwise it
+    // would be redundant with upgrade_clicked in the same tick and
+    // would blend different semantics with the fiat path (which
+    // fires started only after Stripe session creation succeeds).
     setShowCryptoFlow(true);
   }, []);
 
