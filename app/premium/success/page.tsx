@@ -67,7 +67,7 @@ function SuccessInner() {
           <CircleNotch className="w-8 h-8 animate-spin" weight="bold" aria-hidden />
         )}
       </div>
-      <h1 className="text-3xl font-black tracking-tight text-gray-900">
+      <h1 className="text-3xl font-bold tracking-tight text-gray-900">
         {confirmed ? 'Premium unlocked' : 'Confirming payment…'}
       </h1>
       <p className="text-sm font-medium text-gray-500 max-w-sm">
@@ -93,7 +93,7 @@ export default function PremiumSuccessPage() {
         <div className="w-16 h-16 rounded-full bg-accent/15 text-accent flex items-center justify-center">
           <CircleNotch className="w-8 h-8 animate-spin" weight="bold" aria-hidden />
         </div>
-        <h1 className="text-3xl font-black tracking-tight text-gray-900">Confirming payment…</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Confirming payment…</h1>
       </main>
     }>
       <SuccessInner />

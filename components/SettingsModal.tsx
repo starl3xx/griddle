@@ -12,10 +12,10 @@ import {
   EyeSlash,
   CircleNotch,
   Check,
-  Question,
   Gear,
 } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
+import { FaqAccordion } from './FaqAccordion';
 
 /**
  * Shape of the profile object surfaced by GET /api/profile. Kept narrow
@@ -347,18 +347,18 @@ export function SettingsModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="modal-sheet sm:rounded-card animate-slide-up max-h-[92vh] overflow-y-auto"
+        className="modal-sheet animate-slide-up max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center gap-3 mb-5">
           <Avatar pfpUrl={profile?.avatarUrl ?? null} />
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100 truncate">
+            <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 truncate">
               {headerLabel}
             </h2>
             <p className="text-xs font-medium text-gray-500 flex items-center gap-1.5">
@@ -396,7 +396,7 @@ export function SettingsModal({
             </button>
             <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">
               <Diamond className="w-4 h-4 text-accent" weight="fill" aria-hidden />
-              Unlock with card or crypto
+              Upgrade to Premium <span className="font-medium text-gray-500">(card or crypto)</span>
             </button>
           </div>
         )}
@@ -675,16 +675,13 @@ export function SettingsModal({
           </Section>
         )}
 
-        {/* Footer — FAQ link */}
-        <div className="mt-5 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-1.5">
-          <Question className="w-3.5 h-3.5 text-gray-400" weight="bold" aria-hidden />
-          <a
-            href="/faq"
-            className="text-xs font-semibold text-gray-400 hover:text-brand transition-colors"
-          >
-            FAQ
-          </a>
-        </div>
+        {/* FAQ — inline accordion. Renders the shared FAQ data via
+            FaqAccordion so /faq and this modal stay in sync. Previously
+            we linked out to /faq; inlining keeps users in the Settings
+            flow without a full page navigation. */}
+        <Section title="FAQ">
+          <FaqAccordion />
+        </Section>
       </div>
     </div>
   );

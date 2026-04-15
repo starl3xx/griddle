@@ -143,7 +143,7 @@ export function FunnelTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-black tracking-tight text-gray-900">Funnel</h2>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900">Funnel</h2>
         <div className="flex gap-1.5">
           {(Object.keys(WINDOW_LABELS) as FunnelWindow[]).map((w) => (
             <Button

@@ -292,10 +292,31 @@ export function useGriddle({
 
   // Global keyboard listener. Disabled/pending both skip attachment so
   // the browser handles keys normally during modals + in-flight solves.
+  //
+  // Additionally, we bail on any keydown whose target is a form field
+  // (input/textarea/select/contenteditable). Without this guard, a user
+  // typing into a modal input — e.g. the Sign in email or display-name
+  // fields — would have their keystrokes doubly-consumed: once by the
+  // input, and again by the game's letter/backspace handler, causing
+  // the grid to light up with phantom letters while they type their
+  // email. This is a belt-and-suspenders fix for modals that forget to
+  // pass `disabled={true}` into useGriddle.
   useEffect(() => {
     if (disabled || pendingSolve) return;
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
       if (e.key === 'Backspace') {
         e.preventDefault();
         backspace();

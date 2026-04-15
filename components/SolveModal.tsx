@@ -97,12 +97,12 @@ export function SolveModal({
     shareStatus === 'copied' ? 'Copied!' : shareStatus === 'error' ? 'Copy failed' : 'Share';
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in">
-      <div className="modal-sheet sm:rounded-card animate-slide-up text-center">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+      <div className="modal-sheet animate-slide-up text-center">
         <div className="flex justify-center mb-2" aria-hidden>
           <Medal className="w-12 h-12 text-accent" weight="fill" />
         </div>
-        <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-gray-900">
+        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900">
           Solved!
         </h2>
         <p className="text-sm text-gray-500 mt-1 tabular-nums">

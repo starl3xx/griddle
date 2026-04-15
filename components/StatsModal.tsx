@@ -92,18 +92,18 @@ export function StatsModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="modal-sheet sm:rounded-card animate-slide-up"
+        className="modal-sheet animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center gap-3">
           <Avatar pfpUrl={pfpUrl} />
           <div className="min-w-0">
-            <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100 truncate">
+            <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 truncate">
               {label}
             </h2>
             <p className="text-xs font-medium text-gray-500">Your Griddle stats</p>

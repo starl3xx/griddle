@@ -81,14 +81,14 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
 
       {pickerOpen && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
           onClick={() => setPickerOpen(false)}
         >
           <div
-            className="modal-sheet sm:rounded-card animate-slide-up"
+            className="modal-sheet animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-black tracking-tight text-gray-900">
+            <h2 className="text-xl font-bold tracking-tight text-gray-900">
               Connect a wallet
             </h2>
             <p className="text-sm text-gray-500 mt-1">

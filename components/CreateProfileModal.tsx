@@ -104,11 +104,11 @@ export function CreateProfileModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="modal-sheet sm:rounded-card animate-slide-up"
+        className="modal-sheet animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
         {step === 'check-email' ? (
@@ -120,7 +120,7 @@ export function CreateProfileModal({
                 <Envelope className="w-5 h-5" weight="bold" aria-hidden />
               </div>
               <div>
-                <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100">
+                <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">
                   Sign in
                 </h2>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -142,7 +142,7 @@ export function CreateProfileModal({
             <div className="space-y-3">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  Email <span className="text-gray-400 font-normal normal-case">(recommended — sign in anywhere)</span>
+                  Email <span className="text-gray-400 font-medium normal-case tracking-normal">(recommended — sign in anywhere)</span>
                 </label>
                 <input
                   type="email"
@@ -156,7 +156,7 @@ export function CreateProfileModal({
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  Display name <span className="text-gray-400 font-normal normal-case">(optional)</span>
+                  Display name <span className="text-gray-400 font-medium normal-case tracking-normal">(optional)</span>
                 </label>
                 <input
                   type="text"
@@ -219,7 +219,7 @@ function CheckEmailState({ email, onClose }: { email: string; onClose: () => voi
       <div className="w-12 h-12 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand flex items-center justify-center mx-auto mb-4">
         <Envelope className="w-6 h-6" weight="bold" aria-hidden />
       </div>
-      <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100 mb-1">
+      <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 mb-1">
         Check your email
       </h2>
       <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed max-w-xs mx-auto">

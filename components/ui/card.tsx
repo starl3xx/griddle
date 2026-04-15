@@ -40,7 +40,7 @@ function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLDivElement>
   return (
     <div
       data-slot="card-title"
-      className={cn('leading-none font-black text-gray-900 tracking-tight', className)}
+      className={cn('leading-none font-bold text-gray-900 tracking-tight', className)}
       {...props}
     />
   );

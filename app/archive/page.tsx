@@ -16,7 +16,7 @@ export default async function ArchivePage() {
   return (
     <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6 max-w-2xl mx-auto w-full">
       <header className="text-center">
-        <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-gray-900">
+        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">
           Archive
         </h1>
         <p className="text-sm font-medium text-gray-500 mt-1">
