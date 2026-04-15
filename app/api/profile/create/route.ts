@@ -3,7 +3,6 @@ import { getSessionId } from '@/lib/session';
 import { setSessionProfile } from '@/lib/session-profile';
 import { db } from '@/lib/db/client';
 import { profiles } from '@/lib/db/schema';
-import { sql } from 'drizzle-orm';
 
 /**
  * POST /api/profile/create

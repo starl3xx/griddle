@@ -1219,61 +1219,73 @@ export async function mergeProfiles(
   idA: number,
   idB: number,
 ): Promise<ProfileRow> {
-  // Determine which is older (survivor) vs newer (donor).
-  const [rowA, rowB] = await Promise.all([
-    db.select().from(profiles).where(eq(profiles.id, idA)).limit(1),
-    db.select().from(profiles).where(eq(profiles.id, idB)).limit(1),
-  ]);
-  if (!rowA[0] || !rowB[0]) {
-    throw new Error('mergeProfiles: one or both profiles not found');
-  }
-  const older = rowA[0].createdAt <= rowB[0].createdAt ? rowA[0] : rowB[0];
-  const newer = older.id === rowA[0].id ? rowB[0] : rowA[0];
-
-  // Build the merged patch: survivor keeps its fields; donor fills gaps.
-  const merged = {
-    wallet:           older.wallet          ?? newer.wallet,
-    handle:           older.handle          ?? newer.handle,
-    email:            older.email           ?? newer.email,
-    emailVerifiedAt:  older.emailVerifiedAt ?? newer.emailVerifiedAt,
-    displayName:      older.displayName     ?? newer.displayName,
-    avatarUrl:        older.avatarUrl       ?? newer.avatarUrl,
-    farcasterFid:     older.farcasterFid    ?? newer.farcasterFid,
-    farcasterUsername:older.farcasterUsername ?? newer.farcasterUsername,
-    premiumSource:    older.premiumSource   ?? newer.premiumSource,
-    grantedBy:        older.grantedBy       ?? newer.grantedBy,
-    reason:           older.reason          ?? newer.reason,
-    stripeSessionId:  older.stripeSessionId ?? newer.stripeSessionId,
-    updatedAt:        new Date(),
-  };
-
-  // Single CTE: delete the donor row, update the survivor in one round-trip.
-  // Using raw sql`` to stay within the neon-http "one implicit tx per call"
-  // guarantee — db.transaction() is unavailable on the HTTP driver.
-  await db.execute(sql`
-    WITH deleted AS (
-      DELETE FROM profiles WHERE id = ${newer.id}
+  // Fully atomic merge. Previously this function read both rows into JS,
+  // computed the merged patch, then issued a CTE to DELETE+UPDATE. The
+  // read-compute-write sequence wasn't atomic — a concurrent writer
+  // mutating the donor row between the read and the CTE (e.g. an email
+  // just getting verified) would silently lose the fresh value.
+  //
+  // The rewritten version is a single SQL statement. All reads of
+  // `profiles` happen from the statement-start MVCC snapshot, so the
+  // COALESCEs inside the CTE can't observe a stale version of one row
+  // while the DELETE/UPDATE commit another. Neon-http still can't start
+  // a transaction, but one statement is an implicit one.
+  const rows = await db.execute<RawProfileRow>(sql`
+    WITH pair AS (
+      SELECT
+        older.id            AS older_id,
+        newer.id            AS newer_id,
+        COALESCE(older.wallet,             newer.wallet)             AS wallet,
+        COALESCE(older.handle,             newer.handle)             AS handle,
+        COALESCE(older.email,              newer.email)              AS email,
+        COALESCE(older.email_verified_at,  newer.email_verified_at)  AS email_verified_at,
+        COALESCE(older.display_name,       newer.display_name)       AS display_name,
+        COALESCE(older.avatar_url,         newer.avatar_url)         AS avatar_url,
+        COALESCE(older.farcaster_fid,      newer.farcaster_fid)      AS farcaster_fid,
+        COALESCE(older.farcaster_username, newer.farcaster_username) AS farcaster_username,
+        COALESCE(older.premium_source,     newer.premium_source)     AS premium_source,
+        COALESCE(older.granted_by,         newer.granted_by)         AS granted_by,
+        COALESCE(older.reason,             newer.reason)             AS reason,
+        COALESCE(older.stripe_session_id,  newer.stripe_session_id)  AS stripe_session_id
+      FROM
+        profiles older,
+        profiles newer
+      WHERE older.id IN (${idA}, ${idB})
+        AND newer.id IN (${idA}, ${idB})
+        AND older.id <> newer.id
+        AND (older.created_at, older.id) <= (newer.created_at, newer.id)
+    ),
+    deleted AS (
+      DELETE FROM profiles
+      WHERE id = (SELECT newer_id FROM pair)
+    ),
+    updated AS (
+      UPDATE profiles p SET
+        wallet             = pair.wallet,
+        handle             = pair.handle,
+        email              = pair.email,
+        email_verified_at  = pair.email_verified_at,
+        display_name       = pair.display_name,
+        avatar_url         = pair.avatar_url,
+        farcaster_fid      = pair.farcaster_fid,
+        farcaster_username = pair.farcaster_username,
+        premium_source     = pair.premium_source,
+        granted_by         = pair.granted_by,
+        reason             = pair.reason,
+        stripe_session_id  = pair.stripe_session_id,
+        updated_at         = now()
+      FROM pair
+      WHERE p.id = pair.older_id
+      RETURNING p.*
     )
-    UPDATE profiles
-    SET
-      wallet            = ${merged.wallet},
-      handle            = ${merged.handle},
-      email             = ${merged.email},
-      email_verified_at = ${merged.emailVerifiedAt},
-      display_name      = ${merged.displayName},
-      avatar_url        = ${merged.avatarUrl},
-      farcaster_fid     = ${merged.farcasterFid},
-      farcaster_username= ${merged.farcasterUsername},
-      premium_source    = ${merged.premiumSource},
-      granted_by        = ${merged.grantedBy},
-      reason            = ${merged.reason},
-      stripe_session_id = ${merged.stripeSessionId},
-      updated_at        = ${merged.updatedAt}
-    WHERE id = ${older.id}
+    SELECT * FROM updated
   `);
 
-  const result = await db.select().from(profiles).where(eq(profiles.id, older.id)).limit(1);
-  return toProfileRow(result[0]);
+  const resultRows = Array.isArray(rows) ? rows : rows.rows;
+  if (!resultRows[0]) {
+    throw new Error('mergeProfiles: one or both profiles not found');
+  }
+  return toProfileRow(resultRows[0]);
 }
 
 /**
