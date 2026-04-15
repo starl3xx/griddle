@@ -4,17 +4,6 @@ import { db } from '@/lib/db/client';
 import { profiles, premiumUsers } from '@/lib/db/schema';
 import { ilike, or, eq, sql, desc } from 'drizzle-orm';
 
-/**
- * GET /api/admin/users?q=&page=&limit=
- *
- * Paginated + searchable user list for the /admin Users tab.
- * Searches across wallet, handle, and premium_source.
- *
- * Note: email, display_name, avatar_url, farcaster_fid columns are added
- * by M4i (PR #30). This query will grow to include them post-merge.
- *
- * Auth: admin wallet via requireAdminWallet().
- */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -26,8 +15,12 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get('q') ?? '').trim();
-  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
-  const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') ?? '50', 10)));
+
+  // Guard against NaN from non-numeric params
+  const rawPage  = parseInt(searchParams.get('page')  ?? '1',  10);
+  const rawLimit = parseInt(searchParams.get('limit') ?? '50', 10);
+  const page  = Number.isFinite(rawPage)  ? Math.max(1,   rawPage)        : 1;
+  const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(10, rawLimit)) : 50;
   const offset = (page - 1) * limit;
 
   const searchTerm = q ? `%${q}%` : null;
@@ -46,9 +39,10 @@ export async function GET(req: Request): Promise<NextResponse> {
         handle: profiles.handle,
         wallet: profiles.wallet,
         premiumSource: profiles.premiumSource,
+        // Also select the actual source from premium_users (not just unlockedAt)
+        premiumUsersSource: premiumUsers.source,
         createdAt: profiles.createdAt,
         premiumUnlockedAt: premiumUsers.unlockedAt,
-        premiumTxHash: premiumUsers.txHash,
       })
       .from(profiles)
       .leftJoin(premiumUsers, eq(profiles.wallet, premiumUsers.wallet))
@@ -70,7 +64,8 @@ export async function GET(req: Request): Promise<NextResponse> {
       handle: r.handle,
       wallet: r.wallet,
       premium: !!(r.premiumSource || r.premiumUnlockedAt),
-      premiumSource: r.premiumSource || (r.premiumUnlockedAt ? 'wallet' : null),
+      // Use the actual source column from premium_users, not a fabricated string
+      premiumSource: r.premiumSource ?? r.premiumUsersSource ?? null,
       createdAt: r.createdAt,
     })),
     pagination: { page, limit, total, pages: Math.ceil(total / limit) },
