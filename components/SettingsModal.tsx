@@ -322,8 +322,13 @@ export function SettingsModal({
           </button>
         </div>
 
-        {/* Anonymous state — onboarding CTAs */}
-        {!hasIdentity && (
+        {/* Anonymous state — onboarding CTAs. Two sub-states: pure
+            anonymous (no profile, no premium) sees all three paths;
+            premium-but-profileless (fiat buyer who hasn't created a
+            profile yet) sees only Create profile + Connect wallet,
+            since showing "Unlock with card or crypto" to a user who
+            already paid would risk a duplicate purchase. */}
+        {!hasIdentity && !premium && (
           <div className="py-2 space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
               Create a profile, connect a wallet, or unlock premium to get started.
@@ -337,6 +342,19 @@ export function SettingsModal({
             <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">
               <Diamond className="w-4 h-4 text-accent" weight="fill" aria-hidden />
               Unlock with card or crypto
+            </button>
+          </div>
+        )}
+        {!hasIdentity && premium && (
+          <div className="py-2 space-y-3">
+            <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
+              You’re premium. Attach a profile or wallet so your access follows you across devices.
+            </p>
+            <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
+              Create profile
+            </button>
+            <button type="button" onClick={onConnect} className="btn-secondary w-full">
+              Connect wallet
             </button>
           </div>
         )}

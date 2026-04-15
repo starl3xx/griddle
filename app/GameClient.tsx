@@ -229,11 +229,18 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   }, []);
 
   // Hydrate the profile snapshot from /api/profile on mount. Required so
-  // the account state survives a page reload — including the post-magic-
-  // link redirect to /?auth=ok, which otherwise resets profile state to
-  // null and leaves StatsModal showing the anonymous CTA. Depends on
-  // refetchProfile (stable callback) so ESLint can see the dep.
-  useEffect(() => { void refetchProfile(); }, [refetchProfile]);
+  // the account state survives a page reload. Skip when the URL is
+  // /?auth=ok — the auth-ok effect below owns that path's PATCH → refetch
+  // sequence, and running an extra mount fetch in parallel can race:
+  // on cold starts the mount GET may resolve AFTER the auth-ok PATCH +
+  // GET, overwriting the fresh post-PATCH profile with the pre-PATCH one.
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('auth') === 'ok') return;
+    }
+    void refetchProfile();
+  }, [refetchProfile]);
 
   // Post-magic-link: /?auth=ok means the verify endpoint just bound a
   // session profile (and possibly merged it into a wallet profile, see
