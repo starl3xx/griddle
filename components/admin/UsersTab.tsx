@@ -37,8 +37,16 @@ export function UsersTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Debounce the query and reset to page 1 only when the effective query
+  // actually changes — typing "a" then deleting it shouldn't kick the user
+  // off page 3 just because the timeout fired.
   useEffect(() => {
-    const t = setTimeout(() => { setDebouncedQuery(query); setPage(1); }, 300);
+    const t = setTimeout(() => {
+      setDebouncedQuery((prev) => {
+        if (prev !== query) setPage(1);
+        return query;
+      });
+    }, 300);
     return () => clearTimeout(t);
   }, [query]);
 
