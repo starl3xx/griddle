@@ -533,12 +533,24 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   );
 
   /**
-   * Single HomeTile click handler. The three tiles (Stats, Leaderboard,
-   * Archive) all dispatch the same signal differing only by tab name —
-   * the gate + telemetry logic lives here so tiles stay dumb. Stats is
-   * always free; Leaderboard and Archive are premium-gated. Reads
-   * premium from a ref so this callback's identity stays stable across
-   * re-renders (HomeTiles memoizes on handler identity).
+   * Unified tab open/switch handler. Used by BOTH the HomeTiles row
+   * (initial open when the modal is closed) and BrowseModal's bottom
+   * tab bar (switching while the modal is already open). The gate +
+   * telemetry logic lives here so neither surface has to reimplement
+   * the premium check — which is how the Stats-tile-then-tab-bar
+   * bypass happened in the first place: the tab bar wired directly
+   * to `setBrowseTab` and skipped the gate entirely.
+   *
+   * Flow:
+   *   - `stats` is always free → set the tab and track stats_opened
+   *   - `leaderboard` / `archive` when premium → set the tab
+   *   - `leaderboard` / `archive` when NOT premium → close the modal
+   *     (if open) and fire the PremiumGateModal. Closing is critical
+   *     so the gate renders on top of a clean background rather than
+   *     stacked on the browse modal.
+   *
+   * Reads premium from a ref so the callback identity stays stable
+   * across renders — HomeTiles + BrowseModal both memoize on it.
    */
   const handleTileClick = useCallback((tab: BrowseTab) => {
     if (tab === 'stats') {
@@ -553,6 +565,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     }
     if (!premiumRef.current) {
       trackEvent({ name: 'premium_gate_shown', feature: tab });
+      setBrowseTab(null);
       setPremiumGate(tab);
       return;
     }
@@ -654,7 +667,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
       <BrowseModal
         openTab={browseTab}
-        onTabChange={setBrowseTab}
+        onTabChange={handleTileClick}
         onClose={() => setBrowseTab(null)}
         premium={premium}
         hasSessionProfile={hasSessionProfile}
