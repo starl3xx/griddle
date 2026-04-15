@@ -113,7 +113,8 @@ export function UsersTab() {
                       </div>
                       <div>
                         <p className="font-semibold text-gray-900">{label(u)}</p>
-                        {u.handle && u.wallet && (
+                        {/* Only show handle sub-line when it isn't already the primary label */}
+                        {u.handle && label(u) !== u.handle && (
                           <p className="text-[11px] text-gray-400">/{u.handle}</p>
                         )}
                         {u.email && (
