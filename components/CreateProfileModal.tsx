@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Envelope, ArrowRight, CircleNotch, User } from '@phosphor-icons/react';
+import { Envelope, ArrowRight, CircleNotch } from '@phosphor-icons/react';
 
 interface CreateProfileModalProps {
   onClose: () => void;
@@ -117,14 +117,14 @@ export function CreateProfileModal({
           <>
             <div className="flex items-center gap-3 mb-5">
               <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand flex items-center justify-center flex-shrink-0">
-                <User className="w-5 h-5" weight="bold" aria-hidden />
+                <Envelope className="w-5 h-5" weight="bold" aria-hidden />
               </div>
               <div>
                 <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100">
-                  Create your profile
+                  Sign in
                 </h2>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Track your streaks and fastest times
+                  We’ll send a one-time link. New here? Same flow.
                 </p>
               </div>
               <button

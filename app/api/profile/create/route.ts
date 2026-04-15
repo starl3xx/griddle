@@ -9,18 +9,32 @@ import { eq } from 'drizzle-orm';
 /**
  * POST /api/profile/create
  *
- * Body: `{ displayName: string }`
+ * Body: `{ displayName: string, avatarUrl?: string }`
  *
- * Creates a display-name-only profile for users who don't want to
- * provide an email. No email verification — profile is bound to this
- * browser session via Upstash KV. If the session is lost (new browser,
- * cleared cookies) the user will need to re-create or add an email.
+ * Creates a profile for the current session. Two modes:
+ *
+ *   1. **Handle-only** — no wallet bound. Profile row has displayName
+ *      + a slugified handle, no wallet. Bound to the session via
+ *      Upstash KV. If the session is lost (new browser, cleared
+ *      cookies) the user will need to re-create or add an email.
+ *
+ *   2. **Wallet-linked** — session already has a wallet bound (the
+ *      user clicked Connect Wallet earlier). Profile row has displayName
+ *      + handle + WALLET so the "Complete your profile" flow from
+ *      SettingsModal produces a full wallet-linked row in one shot,
+ *      not an orphan handle-only row that then races with wallet/link's
+ *      reconcile.
+ *
+ * Either mode accepts an optional `avatarUrl`. Handle is always auto-
+ * slugified from displayName; it can be changed later via PATCH.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const AVATAR_URL_RE = /^https?:\/\/[^\s]{1,500}$/;
+
 export async function POST(req: Request): Promise<NextResponse> {
-  let body: { displayName?: string };
+  let body: { displayName?: string; avatarUrl?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -30,6 +44,20 @@ export async function POST(req: Request): Promise<NextResponse> {
   const displayName = (body.displayName ?? '').trim().slice(0, 50);
   if (!displayName) {
     return NextResponse.json({ error: 'displayName required' }, { status: 400 });
+  }
+
+  let avatarUrl: string | null = null;
+  if (body.avatarUrl !== undefined) {
+    const trimmed = body.avatarUrl.trim().slice(0, 500);
+    if (trimmed) {
+      if (!AVATAR_URL_RE.test(trimmed)) {
+        return NextResponse.json(
+          { error: 'avatarUrl must be a http(s) URL' },
+          { status: 400 },
+        );
+      }
+      avatarUrl = trimmed;
+    }
   }
 
   // Guard: if the session already has a profile bound, refuse to
@@ -87,6 +115,18 @@ export async function POST(req: Request): Promise<NextResponse> {
   };
   const handle = toValidSlug(displayName);
 
+  // Shared insert payload — wallet comes from the session KV binding
+  // (if any), so a wallet-connected user completing their profile
+  // ends up with a proper wallet-linked row in one shot. avatarUrl is
+  // optional and validated above.
+  const baseValues = {
+    handle,
+    displayName,
+    avatarUrl,
+    wallet: sessionWallet,
+    updatedAt: new Date(),
+  };
+
   // Try the slugified handle first. If it's taken, fall back to a
   // 4-digit random suffix. Use onConflictDoNothing + empty-returning
   // check to detect handle uniqueness without swallowing unrelated
@@ -95,7 +135,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   let profileId: number;
   const firstTry = await db
     .insert(profiles)
-    .values({ handle, displayName, updatedAt: new Date() })
+    .values(baseValues)
     .onConflictDoNothing()
     .returning({ id: profiles.id });
 
@@ -109,7 +149,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     const fallbackHandle = `${base}-${suffix}`;
     const retry = await db
       .insert(profiles)
-      .values({ handle: fallbackHandle, displayName, updatedAt: new Date() })
+      .values({ ...baseValues, handle: fallbackHandle })
       .onConflictDoNothing()
       .returning({ id: profiles.id });
     if (!retry.length) {

@@ -645,6 +645,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       <SettingsModal
         open={showSettings}
         profile={profile}
+        sessionWallet={sessionWallet}
         premium={premium}
         dark={dark}
         onToggleDark={toggleDark}
