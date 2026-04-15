@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MagnifyingGlass, CircleNotch, Diamond } from '@phosphor-icons/react';
 
 interface UserRow {
@@ -42,27 +42,38 @@ export function UsersTab() {
     return () => clearTimeout(t);
   }, [query]);
 
-  const fetchUsers = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: '50' });
-      if (debouncedQuery) params.set('q', debouncedQuery);
-      const res = await fetch(`/api/admin/users?${params}`);
-      if (!res.ok) throw new Error('Failed to load users');
-      setData(await res.json() as UsersResponse);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error');
-    } finally {
-      setLoading(false);
-    }
+  // AbortController cancels in-flight requests so a slow earlier response
+  // can't overwrite a newer one when debouncedQuery/page change quickly.
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ page: String(page), limit: '50' });
+        if (debouncedQuery) params.set('q', debouncedQuery);
+        const res = await fetch(`/api/admin/users?${params}`, { signal: controller.signal });
+        if (!res.ok) throw new Error('Failed to load users');
+        setData(await res.json() as UsersResponse);
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : 'Error');
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => controller.abort();
   }, [debouncedQuery, page]);
 
-  useEffect(() => { void fetchUsers(); }, [fetchUsers]);
-
   const { users = [], pagination } = data ?? {};
-  const label = (u: UserRow) =>
-    u.displayName ?? u.handle ?? (u.wallet ? `${u.wallet.slice(0, 6)}...${u.wallet.slice(-4)}` : `#${u.id}`);
+  // Treat empty strings as missing so label never returns "" (which would
+  // crash `label(u)[0].toUpperCase()` on the avatar initial).
+  const label = (u: UserRow) => {
+    const display = u.displayName?.trim() || u.handle?.trim();
+    if (display) return display;
+    if (u.wallet) return `${u.wallet.slice(0, 6)}...${u.wallet.slice(-4)}`;
+    return `#${u.id}`;
+  };
 
   return (
     <div className="space-y-4">
