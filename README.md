@@ -140,42 +140,69 @@ The target word is **never** sent to the client. Solve verification happens serv
 app/
 ├── layout.tsx
 ├── page.tsx                    # Main game (server component, word stripped before client)
-├── GameClient.tsx              # Client wrapper — modals, tiles, wallet flow
+├── GameClient.tsx              # Client wrapper — modals, tiles, wallet flow, telemetry
 ├── manifest.ts                 # PWA web app manifest
+├── faq/page.tsx                # Public FAQ page (mirrors FAQ.md)
 ├── leaderboard/[day]/          # Per-day ranked leaderboard
 ├── archive/                    # Past puzzles index (premium-gated from the home tile)
-├── admin/                      # /admin hub (Pulse + Anomalies tabs)
+├── premium/success/            # Stripe success landing
+├── admin/                      # /admin hub (Pulse · Funnel · Users · Anomalies · Grant)
 └── api/
     ├── puzzle/today/           # Grid only, never the word
     ├── solve/                  # Server-side answer verification + anti-bot flags
     ├── og/                     # Satori OG share image
     ├── stats/                  # Per-wallet aggregate stats for the Stats modal
+    ├── settings/               # User settings GET/PATCH (dark mode, streak protection, unassisted)
     ├── leaderboard/[day]/      # Daily leaderboard data
     ├── wallet/link/            # Session→wallet binding (POST + DELETE)
-    ├── premium/[wallet]/       # Onchain premium status read
+    ├── auth/
+    │   ├── request/            # POST — send magic link email (rate limited, rollback on failure)
+    │   └── verify/             # GET  — consume token, bind session → profile, redirect to /?auth=ok
+    ├── profile/
+    │   ├── route.ts            # GET/PATCH bound profile (session-profile or session-wallet fallback)
+    │   ├── create/             # Handle-only profile creation (session-bound, fails closed on KV)
+    │   └── farcaster/          # Farcaster miniapp upsert (wallet-match guarded, FID-verified)
+    ├── premium/
+    │   ├── [wallet]/           # Wallet-keyed premium status read
+    │   ├── session/            # Session-bound premium read (fiat pre-wallet-connect)
+    │   ├── migrate/            # Promote session-premium to wallet-keyed row on first connect
+    │   └── verify/             # On-chain UnlockedWithBurn event verification → premium_users
+    ├── stripe/
+    │   ├── checkout/           # POST — create Stripe session with x-session-id in metadata
+    │   └── webhook/             # POST — signature-verified checkout.session.completed → recordFiatUnlock
+    ├── telemetry/event/        # POST — client funnel event ingestion (allow-listed events only)
     └── admin/
         ├── pulse/              # Admin Pulse aggregate (24h/7d)
-        └── anomalies/          # Flagged-solve list
+        ├── funnel/             # Stage counts + breakdown + time-to-convert (windowed)
+        ├── users/              # Paginated + searchable profile list
+        ├── anomalies/          # Flagged-solve list
+        └── grant-premium/      # Comp premium to wallet or handle (admin_grant)
 
 components/
 ├── Grid.tsx                    # 3×3 cell grid, 5 states
 ├── WordSlots.tsx               # 9 letter slots below grid
 ├── FlashBadge.tsx              # Purple shorter-word flash
 ├── FoundWords.tsx              # Persistent 4–8 letter found-words strip
-├── HomeTiles.tsx               # Stats · Leaderboard · Archive action row
+├── HomeTiles.tsx               # Stats · Leaderboard · Archive action row (2:1 layout)
 ├── Avatar.tsx                  # Shared Farcaster pfp / wallet-monogram avatar
 ├── TutorialModal.tsx           # First-visit + "HOW TO PLAY" modal
-├── StatsModal.tsx              # Per-wallet stats grid
+├── StatsModal.tsx              # Three-state modal: anon CTA / account stats / premium + settings
+├── CreateProfileModal.tsx      # Email (magic link) OR display-name-only profile creation
 ├── SolveModal.tsx              # Post-solve share + play-again sheet
-├── PremiumGateModal.tsx        # Premium unlock skeleton (M4f wiring pending)
+├── PremiumGateModal.tsx        # Live premium unlock — crypto + fiat buttons
+├── PremiumCryptoFlow.tsx       # EIP-2612 permit sign → unlockWithPermit → verify
+├── LazyPremiumCryptoFlow.tsx   # Dynamic-import shell for the crypto unlock path
 ├── ConnectButton.tsx           # wagmi-backed custom connect pill
 ├── LazyConnectFlow.tsx         # Dynamic-import shell for the ~140 kB wagmi stack
 ├── WalletProvider.tsx          # wagmi + react-query provider
 ├── NextPuzzleCountdown.tsx     # UTC midnight rollover countdown
 ├── admin/
-│   ├── AdminDashboard.tsx      # /admin client shell with tab state
+│   ├── AdminDashboard.tsx      # /admin client shell with Analytics + Operations tab groups
 │   ├── PulseTab.tsx            # Five-card health grid
+│   ├── FunnelTab.tsx           # Stage bars + metadata breakdown + time-to-convert
+│   ├── UsersTab.tsx            # Paginated profile list with debounced search
 │   ├── AnomaliesTab.tsx        # Flagged-solve table on shadcn primitives
+│   ├── GrantTab.tsx            # Comp-premium admin form
 │   └── index.ts
 └── ui/                         # shadcn-style primitives (Card/Button/Table/Input/Progress)
 
@@ -183,20 +210,34 @@ lib/
 ├── adjacency.ts                # 3×3 rook-graph adjacency, Hamiltonian-path validation
 ├── dictionary.ts               # Lazy-loaded 4–8 letter Set lookup (dynamic import)
 ├── scheduler.ts                # Deterministic getPuzzleForDay()
-├── telemetry.ts                # Client-side keystroke + timing capture
+├── telemetry.ts                # Client-side keystroke + timing capture (anti-bot)
 ├── useGriddle.ts               # Game state hook (keyboard + tap, solve detection)
-├── farcaster.ts                # useFarcaster hook (inMiniApp + pfpUrl + displayName)
-├── session.ts                  # Session cookie helpers
+├── useDarkMode.ts              # Dark-mode hook with session-wallet DB sync
+├── farcaster.ts                # useFarcaster hook (inMiniApp + fid + pfpUrl + displayName)
+├── session.ts                  # Session cookie helpers (middleware-backed)
+├── session-profile.ts          # Session→profile KV binding (fail-closed throwing setter)
+├── session-premium.ts          # Session→premium KV binding (fiat-before-wallet)
 ├── wallet-session.ts           # Session→wallet KV binding
+├── resend.ts                   # Resend API wrapper — magic-link email templates
 ├── admin.ts                    # ADMIN_WALLETS allowlist + requireAdminWallet
 ├── address.ts                  # Shared 0x validator
 ├── site.ts                     # Canonical site URL/name/description
 ├── share.ts                    # Plain-text share format
+├── format.ts                   # Time + ms formatting shared by UI + server
+├── stripe.ts                   # Lazy Stripe client + webhook secret helper
 ├── utils.ts                    # cn() — clsx + tailwind-merge for primitives
 ├── kv.ts                       # Upstash Redis client
+├── contracts/                  # ABIs + address helpers (griddlePremium, wordToken, oracle)
+├── funnel/
+│   ├── events.ts               # Typed FunnelEvent discriminated union
+│   ├── types.ts                # Shared rollup types (client-safe, no runtime imports)
+│   ├── client.ts               # trackEvent(event) — sendBeacon with keepalive fallback
+│   └── record.ts               # Server-side recordFunnelEvent (idempotent on caller-supplied key)
 └── db/
-    ├── schema.ts               # Drizzle schema (puzzles, solves, streaks, premium, leaderboard, puzzle_loads, profiles)
-    └── queries.ts              # Cached read-through + admin Pulse + profile helpers
+    ├── client.ts               # Drizzle (neon-http) singleton
+    ├── schema.ts               # puzzles, solves, streaks, premium_users, leaderboard,
+    │                           # puzzle_loads, profiles, magic_links, user_settings, funnel_events
+    └── queries.ts              # Cached read-through + admin Pulse/Funnel + profile + settings + funnel rollups
 
 contracts/                      # Foundry project
 ├── foundry.toml
@@ -213,11 +254,14 @@ data/
 ├── puzzles.json                # 279 curated words with pre-validated grids
 └── dictionary.json             # 4–8 letter English words (74,947 entries)
 
-drizzle/                        # Generated migrations
-├── 0000_lethal_swordsman.sql
-├── 0001_omniscient_donald_blake.sql
+drizzle/                        # Generated migrations (0000 – 0010)
+├── 0000_lethal_swordsman.sql   # Initial schema
+├── 0001_…                      # Profiles scaffolding, settings, premium ledger extensions
 ├── 0002_watery_midnight.sql    # solves_created_at_idx
-└── 0003_optimal_weapon_omega.sql  # profiles table (M4f scaffolding, pending merge)
+├── 0007_blushing_saracen.sql   # User settings + premium extensions (last of M4f–h)
+├── 0008_bouncy_korath.sql      # profiles email + emailVerifiedAt + displayName + avatarUrl, magic_links
+├── 0009_misty_risque.sql       # profiles farcasterFid + farcasterUsername + partial unique idx
+└── 0010_familiar_the_enforcers.sql  # funnel_events table + indexes + idempotency partial unique
 
 public/
 ├── fonts/                      # Söhne woff2 (6 weights ported from LHAW)
@@ -252,16 +296,18 @@ bun run db:seed                  # Seed 279 puzzles (idempotent)
 | `KV_REST_API_URL` | Upstash Redis HTTPS endpoint | M4-perf ✅ |
 | `KV_REST_API_TOKEN` | Upstash Redis auth token | M4-perf ✅ |
 | `NEXT_PUBLIC_SITE_URL` | Canonical site URL (driven from `lib/site.ts`) | M2 ✅ |
-| `NEXT_PUBLIC_WORD_TOKEN_ADDRESS` | $WORD ERC-20 address on Base | M4f |
-| `NEXT_PUBLIC_GRIDDLE_PREMIUM_ADDRESS` | `GriddlePremium` deployment (set after M4e deploy) | M4f |
-| `NEXT_PUBLIC_GRIDDLE_REWARDS_ADDRESS` | `GriddleRewards` deployment (set after M4e deploy) | M4f |
-| `NEXT_PUBLIC_CHAIN_ID` | `8453` (Base mainnet) | M4f |
-| `ORACLE_API_KEY` | CoinGecko key (shared with LHAW) | M4e |
-| `STRIPE_SECRET_KEY` | Stripe API key for the Apple Pay premium path | M4f |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Client-side Stripe publishable key for Checkout | M4f |
-| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret for `/api/premium/stripe-webhook` | M4f |
-| `STRIPE_PRICE_LOOKUP_KEY` | Stable lookup key for the Griddle Premium price (default `griddle_premium_v1`) | M4f |
-| `OPERATOR_PRIVATE_KEY` | Operator wallet for swap+burn after fiat purchase | M4f |
+| `NEXT_PUBLIC_WORD_TOKEN_ADDRESS` | $WORD ERC-20 address on Base | M4f ✅ |
+| `NEXT_PUBLIC_GRIDDLE_PREMIUM_ADDRESS` | `GriddlePremium` deployment | M4f ✅ |
+| `NEXT_PUBLIC_GRIDDLE_REWARDS_ADDRESS` | `GriddleRewards` deployment | M4f ✅ |
+| `NEXT_PUBLIC_CHAIN_ID` | `8453` (Base mainnet) | M4f ✅ |
+| `ORACLE_API_KEY` | CoinGecko key (shared with LHAW) | M4e ✅ |
+| `STRIPE_SECRET_KEY` | Stripe API key for the Apple Pay premium path | M4f ✅ |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Client-side Stripe publishable key for Checkout | M4f ✅ |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret for `/api/stripe/webhook` | M4f ✅ |
+| `STRIPE_PRICE_LOOKUP_KEY` | Stable lookup key for the Griddle Premium price (default `griddle_premium_v1`) | M4f ✅ |
+| `ESCROW_MANAGER_PRIVATE_KEY` | Operator EOA that opens fiat escrows via `GriddlePremium.unlockForUser` after Stripe settles | M4f ✅ |
+| `RESEND_API_KEY` | Resend API key for the magic-link email transport | M4i ✅ |
+| `EMAIL_FROM` | Sender address for magic links (default `noreply@griddle.fun`) | M4i ✅ |
 | `BOT_THRESHOLD_INELIGIBLE_MS` | Below this server-side solve time, mark ineligible (default `8000`) | M4b ✅ |
 | `BOT_THRESHOLD_SUSPICIOUS_MS` | Below this, flag but count (default `15000`) | M4b ✅ |
 | `BOT_THRESHOLD_STDDEV_MS` | Keystroke stddev floor for suspicion (default `30`) | M4b ✅ |
@@ -296,14 +342,19 @@ Contract deploy (in `contracts/.env`, not the app env):
 | **M4e** | Premium contracts | Foundry project, `GriddlePremium.sol` (permit+burn crypto path, escrow-then-burn fiat path), `GriddleRewards.sol` (EIP-712 signed streak vouchers), full test coverage | ✅ Shipped (code; deploy pending) |
 | **M4-home** | Home UX upgrade | Tappable "How to play" link replacing the dismissible card, three home tiles (Stats · 🏆 Leaderboard · 🗃️ Archive), premium-gate modal skeleton, persistent 4–8 letter found-words strip, profile-aware Stats modal, `/archive` page | ✅ Shipped |
 | **M4-admin** | Admin console restructure | shadcn-style UI primitives (`Button`/`Card`/`Table`/`Input`/`Progress`), `/admin` tab hub (Pulse + Anomalies), `/api/admin/pulse`, btree index on `solves.created_at` | ✅ Shipped |
-| **M4f** | Premium UI + Stripe + Apple Pay | `PremiumModal.tsx` wired to both paths — $5 crypto (EIP-2612 permit+burn) and $6 Apple Pay (Stripe → Uniswap V3 swap → escrow-then-burn with 30-day dispute window). Stripe webhook handler with idempotency. `profiles` table scaffolded for inclusive leaderboard handles. | In progress |
+| **M4f** | Premium checkout live | `PremiumGateModal` + `PremiumCryptoFlow` + `/api/stripe/checkout` + `/api/stripe/webhook` wired end-to-end. Crypto path signs an EIP-2612 permit and server-verifies the `UnlockedWithBurn` event via `/api/premium/verify`. Fiat path creates a Stripe session (Apple Pay + card) with the session id stashed in metadata, and the webhook records the unlock with Stripe-event-id idempotency. Both paths land in `premium_users`. | ✅ Shipped |
+| **M4g** | Session-based premium | Fiat checkout no longer requires a wallet. Premium binds to the browser session in Upstash KV via `session-premium.ts` and a `/api/premium/session` read; on first wallet connect `/api/premium/migrate` promotes the session binding to a wallet-keyed `premium_users` row. | ✅ Shipped |
+| **M4h** | Stats modal + dark mode + settings | StatsModal rebuild with three identity states (anonymous / account / premium), premium settings panel (streak protection with 7-day cooldown, unassisted mode toggle), universal dark-mode toggle (Tailwind `darkMode: 'class'`), per-wallet settings table, Wordmarks placeholder card, FAQ link. Header Connect pill removed — the connector picker auto-reconnects without a user click. | ✅ Shipped |
+| **M4i** | Identity + email auth | Magic-link email auth via Resend (`/api/auth/request`, `/api/auth/verify`), `CreateProfileModal` with email OR handle-only paths, Farcaster miniapp profile upsert with FID+wallet match guard, atomic profile auto-merge in a single CTE, session→profile KV bindings that fail closed when they can't land. Adds `profiles.email` / `displayName` / `avatarUrl` / `farcasterFid` / `farcasterUsername` columns and a `magic_links` token table. | ✅ Shipped |
+| **M4j** | Admin Users tab | Searchable, paginated profile list under `/admin` → Operations. Joins `profiles` and `premium_users` for combined identity + premium source display. Debounced search with AbortController-cancelled fetches so rapid typing can't race stale responses into the table. | ✅ Shipped |
+| **M5a** | Funnel telemetry | New `funnel_events` table + typed event catalog (`lib/funnel/events.ts`) + client `sendBeacon` helper + server-side `recordFunnelEvent` with idempotency keys for webhook / tx-verify callers. Instruments `stats_opened`, `premium_gate_shown`, `upgrade_clicked`, `checkout_started`, `checkout_completed`, `checkout_failed`, `profile_identified`. New admin **Funnel** tab with stage bars, per-metadata breakdown, an Other signals card for `checkout_failed` reason taxonomy, and median time-to-convert per payment method. | ✅ Shipped |
 
-### Premium pricing (decided 2026-04-13)
+### Premium pricing
 
 - **$5** — direct $WORD permit-burn from a connected wallet
-- **$6** — Stripe Checkout with Apple Pay enabled (the $1 covers Stripe fees ~$0.45, DEX swap fees + slippage buffer, and a small treasury margin)
+- **$6** — Stripe Checkout with Apple Pay enabled (the $1 covers Stripe fees ~$0.45, DEX swap fees + slippage buffer, and a small treasury margin). No wallet required — the unlock binds to the browser session in KV and migrates to a wallet-keyed `premium_users` row on first connect.
 
-Both paths land in the same `premium_users` row. Premium status is server-side (DB), not onchain — the contract burn is the deflationary signal, not the access-control mechanism. Both paths use **escrow-then-burn**: tokens go to a hold contract for ~30 days before permanent burn, so a Stripe dispute can recover them back to treasury.
+Both paths land in the same `premium_users` ledger. Premium status is server-side (DB), not onchain — the contract burn is the deflationary signal, not the access-control mechanism. Both paths use **escrow-then-burn**: tokens go to a hold contract for ~30 days before permanent burn, so a Stripe dispute can recover them back to treasury. The server-side `checkout_completed` funnel event is idempotency-keyed on the Stripe event id (fiat) or the on-chain tx hash (crypto) so retry storms can't double-count conversions.
 
 ---
 
@@ -325,12 +376,30 @@ Both paths land in the same `premium_users` row. Premium status is server-side (
 ## Code Style
 
 - **Curly quotes everywhere** — `’`, `“`, `”` in all UI text. Never `'` or `"`. Applies to copy, share text, OG images, email, toasts, modals
-- **No dark mode** — light mode only (matches LHAW)
-- **Branch + PR workflow** — every change after M1 goes through a PR, reviewed by Cursor Bugbot before merge
+- **Dark mode via Tailwind `class` strategy** — universal toggle from StatsModal, persisted per-wallet in `user_settings.darkModeEnabled` when connected, otherwise `localStorage`. Every styled component ships both light and dark variants
+- **Branch + PR workflow** — every change after M1 goes through a PR, reviewed by Cursor Bugbot before merge. Fix all Bugbot findings and push before asking for a second review
+- **Fail-closed on create-and-bind** — any endpoint that creates a DB row AND binds it to the session (magic-link verify, profile/create, profile/farcaster) uses the throwing `setSessionProfileOrThrow` variant and rolls back the row on KV failure. Two stores drifting apart is worse than a 503
+- **Idempotency keys on webhook telemetry** — every server-side `checkout_completed` insert is keyed on the Stripe event id or the on-chain tx hash. Client events are allow-listed and carry no idempotency key — `checkout_completed` and `profile_created` are server-only on purpose
 
 ---
 
 ## Changelog
+
+### 2026-04-15 (M4i + M4j + M5a — identity, admin Users, funnel)
+
+- **M4i — email auth + profile creation** (#30): Magic-link email auth via Resend. New `POST /api/auth/request` generates a SHA-256-hashed token with a 15-minute TTL and atomic 5-per-hour rate limit via a single `INSERT … SELECT … WHERE count < N`. Transport failure rolls the token row back so a Resend outage doesn’t burn rate-limit slots. `GET /api/auth/verify` consumes the token in one atomic UPDATE, creates-or-finds the profile, binds it to the session in Upstash KV via a throwing setter (so a KV flake redirects to `?auth=error` instead of stranding the user with a consumed token and no binding). Profiles gained `email`, `emailVerifiedAt`, `displayName`, `avatarUrl`, `farcasterFid`, `farcasterUsername` columns plus a `magic_links` table. Auto-merge: if a user authenticates with both a wallet row and a Farcaster row (or email + wallet), `mergeProfiles` combines them in a single atomic CTE (older row wins on conflict, survivor row’s wallet is then explicitly overwritten with the authenticating wallet). CreateProfileModal accepts email OR display-name-only; on the email path a pending display name is stashed in `localStorage` and PATCHed onto the profile after the `?auth=ok` redirect. Handle-only profiles rejected when the session already has a profile (by either `session-profile` OR `session-wallet` + wallet-linked row) to close a handle-squat loop. Single-char slugs padded to at least 2 chars and trailing hyphens trimmed after the length slice so every generated handle round-trips through the PATCH validator. `upsertProfileForFarcaster` uses `onConflictDoNothing` + re-fetch as its TOCTOU guard, and the Farcaster POST in `handleWalletConnect` is now awaited before the premium migration proceeds. FID validated as a positive integer on ingest.
+- **M4j — admin Users tab** (#31): Searchable, paginated profile list under `/admin` → Operations. Joins `profiles` and `premium_users` for combined identity + premium-source display (uses the actual `premium_users.source` column, not a fabricated label). Debounced search with `AbortController`-cancelled fetches so rapid typing can't race stale responses into the table, empty-string handle values treated as missing in the avatar-initial helper, page reset on real query change only.
+- **M5a — funnel telemetry** (#32): New `funnel_events` table with `(created_at desc)`, `(event_name, created_at)`, and a partial unique index on `idempotency_key` so server-side retry bursts can't double-count. Typed event catalog (`lib/funnel/events.ts`) as a discriminated union on `name` — typos become compile errors at every call site. Client helper (`lib/funnel/client.ts`) uses `navigator.sendBeacon` with a keepalive-fetch fallback so events survive page unloads. Server helper (`lib/funnel/record.ts`) swallows its own failures; the `/api/telemetry/event` handler wraps every step in try/catch so the route honors its “always 204” contract even when `getSessionId` throws. The client ingestion endpoint accepts only an allow-listed subset (`stats_opened`, `premium_gate_shown`, `upgrade_clicked`, `checkout_started`, `checkout_failed`, `profile_identified`) — `checkout_completed` and `profile_created` are emitted exclusively server-side from the Stripe webhook and the crypto verify route, each with an idempotency key (Stripe event id or `crypto:${txHash}`) so forged client events can’t inflate conversion metrics.
+
+  New **Funnel** admin tab with a window picker (24h / 7d / 30d / all), stage bars (conversion % computed against the first populated stage so warmup doesn’t render every stage at 0%), per-metadata breakdown (`checkout_failed` routes to its `reason` bucket via a CASE expression so failure taxonomies stay visible), an Other signals card for non-funnel events, and median time-to-convert cards per payment method. Time-to-convert query uses an alias-local CTE bound (`uc.created_at`) to sidestep the ambiguous column Drizzle would otherwise render for the self-join. Shared rollup types live in `lib/funnel/types.ts` with no runtime imports so the `'use client'` tab and the server query stay in lockstep without the bundler pulling `db/client.ts` into the client chunk.
+
+### 2026-04-14 (M4f + M4g + M4h — premium checkout, dark mode, stats)
+
+- **M4f — premium checkout live** (#26): `PremiumGateModal` + `PremiumCryptoFlow` + `/api/stripe/checkout` + `/api/stripe/webhook` + `/api/premium/verify` end-to-end. Crypto path: fetch live $WORD/USD from the oracle, sign an EIP-2612 permit (`signTypedDataAsync`) with a ±15% slippage buffer, call `unlockWithPermit` via `writeContractAsync`, then server-verify the `UnlockedWithBurn` event from the receipt before writing the `premium_users` row — the client-reported wallet is never trusted. Fiat path: stash `sessionId` in Stripe metadata, signature-verified webhook on receipt, `recordFiatUnlock` with Stripe-session-id idempotency. Both routes land in the same `premium_users` ledger.
+- **HomeTiles 2:1 + payment copy + silhouette avatar** (#25): Home tiles relaid out as a 2×1 grid (Stats · Leaderboard · Archive), post-solve share card gains a neutral silhouette avatar for anon users, pricing copy refreshed across Premium/Checkout UI.
+- **Admin Grant tab** (#24): `/admin` → Operations → **Grant**, an operator form that comps premium to any wallet OR handle with an optional reason string. `premium_users.source='admin_grant'` with `grantedBy` + `reason` audit trail. Used for game launch perks and support-case resolutions; does not burn tokens.
+- **M4g — session-based premium** (#27): Fiat checkout no longer requires a connected wallet. A new Upstash binding (`session-premium.ts`) holds the premium flag against the browser session id, surfaced via `/api/premium/session`. On the user’s first wallet connect, `/api/premium/migrate` promotes the session-bound unlock to a wallet-keyed `premium_users` row — GETDEL on the session key so it can’t be double-claimed, onConflictDoUpdate on the wallet key so a prior crypto unlock can’t be overwritten by a fiat migration.
+- **M4h — stats modal overhaul + dark mode + settings** (#28, #29): StatsModal rebuilt with three identity states — **anonymous** (CTAs: create profile / connect wallet / unlock with card or crypto), **account** (free stats + premium upsell strip with a “Refresh” button for users who just paid but whose wallet hasn’t flipped yet), and **premium** (full stats grid + settings panel + Wordmarks placeholder + FAQ link). Premium settings live in a new `user_settings` table keyed on wallet: **streak protection** (armed once, 7-day cooldown after use) and **unassisted mode** (hides cell hints for an Ace Wordmark). Universal **dark mode** toggle in the stats header — Tailwind `darkMode: 'class'` strategy, wallet-synced to `user_settings.darkModeEnabled` when connected, `localStorage` fallback otherwise. Header Connect pill removed entirely; wagmi auto-reconnects on page load via the provider. `/faq` page added for the public-facing FAQ (mirrors `FAQ.md`). Wallet picker no longer auto-opens on first load — only when the user explicitly clicks a connect CTA.
 
 ### 2026-04-14 (home UX + admin console)
 
