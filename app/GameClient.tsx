@@ -442,7 +442,15 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     if (!sessionWallet) return;
     if (!pfpUrl) return;
     if (lastSyncedPfpUrlRef.current === pfpUrl) return;
-    lastSyncedPfpUrlRef.current = pfpUrl;
+    // Capture the URL we're about to sync in a local so closure reads
+    // are stable across the async boundary. Do NOT mark the ref as
+    // synced yet — if the effect tears down before the fetch resolves
+    // (e.g. `username` or `displayName` changes and the cleanup aborts
+    // the in-flight request), an eagerly-set ref would record the URL
+    // as "already synced" and the retry-on-next-effect-run would be
+    // skipped, silently losing the pfp update. The ref only moves
+    // forward after a confirmed server response.
+    const targetPfpUrl = pfpUrl;
     const controller = new AbortController();
     fetch('/api/profile/farcaster', {
       method: 'POST',
@@ -451,13 +459,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         fid,
         username,
         displayName,
-        avatarUrl: pfpUrl,
+        avatarUrl: targetPfpUrl,
         wallet: sessionWallet,
       }),
       signal: controller.signal,
     })
-      .then((r) => { if (r.ok) void refetchProfile(); })
-      .catch(() => {/* best-effort; silent */});
+      .then((r) => {
+        if (!r.ok) return;
+        lastSyncedPfpUrlRef.current = targetPfpUrl;
+        void refetchProfile();
+      })
+      .catch(() => {/* best-effort; silent — ref stays unset so a later run retries */});
     return () => controller.abort();
   }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile]);
 
