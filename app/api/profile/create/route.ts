@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { setSessionProfileOrThrow } from '@/lib/session-profile';
+import { getSessionProfile, setSessionProfileOrThrow } from '@/lib/session-profile';
 import { db } from '@/lib/db/client';
 import { profiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -29,6 +29,22 @@ export async function POST(req: Request): Promise<NextResponse> {
   const displayName = (body.displayName ?? '').trim().slice(0, 50);
   if (!displayName) {
     return NextResponse.json({ error: 'displayName required' }, { status: 400 });
+  }
+
+  // Guard: if the session already has a profile bound, refuse to
+  // create a second one. Without this, a malicious client could loop
+  // this endpoint with different display names to squat handles —
+  // each call creates a new profile, overwrites the session KV
+  // binding, and leaves the previous profile orphaned but still
+  // blocking its handle via the unique index. Callers that actually
+  // want to update an existing profile use PATCH /api/profile.
+  const sessionId = await getSessionId();
+  const existing = await getSessionProfile(sessionId);
+  if (existing !== null) {
+    return NextResponse.json(
+      { error: 'profile already exists for this session; use PATCH /api/profile to update' },
+      { status: 409 },
+    );
   }
 
   // Slugify the display name into a handle that matches the same shape
@@ -89,7 +105,6 @@ export async function POST(req: Request): Promise<NextResponse> {
   // instead of leaving a dangling handle (which would block re-creates
   // because the unique index is already taken).
   try {
-    const sessionId = await getSessionId();
     await setSessionProfileOrThrow(sessionId, profileId);
   } catch (err) {
     console.error('[profile/create] setSessionProfile failed; rolling back profile row', err);
