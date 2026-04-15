@@ -301,3 +301,42 @@ export const puzzleLoads = pgTable(
     pk: primaryKey({ columns: [t.sessionId, t.puzzleId] }),
   }),
 );
+
+/**
+ * Funnel events — one row per instrumented step in the
+ * anon → account → premium conversion funnel. Schema is intentionally
+ * wide-and-dumb: `event_name` is a free-form varchar (not an enum) so
+ * adding/renaming events never requires a migration, and `metadata`
+ * jsonb carries any per-event variant fields.
+ *
+ * Identity is resolved server-side at insert time from the existing KV
+ * helpers, so the client never needs to know its own identity state to
+ * emit an event. `session_id` is always set; `wallet` and `profile_id`
+ * are populated when known.
+ *
+ * `idempotency_key` lets server-side emitters (Stripe webhook, crypto
+ * tx confirmation) guard against retries producing double-count events.
+ * It's partial-unique so client-side events (which leave it null) can
+ * coexist freely.
+ */
+export const funnelEvents = pgTable(
+  'funnel_events',
+  {
+    id: serial('id').primaryKey(),
+    eventName: varchar('event_name', { length: 64 }).notNull(),
+    sessionId: varchar('session_id', { length: 64 }).notNull(),
+    wallet: varchar('wallet', { length: 42 }),
+    profileId: integer('profile_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 128 }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    createdAtIdx: index('funnel_events_created_at_idx').on(sql`${t.createdAt} DESC`),
+    eventNameIdx: index('funnel_events_name_created_at_idx').on(t.eventName, sql`${t.createdAt} DESC`),
+    sessionIdx: index('funnel_events_session_idx').on(t.sessionId),
+    idempotencyIdx: uniqueIndex('funnel_events_idempotency_idx')
+      .on(t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} is not null`),
+  }),
+);

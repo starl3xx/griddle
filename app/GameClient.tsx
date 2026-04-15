@@ -17,6 +17,7 @@ import { PremiumGateModal } from '@/components/PremiumGateModal';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
 import { useFarcaster } from '@/lib/farcaster';
+import { trackEvent } from '@/lib/funnel/client';
 import type { SolvePayload } from '@/lib/telemetry';
 
 /**
@@ -181,6 +182,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    */
   const [premium, setPremium] = useState(false);
 
+  // Refs that mirror the reactive identity state so stable callbacks
+  // (useCallback with []) can read the latest value without taking
+  // `premium` / `sessionWallet` as deps — avoids re-creating the
+  // callback on every state change and the downstream re-renders in
+  // memoized children.
+  const premiumRef = useRef(premium);
+  const sessionWalletRef = useRef(sessionWallet);
+  useEffect(() => { premiumRef.current = premium; }, [premium]);
+  useEffect(() => { sessionWalletRef.current = sessionWallet; }, [sessionWallet]);
+
   // Check session-based premium on mount (covers fiat buyers who haven't
   // connected a wallet yet). This runs once, client-side only.
   useEffect(() => {
@@ -268,6 +279,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       } catch {
         // link is best-effort — proceed even on failure so UI updates
       }
+      // Emit profile_identified after the link POST so the server-side
+      // session → wallet binding exists when the event row is written.
+      trackEvent({ name: 'profile_identified', method: 'wallet_connected' });
 
       // Farcaster miniapp: upsert a rich profile using FID + username + pfp.
       // The API auto-merges with any existing wallet profile and binds the
@@ -396,6 +410,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const [showCryptoFlow, setShowCryptoFlow] = useState(false);
 
   const handleUnlockCrypto = useCallback(() => {
+    trackEvent({ name: 'upgrade_clicked', method: 'crypto' });
+    // checkout_started fires from PremiumCryptoFlow at the actual
+    // permit-signed / tx-broadcast moment, not here — otherwise it
+    // would be redundant with upgrade_clicked in the same tick and
+    // would blend different semantics with the fiat path (which
+    // fires started only after Stripe session creation succeeds).
     setShowCryptoFlow(true);
   }, []);
 
@@ -406,18 +426,40 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * webhook skip the migration step.
    */
   const handleUnlockFiat = useCallback(async () => {
-    const res = await fetch('/api/stripe/checkout', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ wallet: sessionWallet ?? undefined }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Checkout failed: ${body}`);
+    trackEvent({ name: 'upgrade_clicked', method: 'fiat' });
+    // Track whether we've already fired a specific-reason failure so
+    // the generic exception handler doesn't double-count in the funnel.
+    let failedReasonEmitted = false;
+    const emitFailure = (reason: string) => {
+      if (failedReasonEmitted) return;
+      failedReasonEmitted = true;
+      trackEvent({ name: 'checkout_failed', method: 'fiat', reason });
+    };
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ wallet: sessionWallet ?? undefined }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        emitFailure(`http_${res.status}`);
+        throw new Error(`Checkout failed: ${body}`);
+      }
+      const data = (await res.json()) as { url?: string };
+      if (!data.url) {
+        emitFailure('no_url');
+        throw new Error('Checkout did not return a URL');
+      }
+      // checkout_started fires right before the redirect — the fiat
+      // checkout_completed is emitted server-side from the Stripe
+      // webhook so it's not gated on the user returning to the app.
+      trackEvent({ name: 'checkout_started', method: 'fiat' });
+      window.location.href = data.url;
+    } catch (err) {
+      emitFailure('exception');
+      throw err;
     }
-    const data = (await res.json()) as { url?: string };
-    if (!data.url) throw new Error('Checkout did not return a URL');
-    window.location.href = data.url;
   }, [sessionWallet]);
 
   const handleCryptoUnlocked = useCallback(
@@ -429,11 +471,23 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     [refreshPremium],
   );
 
-  const handleStatsClick = useCallback(() => setShowStats(true), []);
+  const handleStatsClick = useCallback(() => {
+    // variant depends on current identity state — read from refs so
+    // the callback stays stable across premium/sessionWallet changes
+    // (HomeTiles memoizes on its click handlers).
+    const variant = premiumRef.current
+      ? 'premium'
+      : sessionWalletRef.current
+        ? 'account'
+        : 'anon';
+    trackEvent({ name: 'stats_opened', variant });
+    setShowStats(true);
+  }, []);
   const handleLeaderboardClick = useCallback(() => {
     if (premium) {
       router.push(`/leaderboard/${initialPuzzle.dayNumber}`);
     } else {
+      trackEvent({ name: 'premium_gate_shown', feature: 'leaderboard' });
       setPremiumGate('leaderboard');
     }
   }, [premium, router, initialPuzzle.dayNumber]);
@@ -441,6 +495,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     if (premium) {
       router.push('/archive');
     } else {
+      trackEvent({ name: 'premium_gate_shown', feature: 'archive' });
       setPremiumGate('archive');
     }
   }, [premium, router]);
@@ -547,7 +602,11 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         onToggleDark={toggleDark}
         onClose={() => setShowStats(false)}
         onConnect={() => { setShowStats(false); triggerConnect(); }}
-        onUpgrade={() => { setShowStats(false); setPremiumGate('premium'); }}
+        onUpgrade={() => {
+          setShowStats(false);
+          trackEvent({ name: 'premium_gate_shown', feature: 'premium' });
+          setPremiumGate('premium');
+        }}
         onRefreshPremium={() => { if (sessionWallet) void refreshPremium(sessionWallet); }}
         pfpUrl={pfpUrl}
         displayName={displayName}

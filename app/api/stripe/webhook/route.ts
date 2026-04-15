@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getStripe, STRIPE_WEBHOOK_SECRET } from '@/lib/stripe';
 import { recordFiatUnlock } from '@/lib/db/queries';
 import { setSessionPremium } from '@/lib/session-premium';
+import { recordFunnelEvent } from '@/lib/funnel/record';
 import type Stripe from 'stripe';
 
 /**
@@ -92,6 +93,21 @@ export async function POST(req: Request): Promise<NextResponse> {
   } catch (err) {
     console.error('[stripe/webhook] failed to record unlock', err);
     return NextResponse.json({ error: 'failed to record unlock' }, { status: 500 });
+  }
+
+  // checkout_completed — idempotency key = stripe event id, so Stripe's
+  // at-least-once webhook delivery can't double-count. recordFunnelEvent
+  // catches its own failures internally, but it's reached through an
+  // await expression, so we belt-and-suspender a try/catch here — any
+  // exception surfacing as a 500 would trigger a Stripe retry storm
+  // and the very double-count we're guarding against.
+  try {
+    await recordFunnelEvent(
+      { name: 'checkout_completed', method: 'fiat' },
+      { sessionId, wallet, idempotencyKey: event.id },
+    );
+  } catch (err) {
+    console.warn('[stripe/webhook] funnel telemetry emit failed', err);
   }
 
   return NextResponse.json({ received: true, sessionId: session.id });

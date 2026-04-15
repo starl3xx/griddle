@@ -9,6 +9,7 @@ import {
   profiles,
   userSettings,
   magicLinks,
+  funnelEvents,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
@@ -1580,5 +1581,129 @@ export async function upsertUserSettings(
     unassistedModeEnabled: r.unassistedModeEnabled,
     darkModeEnabled: r.darkModeEnabled,
     updatedAt: r.updatedAt,
+  };
+}
+
+// ─── Funnel telemetry rollups ──────────────────────────────────────
+
+// Type definitions live in `lib/funnel/types.ts` so the admin Funnel
+// tab (a `'use client'` component) can import the same shapes without
+// dragging db/client.ts and the postgres driver into the client bundle.
+// Re-exported here so existing server-side call sites keep their
+// import paths.
+export type {
+  FunnelWindow,
+  FunnelStageRow,
+  FunnelBreakdownRow,
+  FunnelTimeToConvertRow,
+  FunnelStats,
+} from '@/lib/funnel/types';
+import type { FunnelWindow, FunnelStats } from '@/lib/funnel/types';
+
+/** SQL interval string for a FunnelWindow. `all` returns null = no bound. */
+function windowIntervalSql(window: FunnelWindow) {
+  switch (window) {
+    case '24h': return sql`now() - interval '1 day'`;
+    case '7d':  return sql`now() - interval '7 days'`;
+    case '30d': return sql`now() - interval '30 days'`;
+    case 'all': return null;
+  }
+}
+
+export async function getFunnelStats(window: FunnelWindow = '7d'): Promise<FunnelStats> {
+  const since = windowIntervalSql(window);
+  const timeBound = since
+    ? sql`${funnelEvents.createdAt} >= ${since}`
+    : sql`true`;
+
+  // Stage rollup — distinct sessions and total events per event_name.
+  const stageRows = await db
+    .select({
+      eventName: funnelEvents.eventName,
+      sessions: sql<number>`count(distinct ${funnelEvents.sessionId})::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(funnelEvents)
+    .where(timeBound)
+    .groupBy(funnelEvents.eventName);
+
+  // Breakdown — second group key is the metadata discriminator we care
+  // about for each event. checkout_failed is special: its metadata has
+  // BOTH `method` and `reason`, and we want the bucket to be the reason
+  // (e.g. http_400) — not the method — so the funnel surfaces failure
+  // taxonomies. Plain coalesce would pick `method` first and collapse
+  // all failures under "fiat" / "crypto". Use a CASE expression so
+  // checkout_failed routes to `reason`, everything else falls back to
+  // the method/feature/variant coalesce.
+  const bucketExpr = sql`
+    case
+      when ${funnelEvents.eventName} = 'checkout_failed'
+        then coalesce(${funnelEvents.metadata}->>'reason', 'n/a')
+      else coalesce(
+        ${funnelEvents.metadata}->>'method',
+        ${funnelEvents.metadata}->>'feature',
+        ${funnelEvents.metadata}->>'variant',
+        'n/a'
+      )
+    end
+  `;
+  const breakdownRows = await db
+    .select({
+      eventName: funnelEvents.eventName,
+      bucket: sql<string>`${bucketExpr}`,
+      sessions: sql<number>`count(distinct ${funnelEvents.sessionId})::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(funnelEvents)
+    .where(timeBound)
+    .groupBy(funnelEvents.eventName, bucketExpr);
+
+  // Median time-to-convert per method. For each session we compute the
+  // gap between its earliest upgrade_clicked and its earliest
+  // checkout_completed of the same method, then take the median via
+  // percentile_cont. Sessions that never converted don't appear — we're
+  // measuring speed, not rate (that's what the stages query is for).
+  //
+  // Note: the reusable `timeBound` fragment renders as
+  // `funnel_events.created_at` which is ambiguous inside the self-join
+  // below (both aliases `uc` and `cc` point at funnel_events). Build
+  // a CTE-local time bound that names the alias explicitly.
+  const ttcTimeBound = since ? sql`uc.created_at >= ${since}` : sql`true`;
+  const ttcRows = await db.execute<{ method: string; median_ms: number | null }>(sql`
+    WITH paired AS (
+      SELECT
+        uc.session_id,
+        uc.metadata->>'method' AS method,
+        extract(epoch FROM (min(cc.created_at) - min(uc.created_at))) * 1000 AS gap_ms
+      FROM funnel_events uc
+      JOIN funnel_events cc
+        ON cc.session_id = uc.session_id
+       AND cc.event_name = 'checkout_completed'
+       AND cc.metadata->>'method' = uc.metadata->>'method'
+       AND cc.created_at >= uc.created_at
+      WHERE uc.event_name = 'upgrade_clicked'
+        AND ${ttcTimeBound}
+      GROUP BY uc.session_id, uc.metadata->>'method'
+    )
+    SELECT method,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY gap_ms)::float AS median_ms
+    FROM paired
+    WHERE gap_ms >= 0
+    GROUP BY method
+  `);
+
+  const ttcArr = Array.isArray(ttcRows) ? ttcRows : ttcRows.rows;
+  const medianTimeToConvertMs: FunnelStats['medianTimeToConvertMs'] = (['crypto', 'fiat'] as const).map(
+    (method) => {
+      const row = ttcArr.find((r) => r.method === method);
+      return { method, ms: row?.median_ms ?? null };
+    },
+  );
+
+  return {
+    window,
+    stages: stageRows,
+    breakdown: breakdownRows,
+    medianTimeToConvertMs,
   };
 }
