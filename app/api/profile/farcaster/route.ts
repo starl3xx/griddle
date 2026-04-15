@@ -33,8 +33,16 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
-  if (!body.fid || typeof body.fid !== 'number') {
-    return NextResponse.json({ error: 'fid required' }, { status: 400 });
+  // Require a positive integer FID. A bare `typeof 'number'` check
+  // lets floats like 1.5 through and PG silently truncates them on
+  // insert into the int column, risking a unique-index collision
+  // with a real user's FID.
+  if (
+    typeof body.fid !== 'number' ||
+    !Number.isInteger(body.fid) ||
+    body.fid <= 0
+  ) {
+    return NextResponse.json({ error: 'fid must be a positive integer' }, { status: 400 });
   }
 
   const sessionId = await getSessionId();
