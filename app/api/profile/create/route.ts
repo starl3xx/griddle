@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { setSessionProfile } from '@/lib/session-profile';
+import { setSessionProfileOrThrow } from '@/lib/session-profile';
 import { db } from '@/lib/db/client';
 import { profiles } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 
 /**
  * POST /api/profile/create
@@ -70,8 +71,29 @@ export async function POST(req: Request): Promise<NextResponse> {
     profileId = retry[0].id;
   }
 
-  const sessionId = await getSessionId();
-  await setSessionProfile(sessionId, profileId);
+  // Bind the new profile to the session in KV. MUST succeed — the
+  // non-throwing setSessionProfile would silently swallow a KV flake,
+  // leaving an orphaned DB row and a client that optimistically thinks
+  // it has an account but reverts to anonymous on reload. Mirror the
+  // magic-link verify path: use the throwing variant, and if it fails,
+  // delete the just-created profile row so the user can retry cleanly
+  // instead of leaving a dangling handle (which would block re-creates
+  // because the unique index is already taken).
+  try {
+    const sessionId = await getSessionId();
+    await setSessionProfileOrThrow(sessionId, profileId);
+  } catch (err) {
+    console.error('[profile/create] setSessionProfile failed; rolling back profile row', err);
+    try {
+      await db.delete(profiles).where(eq(profiles.id, profileId));
+    } catch (delErr) {
+      console.error('[profile/create] rollback delete also failed', delErr);
+    }
+    return NextResponse.json(
+      { error: 'Could not bind profile to session; please retry.' },
+      { status: 503 },
+    );
+  }
 
   return NextResponse.json({ profileId, handle });
 }
