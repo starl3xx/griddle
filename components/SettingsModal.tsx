@@ -194,26 +194,41 @@ export function SettingsModal({
     setProfileError(null);
     setProfileSavedAt(null);
 
-    // Only send fields that actually changed. PATCH /api/profile rejects
-    // empty strings explicitly for each field, so "no change" means
-    // "don't include in the body" — not "send empty."
-    const patch: { displayName?: string; handle?: string; avatarUrl?: string } = {};
+    // Only include fields that actually changed from the current
+    // profile. displayName and handle can't be cleared — the server
+    // rejects empty values and we show a specific error here. avatarUrl
+    // CAN be cleared by blanking the field; send explicit `null` in
+    // that case so the server drops the column back to the default
+    // silhouette.
+    const patch: { displayName?: string; handle?: string; avatarUrl?: string | null } = {};
     const trimmedName = displayNameDraft.trim();
     const trimmedHandle = handleDraft.trim().toLowerCase();
     const trimmedAvatar = avatarUrlDraft.trim();
+    const currentName = profile?.displayName ?? '';
+    const currentHandle = profile?.handle ?? '';
+    const currentAvatar = profile?.avatarUrl ?? '';
 
-    if (trimmedName && trimmedName !== (profile?.displayName ?? '')) {
+    if (trimmedName !== currentName) {
+      if (!trimmedName) {
+        setProfileError('Display name cannot be empty.');
+        return;
+      }
       patch.displayName = trimmedName;
     }
-    if (trimmedHandle && trimmedHandle !== (profile?.handle ?? '')) {
+    if (trimmedHandle !== currentHandle) {
+      if (!trimmedHandle) {
+        setProfileError('Handle cannot be empty.');
+        return;
+      }
       if (!HANDLE_RE.test(trimmedHandle) || trimmedHandle.length < 2 || trimmedHandle.length > 32) {
         setProfileError('Handle must be 2–32 chars, lowercase letters, numbers, or hyphens.');
         return;
       }
       patch.handle = trimmedHandle;
     }
-    if (trimmedAvatar && trimmedAvatar !== (profile?.avatarUrl ?? '')) {
-      patch.avatarUrl = trimmedAvatar;
+    if (trimmedAvatar !== currentAvatar) {
+      // Empty → null = clear the avatar. Non-empty → set the URL.
+      patch.avatarUrl = trimmedAvatar ? trimmedAvatar : null;
     }
 
     if (Object.keys(patch).length === 0) {
