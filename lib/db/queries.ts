@@ -1682,6 +1682,12 @@ export async function getFunnelStats(window: FunnelWindow = '7d'): Promise<Funne
   // checkout_completed of the same method, then take the median via
   // percentile_cont. Sessions that never converted don't appear — we're
   // measuring speed, not rate (that's what the stages query is for).
+  //
+  // Note: the reusable `timeBound` fragment renders as
+  // `funnel_events.created_at` which is ambiguous inside the self-join
+  // below (both aliases `uc` and `cc` point at funnel_events). Build
+  // a CTE-local time bound that names the alias explicitly.
+  const ttcTimeBound = since ? sql`uc.created_at >= ${since}` : sql`true`;
   const ttcRows = await db.execute<{ method: string; median_ms: number | null }>(sql`
     WITH paired AS (
       SELECT
@@ -1695,7 +1701,7 @@ export async function getFunnelStats(window: FunnelWindow = '7d'): Promise<Funne
        AND cc.metadata->>'method' = uc.metadata->>'method'
        AND cc.created_at >= uc.created_at
       WHERE uc.event_name = 'upgrade_clicked'
-        AND ${timeBound}
+        AND ${ttcTimeBound}
       GROUP BY uc.session_id, uc.metadata->>'method'
     )
     SELECT method,

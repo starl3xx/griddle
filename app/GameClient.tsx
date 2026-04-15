@@ -413,6 +413,14 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    */
   const handleUnlockFiat = useCallback(async () => {
     trackEvent({ name: 'upgrade_clicked', method: 'fiat' });
+    // Track whether we've already fired a specific-reason failure so
+    // the generic exception handler doesn't double-count in the funnel.
+    let failedReasonEmitted = false;
+    const emitFailure = (reason: string) => {
+      if (failedReasonEmitted) return;
+      failedReasonEmitted = true;
+      trackEvent({ name: 'checkout_failed', method: 'fiat', reason });
+    };
     try {
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
@@ -421,12 +429,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       });
       if (!res.ok) {
         const body = await res.text();
-        trackEvent({ name: 'checkout_failed', method: 'fiat', reason: `http_${res.status}` });
+        emitFailure(`http_${res.status}`);
         throw new Error(`Checkout failed: ${body}`);
       }
       const data = (await res.json()) as { url?: string };
       if (!data.url) {
-        trackEvent({ name: 'checkout_failed', method: 'fiat', reason: 'no_url' });
+        emitFailure('no_url');
         throw new Error('Checkout did not return a URL');
       }
       // checkout_started fires right before the redirect — the fiat
@@ -435,7 +443,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       trackEvent({ name: 'checkout_started', method: 'fiat' });
       window.location.href = data.url;
     } catch (err) {
-      trackEvent({ name: 'checkout_failed', method: 'fiat', reason: 'exception' });
+      emitFailure('exception');
       throw err;
     }
   }, [sessionWallet]);

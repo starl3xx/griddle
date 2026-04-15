@@ -40,6 +40,10 @@ export function FunnelTab() {
   const [data, setData] = useState<FunnelStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by the retry button to force a re-fetch without changing
+  // any other state. `setWin(win)` wouldn't re-run the effect because
+  // React bails out when the new state equals the old.
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -61,7 +65,7 @@ export function FunnelTab() {
       }
     })();
     return () => controller.abort();
-  }, [win]);
+  }, [win, retryNonce]);
 
   const stageMap = useMemo(() => {
     const m = new Map<string, StageRow>();
@@ -104,7 +108,7 @@ export function FunnelTab() {
     return (
       <div className="text-center py-12">
         <p className="text-sm text-error mb-4">{error}</p>
-        <Button variant="outline" size="sm" onClick={() => setWin(win)}>
+        <Button variant="outline" size="sm" onClick={() => setRetryNonce((n) => n + 1)}>
           <ArrowsClockwise className="h-4 w-4 mr-2" weight="bold" />
           Retry
         </Button>
