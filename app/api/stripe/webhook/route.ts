@@ -96,14 +96,19 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   // checkout_completed — idempotency key = stripe event id, so Stripe's
-  // at-least-once webhook delivery can't double-count. Fire-and-forget;
-  // failure of the telemetry insert must never surface as a 500 here
-  // (that would make Stripe retry and actually cause the double-count
-  // we're guarding against).
-  await recordFunnelEvent(
-    { name: 'checkout_completed', method: 'fiat' },
-    { sessionId, wallet, idempotencyKey: event.id },
-  );
+  // at-least-once webhook delivery can't double-count. recordFunnelEvent
+  // catches its own failures internally, but it's reached through an
+  // await expression, so we belt-and-suspender a try/catch here — any
+  // exception surfacing as a 500 would trigger a Stripe retry storm
+  // and the very double-count we're guarding against.
+  try {
+    await recordFunnelEvent(
+      { name: 'checkout_completed', method: 'fiat' },
+      { sessionId, wallet, idempotencyKey: event.id },
+    );
+  } catch (err) {
+    console.warn('[stripe/webhook] funnel telemetry emit failed', err);
+  }
 
   return NextResponse.json({ received: true, sessionId: session.id });
 }

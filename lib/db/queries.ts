@@ -1648,34 +1648,35 @@ export async function getFunnelStats(window: FunnelWindow = '7d'): Promise<Funne
     .groupBy(funnelEvents.eventName);
 
   // Breakdown — second group key is the metadata discriminator we care
-  // about (`method` for upgrade/checkout, `feature` for gates,
-  // `variant` for stats_opened). Pull both keys in one pass and coalesce
-  // to a single "bucket" column for a flat shape on the wire.
-  const breakdownRows = await db
-    .select({
-      eventName: funnelEvents.eventName,
-      bucket: sql<string>`coalesce(
+  // about for each event. checkout_failed is special: its metadata has
+  // BOTH `method` and `reason`, and we want the bucket to be the reason
+  // (e.g. http_400) — not the method — so the funnel surfaces failure
+  // taxonomies. Plain coalesce would pick `method` first and collapse
+  // all failures under "fiat" / "crypto". Use a CASE expression so
+  // checkout_failed routes to `reason`, everything else falls back to
+  // the method/feature/variant coalesce.
+  const bucketExpr = sql`
+    case
+      when ${funnelEvents.eventName} = 'checkout_failed'
+        then coalesce(${funnelEvents.metadata}->>'reason', 'n/a')
+      else coalesce(
         ${funnelEvents.metadata}->>'method',
         ${funnelEvents.metadata}->>'feature',
         ${funnelEvents.metadata}->>'variant',
-        ${funnelEvents.metadata}->>'reason',
         'n/a'
-      )`,
+      )
+    end
+  `;
+  const breakdownRows = await db
+    .select({
+      eventName: funnelEvents.eventName,
+      bucket: sql<string>`${bucketExpr}`,
       sessions: sql<number>`count(distinct ${funnelEvents.sessionId})::int`,
       total: sql<number>`count(*)::int`,
     })
     .from(funnelEvents)
     .where(timeBound)
-    .groupBy(
-      funnelEvents.eventName,
-      sql`coalesce(
-        ${funnelEvents.metadata}->>'method',
-        ${funnelEvents.metadata}->>'feature',
-        ${funnelEvents.metadata}->>'variant',
-        ${funnelEvents.metadata}->>'reason',
-        'n/a'
-      )`,
-    );
+    .groupBy(funnelEvents.eventName, bucketExpr);
 
   // Median time-to-convert per method. For each session we compute the
   // gap between its earliest upgrade_clicked and its earliest
