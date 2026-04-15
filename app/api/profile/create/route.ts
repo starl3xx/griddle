@@ -39,29 +39,32 @@ export async function POST(req: Request): Promise<NextResponse> {
     .replace(/^-+|-+$/g, '')
     .slice(0, 32) || 'player';
 
-  // Insert with conflict-do-nothing on handle uniqueness — if the handle
-  // is taken, append a short numeric suffix via a raw expression.
-  // For simplicity in v1 just try the handle and fall back to a random suffix.
+  // Try the slugified handle first. If it's taken, fall back to a
+  // 4-digit random suffix. Use onConflictDoNothing + empty-returning
+  // check to detect handle uniqueness without swallowing unrelated
+  // DB errors (connection failures, CHECK constraint violations, etc.)
+  // in a blanket try/catch.
   let profileId: number;
-  try {
-    const rows = await db
-      .insert(profiles)
-      .values({ handle, displayName, updatedAt: new Date() })
-      .returning({ id: profiles.id });
-    profileId = rows[0].id;
-  } catch {
-    // Handle conflict — append 4-digit random suffix
+  const firstTry = await db
+    .insert(profiles)
+    .values({ handle, displayName, updatedAt: new Date() })
+    .onConflictDoNothing()
+    .returning({ id: profiles.id });
+
+  if (firstTry.length > 0) {
+    profileId = firstTry[0].id;
+  } else {
     const suffix = Math.floor(Math.random() * 9000 + 1000).toString();
     const fallbackHandle = `${handle.slice(0, 27)}-${suffix}`;
-    const rows = await db
+    const retry = await db
       .insert(profiles)
       .values({ handle: fallbackHandle, displayName, updatedAt: new Date() })
       .onConflictDoNothing()
       .returning({ id: profiles.id });
-    if (!rows.length) {
+    if (!retry.length) {
       return NextResponse.json({ error: 'Could not create profile, try a different name.' }, { status: 409 });
     }
-    profileId = rows[0].id;
+    profileId = retry[0].id;
   }
 
   const sessionId = await getSessionId();

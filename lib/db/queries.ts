@@ -1508,14 +1508,20 @@ export async function getOrCreateProfileByEmail(
     .returning();
 
   // Re-fetch if the concurrent insert won the race
-  const rawRow = inserted[0] ?? (await db
+  const r = inserted[0] ?? (await db
     .select()
     .from(profiles)
     .where(sql`lower(${profiles.email}) = lower(${normalized})`)
     .limit(1)
   )[0];
 
-  const r = rawRow;
+  if (!r) {
+    // Insert hit a conflict but the re-fetch also returned nothing —
+    // the racing row must have been deleted between the two queries.
+    // Extremely unlikely in practice; surface a clear error instead of
+    // crashing on undefined.id.
+    throw new Error(`getOrCreateProfileByEmail: conflict on ${normalized} but no row on re-fetch`);
+  }
   return {
     id: r.id,
     wallet: r.wallet,

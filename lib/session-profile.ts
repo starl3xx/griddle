@@ -32,11 +32,3 @@ export async function setSessionProfile(sessionId: string, profileId: number): P
     console.warn(`[session-profile] set failed for ${sessionId}:`, err);
   }
 }
-
-export async function clearSessionProfile(sessionId: string): Promise<void> {
-  try {
-    await kv.del(KEY(sessionId));
-  } catch (err) {
-    console.warn(`[session-profile] del failed for ${sessionId}:`, err);
-  }
-}
