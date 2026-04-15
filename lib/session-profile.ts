@@ -25,20 +25,13 @@ export async function getSessionProfile(sessionId: string): Promise<number | nul
   }
 }
 
-export async function setSessionProfile(sessionId: string, profileId: number): Promise<void> {
-  try {
-    await kv.set(KEY(sessionId), profileId, { ex: ONE_YEAR });
-  } catch (err) {
-    console.warn(`[session-profile] set failed for ${sessionId}:`, err);
-  }
-}
-
 /**
- * Throwing variant of `setSessionProfile`. Callers that must know the
- * binding actually landed (e.g. the magic-link verify route, where
- * the token is already consumed by the time we write the binding)
- * should use this instead of the swallowing variant. KV flakes would
- * otherwise strand the user with a burned token and no session.
+ * Bind a profile id to the session. Throws on KV failure — every
+ * caller (magic-link verify, profile/create, profile/farcaster) runs
+ * in a create-and-bind flow where a silent failure would strand the
+ * user with a DB row and no session anchor. The previous non-throwing
+ * variant was removed after all callers converged on fail-closed
+ * semantics.
  */
 export async function setSessionProfileOrThrow(
   sessionId: string,
