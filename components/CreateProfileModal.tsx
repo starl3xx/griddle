@@ -59,11 +59,18 @@ export function CreateProfileModal({
         // localStorage (rather than piping through the magic_links row)
         // keeps us schema-stable at the cost of losing the name if the
         // link is opened in a different browser — acceptable edge case.
-        if (trimmedName) {
-          try {
+        //
+        // Always write (or clear) the pending-name key unconditionally so
+        // a user who enters a name, abandons, and later retries with just
+        // an email doesn't silently inherit the stale name from their
+        // first attempt.
+        try {
+          if (trimmedName) {
             localStorage.setItem('griddle:pending-display-name', trimmedName);
-          } catch { /* private mode / quota — silently drop */ }
-        }
+          } else {
+            localStorage.removeItem('griddle:pending-display-name');
+          }
+        } catch { /* private mode / quota — silently drop */ }
         const res = await fetch('/api/auth/request', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

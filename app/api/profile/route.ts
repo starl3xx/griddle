@@ -127,7 +127,17 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     }
     patch.displayName = displayName;
   }
-  if (body.avatarUrl !== undefined) patch.avatarUrl = body.avatarUrl.trim().slice(0, 500);
+  if (body.avatarUrl !== undefined) {
+    // Empty-string avatarUrl is truthy and would render as <img src="">
+    // in any component that checks `if (profile.avatarUrl)`. Reject
+    // empty values explicitly — callers should omit the field to
+    // leave the existing value untouched.
+    const avatarUrl = body.avatarUrl.trim().slice(0, 500);
+    if (!avatarUrl) {
+      return NextResponse.json({ error: 'avatarUrl cannot be empty' }, { status: 400 });
+    }
+    patch.avatarUrl = avatarUrl;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
