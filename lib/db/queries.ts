@@ -478,6 +478,12 @@ export interface ProfileRow {
   displayName: string | null;
   /** URL to the user's avatar image. */
   avatarUrl: string | null;
+  /**
+   * Provenance of `avatarUrl`. `'farcaster'` = came from Farcaster
+   * sync (safe to auto-refresh); `'custom'` = user-uploaded or
+   * user-supplied (do NOT overwrite); `null` = unknown.
+   */
+  avatarSource: 'farcaster' | 'custom' | null;
   /** Farcaster user id. Set when connected via Farcaster miniapp. */
   farcasterFid: number | null;
   /** Farcaster @username. */
@@ -507,6 +513,7 @@ function toProfileRow(r: RawProfileRow): ProfileRow {
     emailVerifiedAt: r.emailVerifiedAt ?? null,
     displayName: r.displayName ?? null,
     avatarUrl: r.avatarUrl ?? null,
+    avatarSource: (r.avatarSource ?? null) as ProfileRow['avatarSource'],
     farcasterFid: r.farcasterFid ?? null,
     farcasterUsername: r.farcasterUsername ?? null,
     createdAt: r.createdAt,
@@ -1348,6 +1355,18 @@ export async function upsertProfileForFarcaster(input: {
   const fidRow  = byFid[0]   ?? null;
   const walletRow = byWallet[0] ?? null;
 
+  // Decide whether a Farcaster sync is allowed to overwrite an
+  // existing avatarUrl on a row. Custom uploads are protected — once
+  // a user has uploaded their own photo, subsequent Farcaster syncs
+  // must NOT clobber it. Farcaster-sourced avatars and null rows are
+  // both fair game: we treat `null` avatar_source as "unknown, but
+  // since no one has ever uploaded, it's safe to replace with the
+  // current Farcaster pfp". This is the QoL fix that lets a user's
+  // updated Farcaster pfp propagate into Griddle without requiring
+  // a re-connect.
+  const canOverwriteAvatar = (row: { avatarSource: string | null } | null): boolean =>
+    !row || row.avatarSource !== 'custom';
+
   // Auto-merge if two different rows, then apply fresh Farcaster input
   // on top of the merged survivor so the latest username/avatar/wallet
   // aren't silently lost (mergeProfiles only combines existing row data).
@@ -1364,7 +1383,13 @@ export async function upsertProfileForFarcaster(input: {
     };
     if (input.username) freshPatch.farcasterUsername = input.username;
     if (input.displayName && !merged.displayName) freshPatch.displayName = input.displayName;
-    if (input.avatarUrl && !merged.avatarUrl) freshPatch.avatarUrl = input.avatarUrl;
+    // Avatar policy on the merged survivor: protect 'custom' uploads
+    // (merged inherits avatarSource via mergeProfiles COALESCE); for
+    // anything else, apply the incoming Farcaster pfp if provided.
+    if (input.avatarUrl && canOverwriteAvatar(merged)) {
+      freshPatch.avatarUrl = input.avatarUrl;
+      freshPatch.avatarSource = 'farcaster';
+    }
     // Always overwrite the merged wallet with the user's current one
     // when supplied. mergeProfiles picks `older.wallet ?? newer.wallet`,
     // so if both rows had wallets the older one wins and the user's
@@ -1384,11 +1409,28 @@ export async function upsertProfileForFarcaster(input: {
 
   const existing = fidRow ?? walletRow ?? null;
 
+  // Avatar policy for the single-row update path: protect custom
+  // uploads, otherwise adopt the incoming Farcaster pfp. This is the
+  // QoL fix — previously this line was
+  //   `existing?.avatarUrl ?? input.avatarUrl ?? null`
+  // which pinned the avatar to whatever was set on first-ever sync
+  // and never refreshed it afterwards, so a user who updated their
+  // Farcaster pfp would see the stale image in Griddle forever.
+  const nextAvatarUrl =
+    canOverwriteAvatar(existing) && input.avatarUrl
+      ? input.avatarUrl
+      : existing?.avatarUrl ?? input.avatarUrl ?? null;
+  const nextAvatarSource =
+    canOverwriteAvatar(existing) && input.avatarUrl
+      ? 'farcaster'
+      : existing?.avatarSource ?? (input.avatarUrl ? 'farcaster' : null);
+
   const patch = {
     farcasterFid:      input.fid,
     farcasterUsername: input.username ?? existing?.farcasterUsername ?? null,
     displayName:       existing?.displayName ?? input.displayName ?? null,
-    avatarUrl:         existing?.avatarUrl   ?? input.avatarUrl   ?? null,
+    avatarUrl:         nextAvatarUrl,
+    avatarSource:      nextAvatarSource,
     wallet:            wallet ?? existing?.wallet ?? null,
     updatedAt:         new Date(),
   };
@@ -1411,6 +1453,9 @@ export async function upsertProfileForFarcaster(input: {
     farcasterUsername: input.username ?? null,
     displayName: input.displayName ?? null,
     avatarUrl: input.avatarUrl ?? null,
+    // New Farcaster row: if we seeded an avatar, tag it so future
+    // syncs know it's safe to refresh.
+    avatarSource: input.avatarUrl ? 'farcaster' : null,
     wallet,
     updatedAt: new Date(),
   }).onConflictDoNothing().returning();

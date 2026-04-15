@@ -123,10 +123,15 @@ export async function POST(req: Request): Promise<NextResponse> {
   // (if any), so a wallet-connected user completing their profile
   // ends up with a proper wallet-linked row in one shot. avatarUrl is
   // optional and validated above.
+  //
+  // avatarSource: create-profile is always a user-driven edit, so
+  // any avatar supplied here is tagged 'custom' to shield it from
+  // future Farcaster sync overwrites. Null when no avatar given.
   const baseValues = {
     handle,
     displayName,
     avatarUrl,
+    avatarSource: avatarUrl ? 'custom' : null,
     wallet: sessionWallet,
     updatedAt: new Date(),
   };

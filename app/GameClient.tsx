@@ -415,6 +415,52 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     [],
   );
 
+  /**
+   * Auto-refresh a Farcaster user's avatar when their pfp URL changes.
+   *
+   * Problem this solves: `handleWalletConnect` fires once when the
+   * wallet connects and snapshots `pfpUrlRef.current` into the profile
+   * row. If the Farcaster miniapp SDK later resolves a newer pfp URL
+   * (or the user updates their pfp on Farcaster and plays again), that
+   * change never propagates into `profiles.avatar_url` — the profile
+   * is pinned to whatever was set on first connect.
+   *
+   * This effect listens for `pfpUrl` changes and re-POSTs to
+   * /api/profile/farcaster. The server uses the `avatar_source` column
+   * to decide whether the overwrite is allowed:
+   *   - `'farcaster'` or `null` → apply the incoming pfp
+   *   - `'custom'`              → keep the user's uploaded photo
+   *
+   * Dedup via `lastSyncedPfpUrlRef` so we don't spam the endpoint when
+   * the effect re-runs on unrelated state changes; only fire when the
+   * pfp URL actually differs from the last value we synced.
+   */
+  const lastSyncedPfpUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!inMiniApp) return;
+    if (!fid) return;
+    if (!sessionWallet) return;
+    if (!pfpUrl) return;
+    if (lastSyncedPfpUrlRef.current === pfpUrl) return;
+    lastSyncedPfpUrlRef.current = pfpUrl;
+    const controller = new AbortController();
+    fetch('/api/profile/farcaster', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        fid,
+        username,
+        displayName,
+        avatarUrl: pfpUrl,
+        wallet: sessionWallet,
+      }),
+      signal: controller.signal,
+    })
+      .then((r) => { if (r.ok) void refetchProfile(); })
+      .catch(() => {/* best-effort; silent */});
+    return () => controller.abort();
+  }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile]);
+
   // Reset premium state on disconnect AND clear the server-side
   // session→wallet binding so subsequent solves aren’t silently
   // attributed to the just-disconnected wallet.
