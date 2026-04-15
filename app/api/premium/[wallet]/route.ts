@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { premiumUsers } from '@/lib/db/schema';
 import { isValidAddress } from '@/lib/address';
 
 /**
@@ -16,6 +15,20 @@ import { isValidAddress } from '@/lib/address';
  * is the single source of truth across both the crypto path
  * (GriddlePremium.unlockWithPermit observed by an event listener)
  * and the future Apple Pay path (Stripe webhook).
+ *
+ * Implementation note: uses raw SQL via `db.execute()` instead of the
+ * drizzle query builder's `eq(premiumUsers.wallet, ...)`. An in-prod
+ * investigation (see commit history around 2026-04-15) turned up a
+ * reproducible drift where the same `eq()` call from this file's
+ * handler returned 0 rows while (a) the row demonstrably existed in
+ * `premium_users` via direct SQL, (b) a sibling `/api/debug/premium-
+ * trace` route ran the identical drizzle builder and found the row,
+ * and (c) a raw SQL `SELECT … WHERE wallet = $1` from THIS handler
+ * also found the row. Root cause unknown (possibly a route-specific
+ * bundling quirk with the drizzle column reference; no reproducer
+ * extracted yet). Raw SQL is the proven-correct path, so we use it
+ * until the drizzle side is understood — the fallback is cheap and
+ * has no observable semantic difference.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,66 +45,10 @@ export async function GET(
 
   const normalized = wallet.toLowerCase();
 
-  const rows = await db
-    .select({ wallet: premiumUsers.wallet })
-    .from(premiumUsers)
-    .where(eq(premiumUsers.wallet, normalized))
-    .limit(1);
-
-  // DEEPER DIAGNOSTIC: run the same lookup four more ways to pin down
-  // where the drift is. Compare against the /api/debug/premium-trace
-  // route which ran the same eq() query and found 1 row. If any of
-  // these diverge from each other we'll see exactly which layer is
-  // lying.
-  let rawEqCount = -1;
-  let rawLowerCount = -1;
-  let totalCount = -1;
-  let firstFive: unknown[] = [];
-  let debugErr: string | null = null;
-  try {
-    const rawEq = await db.execute<{ wallet: string }>(sql`
-      SELECT wallet FROM premium_users WHERE wallet = ${normalized} LIMIT 1
-    `);
-    rawEqCount = Array.isArray(rawEq) ? rawEq.length : (rawEq.rows?.length ?? -2);
-
-    const rawLower = await db.execute<{ wallet: string }>(sql`
-      SELECT wallet FROM premium_users WHERE lower(wallet) = lower(${normalized}) LIMIT 1
-    `);
-    rawLowerCount = Array.isArray(rawLower) ? rawLower.length : (rawLower.rows?.length ?? -2);
-
-    const all = await db.execute<{ wallet: string; source: string }>(sql`
-      SELECT wallet, source FROM premium_users LIMIT 5
-    `);
-    const allRows = Array.isArray(all) ? all : (all.rows ?? []);
-    firstFive = allRows;
-
-    const total = await db.execute<{ count: number }>(sql`
-      SELECT count(*)::int AS count FROM premium_users
-    `);
-    const totalRows = Array.isArray(total) ? total : (total.rows ?? []);
-    totalCount = totalRows[0]?.count ?? -3;
-  } catch (e) {
-    debugErr = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-  }
-
-  console.log('[premium/wallet/debug]', JSON.stringify({
-    rawWalletParam: wallet,
-    normalized,
-    normalizedLength: normalized.length,
-    drizzleEqRowCount: rows.length,
-    drizzleEqFirstRow: rows[0] ?? null,
-    rawEqCount,
-    rawLowerCount,
-    totalCount,
-    firstFive,
-    debugErr,
-    dbHostHint: (process.env.DATABASE_URL ?? '').match(/@([^/]+)/)?.[1]?.slice(0, 32) ?? 'no-match',
-    nodeEnv: process.env.NODE_ENV,
-    vercelEnv: process.env.VERCEL_ENV,
-    vercelUrl: process.env.VERCEL_URL?.slice(0, 40),
-    deploymentId: process.env.VERCEL_DEPLOYMENT_ID?.slice(0, 20),
-    buildTime: new Date().toISOString(),
-  }));
+  const result = await db.execute<{ wallet: string }>(sql`
+    SELECT wallet FROM premium_users WHERE wallet = ${normalized} LIMIT 1
+  `);
+  const rows = Array.isArray(result) ? result : (result.rows ?? []);
 
   return NextResponse.json({ wallet: normalized, premium: rows.length > 0 });
 }
