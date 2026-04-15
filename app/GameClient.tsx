@@ -283,7 +283,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // fully-formed session.
       if (inMiniAppRef.current && fidRef.current) {
         try {
-          await fetch('/api/profile/farcaster', {
+          const res = await fetch('/api/profile/farcaster', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
@@ -294,6 +294,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
               wallet: normalized,
             }),
           });
+          // Mirror the handle-only and email-verify paths: once the
+          // server-side profile is bound to this session, flip the
+          // client flag so StatsModal stops showing the anonymous CTA
+          // immediately. Without this, Farcaster users stayed stuck
+          // on the anon state until the next reload rehydrated via
+          // /api/profile.
+          if (res.ok) setHasSessionProfile(true);
         } catch {/* best-effort — non-fatal */}
       }
 

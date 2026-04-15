@@ -31,12 +31,16 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   // Use displayName as the handle (slugified) if no handle exists.
-  // The slug is lowercase alphanumeric + hyphen, max 32 chars.
-  const handle = displayName
+  // The slug is lowercase alphanumeric + hyphen, max 32 chars, min 2
+  // to match the PATCH /api/profile validator — single-char handles
+  // created here would otherwise get rejected the next time the user
+  // edited any profile field.
+  let handle = displayName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 32) || 'player';
+  if (handle.length < 2) handle = `${handle}-player`.slice(0, 32);
 
   // Try the slugified handle first. If it's taken, fall back to a
   // 4-digit random suffix. Use onConflictDoNothing + empty-returning
