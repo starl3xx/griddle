@@ -219,6 +219,21 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unlock failed';
       setErrorMessage(message);
+      // Bucket the failure into a reason tag matching the telemetry
+      // endpoint's [a-z0-9_]{1,32} pattern. Phase at throw time is a
+      // close proxy for which step failed; user-rejection is detected
+      // by the wagmi/viem-standard error name so cancellations don't
+      // inflate the "signing failures" bucket.
+      const isUserReject =
+        err instanceof Error &&
+        (err.name === 'UserRejectedRequestError' || /rejected|denied|user rejected/i.test(err.message));
+      let reason: string = 'unknown';
+      if (isUserReject) reason = 'user_rejected';
+      else if (phase === 'quoting') reason = 'quote_failed';
+      else if (phase === 'signing') reason = 'sign_failed';
+      else if (phase === 'submitting') reason = 'submit_failed';
+      else if (phase === 'verifying') reason = 'verify_failed';
+      trackEvent({ name: 'checkout_failed', method: 'crypto', reason });
       setPhase('error');
     }
   };
