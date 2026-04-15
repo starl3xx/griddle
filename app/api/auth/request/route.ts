@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createMagicLink } from '@/lib/db/queries';
+import { createMagicLink, deleteMagicLink } from '@/lib/db/queries';
 import { sendMagicLink, isEmailConfigured } from '@/lib/resend';
 
 /**
@@ -42,6 +42,16 @@ export async function POST(req: Request): Promise<NextResponse> {
   const { success, error } = await sendMagicLink(email, result.token);
   if (!success) {
     console.error('[auth/request] sendMagicLink failed:', error);
+    // Roll back the just-inserted token row so a failed email send
+    // doesn't burn one of the 5 hourly rate-limit slots. Without this,
+    // five consecutive Resend outages would lock the user out for an
+    // hour with zero emails received. Best-effort — if the delete
+    // itself fails, the slot is lost but the user still gets the 502.
+    try {
+      await deleteMagicLink(result.token);
+    } catch (delErr) {
+      console.error('[auth/request] rollback delete failed:', delErr);
+    }
     return NextResponse.json({ error: 'Failed to send email' }, { status: 502 });
   }
 

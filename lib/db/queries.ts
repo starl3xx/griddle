@@ -1181,6 +1181,16 @@ export async function createMagicLink(
 }
 
 /**
+ * Delete a magic link by its raw token. Used by the request route to
+ * roll back a just-created token when the email transport fails, so
+ * the wasted slot doesn't count against the hourly rate limit.
+ */
+export async function deleteMagicLink(token: string): Promise<void> {
+  const tokenHash = hashToken(token);
+  await db.delete(magicLinks).where(eq(magicLinks.tokenHash, tokenHash));
+}
+
+/**
  * Verify a magic link token. Marks it used immediately on success
  * to prevent replay. Returns the email on success.
  */
