@@ -114,6 +114,20 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   } | null>(null);
 
   /**
+   * Authoritative server-computed solve duration (ms) from the most
+   * recent /api/solve response. `clientSolveMs` from the telemetry is
+   * `performance.now() - puzzleLoadedAt`, which resets on every mount
+   * — so a user who opens the puzzle, leaves for an hour, and solves
+   * from a fresh page view would see an 11-second solve time on the
+   * SolveModal even though the server (whose `puzzle_loads.loaded_at`
+   * row is preserved across reloads via `ON CONFLICT DO NOTHING`) has
+   * the correct hour-long duration. Stash it in a ref between the
+   * async verify and the onSolved handoff so handleSolved can prefer
+   * the server value when displaying the solve time.
+   */
+  const serverSolveMsRef = useRef<number | null>(null);
+
+  /**
    * POST the claimed word to the server. The server compares it against
    * the stored puzzle answer and returns the verdict. On success the
    * word comes back in the response (which is fine — the client just
@@ -137,7 +151,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           }),
         });
         if (!res.ok) return { solved: false };
-        const data = (await res.json()) as { solved: boolean; word?: string };
+        const data = (await res.json()) as {
+          solved: boolean;
+          word?: string;
+          serverSolveMs?: number | null;
+        };
+        // Capture the server-computed duration for the SolveModal
+        // display. Null if the session submitted without loading first
+        // (direct POST) — in that case we'll fall back to clientSolveMs
+        // inside handleSolved.
+        serverSolveMsRef.current =
+          typeof data.serverSolveMs === 'number' ? data.serverSolveMs : null;
         // Strict contract: only return solved=true if the server also
         // returned a string `word`. Anything else is a verification
         // failure from the client’s perspective, which causes a shake
@@ -155,11 +179,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
   const handleSolved = useCallback(
     (payload: SolvePayload & { unassisted: boolean; word: string }) => {
+      // Prefer the server-side duration. The client-side value is only
+      // a fallback for the no-puzzle-load edge case (direct POST), and
+      // is wrong for any user who reloaded mid-attempt.
+      const serverMs = serverSolveMsRef.current;
       setSolveResult({
-        solveMs: payload.clientSolveMs,
+        solveMs: serverMs != null ? serverMs : payload.clientSolveMs,
         unassisted: payload.unassisted,
         word: payload.word,
       });
+      serverSolveMsRef.current = null;
     },
     [],
   );
