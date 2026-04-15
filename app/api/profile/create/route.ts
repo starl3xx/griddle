@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getSessionProfile, setSessionProfileOrThrow } from '@/lib/session-profile';
+import { getSessionWallet } from '@/lib/wallet-session';
 import { db } from '@/lib/db/client';
 import { profiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -38,13 +39,34 @@ export async function POST(req: Request): Promise<NextResponse> {
   // binding, and leaves the previous profile orphaned but still
   // blocking its handle via the unique index. Callers that actually
   // want to update an existing profile use PATCH /api/profile.
+  //
+  // Mirror the PATCH handler: check BOTH the session-profile KV (for
+  // handle-only / email-auth profiles) AND the session-wallet KV +
+  // wallet-linked profile row (for users who unlocked premium via
+  // crypto/fiat and got a profile row from recordCryptoUnlock /
+  // recordFiatUnlock). Missing the wallet branch lets a wallet-linked
+  // user pass the guard and create a shadow profile.
   const sessionId = await getSessionId();
-  const existing = await getSessionProfile(sessionId);
-  if (existing !== null) {
+  const existingFromProfile = await getSessionProfile(sessionId);
+  if (existingFromProfile !== null) {
     return NextResponse.json(
       { error: 'profile already exists for this session; use PATCH /api/profile to update' },
       { status: 409 },
     );
+  }
+  const sessionWallet = await getSessionWallet(sessionId);
+  if (sessionWallet) {
+    const walletRows = await db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.wallet, sessionWallet))
+      .limit(1);
+    if (walletRows.length > 0) {
+      return NextResponse.json(
+        { error: 'profile already exists for this wallet; use PATCH /api/profile to update' },
+        { status: 409 },
+      );
+    }
   }
 
   // Slugify the display name into a handle that matches the same shape
