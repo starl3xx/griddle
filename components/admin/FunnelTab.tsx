@@ -17,9 +17,12 @@ interface FunnelStats {
   medianTimeToConvertMs: { method: 'crypto' | 'fiat'; ms: number | null }[];
 }
 
-// The canonical funnel order. Events not in this list still render
-// below the funnel as "other" — rare, but useful for spotting
-// instrumentation drift.
+// The canonical funnel order. Stages render top-to-bottom with
+// conversion % computed against the first populated stage. Events
+// outside this list (checkout_failed, profile_identified, etc.) are
+// rendered in a separate "Other signals" section below so failure
+// breakdowns and identification events are visible without polluting
+// the funnel math.
 const STAGE_ORDER: { name: string; label: string }[] = [
   { name: 'stats_opened',       label: 'Stats opened' },
   { name: 'premium_gate_shown', label: 'Premium gate shown' },
@@ -27,6 +30,12 @@ const STAGE_ORDER: { name: string; label: string }[] = [
   { name: 'checkout_started',   label: 'Checkout started' },
   { name: 'checkout_completed', label: 'Checkout completed' },
 ];
+
+const OTHER_EVENT_LABELS: Record<string, string> = {
+  checkout_failed:    'Checkout failed',
+  profile_identified: 'Profile identified',
+  profile_created:    'Profile created',
+};
 
 const WINDOW_LABELS: Record<FunnelWindow, string> = {
   '24h': '24 hours',
@@ -94,6 +103,25 @@ export function FunnelTab() {
       if (row && row.sessions > 0) return row.sessions;
     }
     return 0;
+  }, [stageMap]);
+
+  // Events outside the canonical funnel (checkout_failed, the
+  // profile_* identification events, etc.). Preserve the catalog
+  // order when known, then append anything unexpected last for
+  // instrumentation-drift visibility.
+  const otherEvents = useMemo(() => {
+    const stageNames = new Set(STAGE_ORDER.map((s) => s.name));
+    const names = Array.from(stageMap.keys()).filter((n) => !stageNames.has(n));
+    const known = Object.keys(OTHER_EVENT_LABELS);
+    names.sort((a, b) => {
+      const ai = known.indexOf(a);
+      const bi = known.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+    return names;
   }, [stageMap]);
 
   if (loading && !data) {
@@ -188,6 +216,50 @@ export function FunnelTab() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Other signals — events outside the canonical funnel */}
+      {otherEvents.length > 0 && (
+        <Card>
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-2 text-gray-500">
+              <ChartLineUp className="h-4 w-4" weight="bold" />
+              <span className="text-[10px] font-bold uppercase tracking-wider">
+                Other signals
+              </span>
+            </div>
+            <div className="space-y-3">
+              {otherEvents.map((name) => {
+                const row = stageMap.get(name);
+                if (!row) return null;
+                const label = OTHER_EVENT_LABELS[name] ?? name;
+                const buckets = breakdownByEvent.get(name) ?? [];
+                return (
+                  <div key={name} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-semibold text-gray-900">{label}</span>
+                      <span className="tabular-nums text-gray-600">
+                        {row.sessions.toLocaleString()} sessions
+                        <span className="text-gray-400 ml-2">
+                          ({row.total.toLocaleString()} events)
+                        </span>
+                      </span>
+                    </div>
+                    {buckets.length > 0 && (
+                      <div className="pl-3 pt-1 text-[11px] text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                        {buckets.map((b) => (
+                          <span key={b.bucket} className="tabular-nums">
+                            {b.bucket}: <span className="font-bold text-gray-700">{b.sessions}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Time-to-convert */}
       <Card>
