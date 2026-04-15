@@ -1407,16 +1407,33 @@ export async function upsertProfileForFarcaster(input: {
     };
   }
 
-  // New profile
-  const rows = await db.insert(profiles).values({
+  // New profile. Use onConflictDoNothing to absorb the TOCTOU race where
+  // a concurrent request creates a row with the same farcaster_fid or
+  // wallet between the SELECT lookups above and this INSERT. On conflict
+  // we re-query to return whichever row won the race.
+  const inserted = await db.insert(profiles).values({
     farcasterFid: input.fid,
     farcasterUsername: input.username ?? null,
     displayName: input.displayName ?? null,
     avatarUrl: input.avatarUrl ?? null,
     wallet,
     updatedAt: new Date(),
-  }).returning();
-  const r = rows[0];
+  }).onConflictDoNothing().returning();
+
+  let r = inserted[0];
+  if (!r) {
+    // Another request won — re-fetch by FID (preferred) or wallet.
+    const refetch = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.farcasterFid, input.fid))
+      .limit(1);
+    r = refetch[0]
+      ?? (wallet
+        ? (await db.select().from(profiles).where(eq(profiles.wallet, wallet)).limit(1))[0]
+        : undefined);
+    if (!r) throw new Error('upsertProfileForFarcaster: insert conflict but no row found on re-fetch');
+  }
   return {
     id: r.id, wallet: r.wallet, handle: r.handle,
     premiumSource: r.premiumSource as ProfileRow['premiumSource'],

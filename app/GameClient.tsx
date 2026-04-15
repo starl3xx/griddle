@@ -192,6 +192,39 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       .catch(() => {/* best-effort */});
   }, []);
 
+  // Hydrate hasSessionProfile from /api/profile on mount. Required so the
+  // account state survives a page reload — including the post-magic-link
+  // redirect to /?auth=ok, which otherwise resets hasSessionProfile to
+  // false and leaves StatsModal showing the anonymous CTA.
+  useEffect(() => {
+    fetch('/api/profile')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { profile: unknown | null } | null) => {
+        if (data?.profile) setHasSessionProfile(true);
+      })
+      .catch(() => {/* best-effort */});
+  }, []);
+
+  // Post-magic-link: /?auth=ok means the verify endpoint just bound a
+  // session profile. Open the stats modal so the user sees their new
+  // account state immediately, and strip the query param so a subsequent
+  // reload doesn't re-pop the modal.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth') === 'ok') {
+      setHasSessionProfile(true);
+      setShowStats(true);
+      params.delete('auth');
+      const qs = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
+      );
+    }
+  }, []);
+
   const refreshPremium = useCallback(async (wallet: string) => {
     try {
       const res = await fetch(`/api/premium/${wallet}`);
