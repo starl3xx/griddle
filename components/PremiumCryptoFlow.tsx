@@ -75,8 +75,18 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       return;
     }
 
+    // Track the current phase in a local variable so the catch block
+    // can read it synchronously. `phase` from useState is closed over
+    // at render time and `setPhase` schedules updates for the next
+    // render — the catch block on the first attempt would otherwise
+    // always see 'idle', collapsing every failure into reason='unknown'.
+    // Assignments are inlined (not hidden behind a helper) so TypeScript
+    // can see every write and not narrow the type to the initial literal.
+    let currentPhase: Phase = 'idle';
+
     try {
       // --- Step 1: quote --------------------------------------------------
+      currentPhase = 'quoting';
       setPhase('quoting');
 
       // SLIPPAGE_PCT is not fetched — the client sends the oracle midpoint
@@ -117,6 +127,7 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       const tokenAmount = expected;
 
       // --- Step 2: sign permit -------------------------------------------
+      currentPhase = 'signing';
       setPhase('signing');
 
       const [nonce, tokenName, tokenVersion] = await Promise.all([
@@ -174,6 +185,7 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       const v = parseInt(sig.slice(128, 130), 16);
 
       // --- Step 3: submit tx ---------------------------------------------
+      currentPhase = 'submitting';
       setPhase('submitting');
 
       // checkout_started fires here (after the permit is signed, just
@@ -190,6 +202,7 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       });
 
       // --- Step 4: verify server-side ------------------------------------
+      currentPhase = 'verifying';
       setPhase('verifying');
 
       // Server-verify independently reads the receipt and parses the
@@ -220,19 +233,21 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       const message = err instanceof Error ? err.message : 'unlock failed';
       setErrorMessage(message);
       // Bucket the failure into a reason tag matching the telemetry
-      // endpoint's [a-z0-9_]{1,32} pattern. Phase at throw time is a
-      // close proxy for which step failed; user-rejection is detected
-      // by the wagmi/viem-standard error name so cancellations don't
-      // inflate the "signing failures" bucket.
+      // endpoint's [a-z0-9_]{1,32} pattern. `currentPhase` is the
+      // local mirror of setPhase — reading `phase` directly here would
+      // see the stale closure value ('idle') because state updates
+      // scheduled inside handleUnlock don't land until next render.
+      // User rejection is detected by the wagmi/viem-standard error
+      // name so cancellations don't inflate the sign_failed bucket.
       const isUserReject =
         err instanceof Error &&
         (err.name === 'UserRejectedRequestError' || /rejected|denied|user rejected/i.test(err.message));
       let reason: string = 'unknown';
       if (isUserReject) reason = 'user_rejected';
-      else if (phase === 'quoting') reason = 'quote_failed';
-      else if (phase === 'signing') reason = 'sign_failed';
-      else if (phase === 'submitting') reason = 'submit_failed';
-      else if (phase === 'verifying') reason = 'verify_failed';
+      else if (currentPhase === 'quoting') reason = 'quote_failed';
+      else if (currentPhase === 'signing') reason = 'sign_failed';
+      else if (currentPhase === 'submitting') reason = 'submit_failed';
+      else if (currentPhase === 'verifying') reason = 'verify_failed';
       trackEvent({ name: 'checkout_failed', method: 'crypto', reason });
       setPhase('error');
     }
