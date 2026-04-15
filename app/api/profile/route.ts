@@ -105,8 +105,28 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   }
 
   const patch: Record<string, string> = {};
-  if (body.handle !== undefined) patch.handle = body.handle.trim().slice(0, 32);
-  if (body.displayName !== undefined) patch.displayName = body.displayName.trim().slice(0, 50);
+  if (body.handle !== undefined) {
+    // Handles must match the same slug shape /api/profile/create enforces:
+    // lowercase alphanumerics with single hyphens, 2–32 chars. An empty
+    // or whitespace-only handle would pass the CHECK constraint but still
+    // participate in profiles_handle_lower_idx, meaning only one profile
+    // could ever have an empty handle — reject it explicitly.
+    const handle = body.handle.trim().toLowerCase().slice(0, 32);
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(handle) || handle.length < 2) {
+      return NextResponse.json(
+        { error: 'handle must be 2–32 chars, lowercase letters, numbers, or hyphens' },
+        { status: 400 },
+      );
+    }
+    patch.handle = handle;
+  }
+  if (body.displayName !== undefined) {
+    const displayName = body.displayName.trim().slice(0, 50);
+    if (!displayName) {
+      return NextResponse.json({ error: 'displayName cannot be empty' }, { status: 400 });
+    }
+    patch.displayName = displayName;
+  }
   if (body.avatarUrl !== undefined) patch.avatarUrl = body.avatarUrl.trim().slice(0, 500);
 
   if (Object.keys(patch).length === 0) {

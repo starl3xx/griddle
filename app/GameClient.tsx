@@ -208,7 +208,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // Post-magic-link: /?auth=ok means the verify endpoint just bound a
   // session profile. Open the stats modal so the user sees their new
   // account state immediately, and strip the query param so a subsequent
-  // reload doesn't re-pop the modal.
+  // reload doesn't re-pop the modal. If CreateProfileModal stashed a
+  // pending display name before sending the link, apply it via PATCH
+  // now (same-browser case) so the user doesn't lose what they typed.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
@@ -222,6 +224,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         '',
         window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
       );
+
+      let pending: string | null = null;
+      try { pending = localStorage.getItem('griddle:pending-display-name'); } catch {/* ignore */}
+      if (pending) {
+        try { localStorage.removeItem('griddle:pending-display-name'); } catch {/* ignore */}
+        fetch('/api/profile', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ displayName: pending }),
+        }).catch(() => {/* best-effort */});
+      }
     }
   }, []);
 

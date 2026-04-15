@@ -53,7 +53,17 @@ export function CreateProfileModal({
 
     try {
       if (trimmedEmail) {
-        // Email path — send magic link
+        // Email path — send magic link. If the user also typed a display
+        // name, stash it in localStorage so GameClient can PATCH it onto
+        // the profile after the verify redirect lands. Persisting via
+        // localStorage (rather than piping through the magic_links row)
+        // keeps us schema-stable at the cost of losing the name if the
+        // link is opened in a different browser — acceptable edge case.
+        if (trimmedName) {
+          try {
+            localStorage.setItem('griddle:pending-display-name', trimmedName);
+          } catch { /* private mode / quota — silently drop */ }
+        }
         const res = await fetch('/api/auth/request', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
