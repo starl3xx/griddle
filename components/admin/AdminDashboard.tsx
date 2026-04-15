@@ -32,7 +32,7 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
     <div className="min-h-screen bg-white">
       <div className="container mx-auto py-8 px-4 max-w-7xl">
         <header className="mb-8">
-          <h1 className="text-3xl font-black tracking-tight text-gray-900">
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
             Admin dashboard
           </h1>
           <p className="text-sm font-medium text-gray-500 mt-1">

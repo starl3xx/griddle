@@ -87,8 +87,13 @@
 }
 
 @layer components {
+  /* Modals are fully rounded on every viewport (no bottom-sheet on
+   * mobile). The previous `rounded-t-card` + `items-end` combo left
+   * the bottom two corners square in PWA / narrow browsers, which
+   * the team flagged as a bug. Centering the modal everywhere is
+   * simpler than trying to style a half-sheet correctly. */
   .modal-sheet {
-    @apply bg-white rounded-t-card sm:rounded-card shadow-modal p-6 w-full max-w-md
+    @apply bg-white rounded-card shadow-modal p-6 w-full max-w-md
            max-h-[90vh] overflow-y-auto;
   }
 }

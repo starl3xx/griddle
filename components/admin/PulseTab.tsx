@@ -89,7 +89,7 @@ export function PulseTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-black tracking-tight text-gray-900">
+        <h2 className="text-lg font-bold tracking-tight text-gray-900">
           Pulse
         </h2>
         <Button

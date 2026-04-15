@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { Diamond } from '@phosphor-icons/react';
+import { Diamond, Backspace, ArrowCounterClockwise, Info } from '@phosphor-icons/react';
 import { useDarkMode } from '@/lib/useDarkMode';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
@@ -577,9 +577,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           <button
             type="button"
             onClick={openTutorial}
-            className="mt-2 text-[11px] font-bold uppercase tracking-wider text-accent hover:text-accent/80 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+            className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-accent hover:text-accent/80 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
           >
             How to play
+            <Info className="w-3 h-3" weight="bold" aria-hidden />
           </button>
         </header>
 
@@ -599,18 +600,20 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         <div className="flex gap-3 mt-1">
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary inline-flex items-center gap-2"
             onClick={actions.backspace}
             disabled={state.pendingSolve}
           >
+            <Backspace className="w-4 h-4" weight="bold" aria-hidden />
             Backspace
           </button>
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary inline-flex items-center gap-2"
             onClick={actions.reset}
             disabled={state.pendingSolve}
           >
+            <ArrowCounterClockwise className="w-4 h-4" weight="bold" aria-hidden />
             Reset
           </button>
         </div>
@@ -693,11 +696,11 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
       {showCryptoFlow && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
           onClick={() => setShowCryptoFlow(false)}
         >
           <div
-            className="modal-sheet sm:rounded-card animate-slide-up"
+            className="modal-sheet animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
             <LazyPremiumCryptoFlow

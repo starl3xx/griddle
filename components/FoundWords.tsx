@@ -52,10 +52,11 @@ export function FoundWords({ words }: FoundWordsProps) {
         return (
           <span
             key={w}
-            className={`inline-flex items-center rounded-pill border px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider tabular-nums animate-fade-in ${tier}`}
+            className={`inline-flex items-center gap-1 rounded-pill border px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider tabular-nums animate-fade-in ${tier}`}
             title={`${w.length} letters`}
           >
-            {w} ({w.length})
+            {w}
+            <span className="font-medium opacity-70">({w.length})</span>
           </span>
         );
       })}

@@ -81,11 +81,11 @@ export function PremiumGateModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="modal-sheet sm:rounded-card animate-slide-up"
+        className="modal-sheet animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">
@@ -93,7 +93,7 @@ export function PremiumGateModal({
             <Diamond className="w-5 h-5" weight="fill" aria-hidden />
           </div>
           <div className="min-w-0">
-            <h2 className="text-xl font-black tracking-tight text-gray-900 dark:text-gray-100">
+            <h2 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
               {headline}
             </h2>
             <p className="text-sm font-medium text-gray-500 mt-0.5">

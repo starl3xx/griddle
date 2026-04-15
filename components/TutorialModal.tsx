@@ -9,9 +9,9 @@ export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in">
-      <div className="modal-sheet sm:rounded-card animate-slide-up">
-        <h2 className="text-2xl font-black tracking-tight text-gray-900">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+      <div className="modal-sheet animate-slide-up">
+        <h2 className="text-2xl font-bold tracking-tight text-gray-900">
           Welcome to Griddle
         </h2>
         <p className="text-sm font-medium text-gray-500 mt-1">
