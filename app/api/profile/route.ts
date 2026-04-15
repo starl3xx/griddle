@@ -133,11 +133,25 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
   }
 
-  const rows = await db
-    .update(profiles)
-    .set({ ...patch, updatedAt: new Date() })
-    .where(eq(profiles.id, profileId))
-    .returning();
+  // Catch unique-index violations (handle collision with another
+  // profile) and surface them as a 409 instead of an unhandled 500.
+  // drizzle re-throws the underlying pg error; detect by SQLSTATE
+  // 23505 code or index name substring so we don't couple to a
+  // specific driver error class.
+  let rows;
+  try {
+    rows = await db
+      .update(profiles)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(profiles.id, profileId))
+      .returning();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('profiles_handle_lower_idx') || msg.includes('23505')) {
+      return NextResponse.json({ error: 'handle already taken' }, { status: 409 });
+    }
+    throw err;
+  }
 
   if (rows.length === 0) {
     return NextResponse.json({ error: 'profile not found' }, { status: 404 });

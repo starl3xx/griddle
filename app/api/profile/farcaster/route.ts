@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
-import { setSessionProfile } from '@/lib/session-profile';
+import { setSessionProfileOrThrow } from '@/lib/session-profile';
 import { upsertProfileForFarcaster } from '@/lib/db/queries';
 
 /**
@@ -63,7 +63,21 @@ export async function POST(req: Request): Promise<NextResponse> {
     avatarUrl: body.avatarUrl ?? null,
     wallet: requestWallet,
   });
-  await setSessionProfile(sessionId, profile.id);
+  // Consistent with /api/profile/create and /api/auth/verify: use the
+  // throwing variant so callers know for sure the binding landed.
+  // The wallet-based fallback in GET /api/profile would usually cover
+  // a Farcaster user reloading after a KV miss, but the contract
+  // inconsistency caused real confusion in testing — every endpoint
+  // that creates-and-binds should fail closed.
+  try {
+    await setSessionProfileOrThrow(sessionId, profile.id);
+  } catch (err) {
+    console.error('[profile/farcaster] setSessionProfile failed', err);
+    return NextResponse.json(
+      { error: 'Could not bind profile to session; please retry.' },
+      { status: 503 },
+    );
+  }
 
   return NextResponse.json({
     profile: {
