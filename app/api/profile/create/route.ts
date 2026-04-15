@@ -46,8 +46,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'displayName required' }, { status: 400 });
   }
 
+  // avatarUrl is optional. Accepts string, empty string, null, or
+  // absent — all normalize to either a validated URL or null.
+  // `typeof` guard is critical because `body.avatarUrl !== undefined`
+  // alone would let a JSON `null` fall through to `.trim()` and throw.
   let avatarUrl: string | null = null;
-  if (body.avatarUrl !== undefined) {
+  if (typeof body.avatarUrl === 'string') {
     const trimmed = body.avatarUrl.trim().slice(0, 500);
     if (trimmed) {
       if (!AVATAR_URL_RE.test(trimmed)) {
@@ -127,11 +131,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     updatedAt: new Date(),
   };
 
-  // Try the slugified handle first. If it's taken, fall back to a
-  // 4-digit random suffix. Use onConflictDoNothing + empty-returning
-  // check to detect handle uniqueness without swallowing unrelated
-  // DB errors (connection failures, CHECK constraint violations, etc.)
-  // in a blanket try/catch.
+  // Try the slugified handle first. If onConflictDoNothing returns
+  // empty, the insert raced a unique-index conflict on EITHER handle
+  // OR wallet (when sessionWallet is set). Both paths look identical
+  // from onConflictDoNothing's perspective, so differentiate by post-
+  // insert state: if a row now exists for our session-wallet, the
+  // conflict was on wallet (TOCTOU with the pre-insert guard) — we
+  // can't retry by changing the handle, so surface a clear error.
+  // If no wallet row exists, assume handle conflict and retry with
+  // a 4-digit suffix.
   let profileId: number;
   const firstTry = await db
     .insert(profiles)
@@ -142,9 +150,25 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (firstTry.length > 0) {
     profileId = firstTry[0].id;
   } else {
+    // Was the conflict on wallet? Re-check.
+    if (sessionWallet) {
+      const walletRows = await db
+        .select({ id: profiles.id })
+        .from(profiles)
+        .where(eq(profiles.wallet, sessionWallet))
+        .limit(1);
+      if (walletRows.length > 0) {
+        return NextResponse.json(
+          { error: 'profile already exists for this wallet; use PATCH /api/profile to update' },
+          { status: 409 },
+        );
+      }
+    }
+
+    // Not a wallet conflict — assume handle collision, retry with a
+    // 4-digit random suffix. Strip a trailing hyphen from the base
+    // before appending so we never produce "xxx--1234".
     const suffix = Math.floor(Math.random() * 9000 + 1000).toString();
-    // Strip a trailing hyphen from the base before appending the suffix
-    // so we never produce "xxx--1234" when the base was slice-trimmed.
     const base = handle.slice(0, 27).replace(/-+$/, '');
     const fallbackHandle = `${base}-${suffix}`;
     const retry = await db
