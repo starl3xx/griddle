@@ -9,18 +9,32 @@ import { eq } from 'drizzle-orm';
 /**
  * POST /api/profile/create
  *
- * Body: `{ displayName: string }`
+ * Body: `{ displayName: string, avatarUrl?: string }`
  *
- * Creates a display-name-only profile for users who don't want to
- * provide an email. No email verification — profile is bound to this
- * browser session via Upstash KV. If the session is lost (new browser,
- * cleared cookies) the user will need to re-create or add an email.
+ * Creates a profile for the current session. Two modes:
+ *
+ *   1. **Handle-only** — no wallet bound. Profile row has displayName
+ *      + a slugified handle, no wallet. Bound to the session via
+ *      Upstash KV. If the session is lost (new browser, cleared
+ *      cookies) the user will need to re-create or add an email.
+ *
+ *   2. **Wallet-linked** — session already has a wallet bound (the
+ *      user clicked Connect Wallet earlier). Profile row has displayName
+ *      + handle + WALLET so the "Complete your profile" flow from
+ *      SettingsModal produces a full wallet-linked row in one shot,
+ *      not an orphan handle-only row that then races with wallet/link's
+ *      reconcile.
+ *
+ * Either mode accepts an optional `avatarUrl`. Handle is always auto-
+ * slugified from displayName; it can be changed later via PATCH.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const AVATAR_URL_RE = /^https?:\/\/[^\s]{1,500}$/;
+
 export async function POST(req: Request): Promise<NextResponse> {
-  let body: { displayName?: string };
+  let body: { displayName?: string; avatarUrl?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -30,6 +44,24 @@ export async function POST(req: Request): Promise<NextResponse> {
   const displayName = (body.displayName ?? '').trim().slice(0, 50);
   if (!displayName) {
     return NextResponse.json({ error: 'displayName required' }, { status: 400 });
+  }
+
+  // avatarUrl is optional. Accepts string, empty string, null, or
+  // absent — all normalize to either a validated URL or null.
+  // `typeof` guard is critical because `body.avatarUrl !== undefined`
+  // alone would let a JSON `null` fall through to `.trim()` and throw.
+  let avatarUrl: string | null = null;
+  if (typeof body.avatarUrl === 'string') {
+    const trimmed = body.avatarUrl.trim().slice(0, 500);
+    if (trimmed) {
+      if (!AVATAR_URL_RE.test(trimmed)) {
+        return NextResponse.json(
+          { error: 'avatarUrl must be a http(s) URL' },
+          { status: 400 },
+        );
+      }
+      avatarUrl = trimmed;
+    }
   }
 
   // Guard: if the session already has a profile bound, refuse to
@@ -87,29 +119,61 @@ export async function POST(req: Request): Promise<NextResponse> {
   };
   const handle = toValidSlug(displayName);
 
-  // Try the slugified handle first. If it's taken, fall back to a
-  // 4-digit random suffix. Use onConflictDoNothing + empty-returning
-  // check to detect handle uniqueness without swallowing unrelated
-  // DB errors (connection failures, CHECK constraint violations, etc.)
-  // in a blanket try/catch.
+  // Shared insert payload — wallet comes from the session KV binding
+  // (if any), so a wallet-connected user completing their profile
+  // ends up with a proper wallet-linked row in one shot. avatarUrl is
+  // optional and validated above.
+  const baseValues = {
+    handle,
+    displayName,
+    avatarUrl,
+    wallet: sessionWallet,
+    updatedAt: new Date(),
+  };
+
+  // Try the slugified handle first. If onConflictDoNothing returns
+  // empty, the insert raced a unique-index conflict on EITHER handle
+  // OR wallet (when sessionWallet is set). Both paths look identical
+  // from onConflictDoNothing's perspective, so differentiate by post-
+  // insert state: if a row now exists for our session-wallet, the
+  // conflict was on wallet (TOCTOU with the pre-insert guard) — we
+  // can't retry by changing the handle, so surface a clear error.
+  // If no wallet row exists, assume handle conflict and retry with
+  // a 4-digit suffix.
   let profileId: number;
   const firstTry = await db
     .insert(profiles)
-    .values({ handle, displayName, updatedAt: new Date() })
+    .values(baseValues)
     .onConflictDoNothing()
     .returning({ id: profiles.id });
 
   if (firstTry.length > 0) {
     profileId = firstTry[0].id;
   } else {
+    // Was the conflict on wallet? Re-check.
+    if (sessionWallet) {
+      const walletRows = await db
+        .select({ id: profiles.id })
+        .from(profiles)
+        .where(eq(profiles.wallet, sessionWallet))
+        .limit(1);
+      if (walletRows.length > 0) {
+        return NextResponse.json(
+          { error: 'profile already exists for this wallet; use PATCH /api/profile to update' },
+          { status: 409 },
+        );
+      }
+    }
+
+    // Not a wallet conflict — assume handle collision, retry with a
+    // 4-digit random suffix. Strip a trailing hyphen from the base
+    // before appending so we never produce "xxx--1234".
     const suffix = Math.floor(Math.random() * 9000 + 1000).toString();
-    // Strip a trailing hyphen from the base before appending the suffix
-    // so we never produce "xxx--1234" when the base was slice-trimmed.
     const base = handle.slice(0, 27).replace(/-+$/, '');
     const fallbackHandle = `${base}-${suffix}`;
     const retry = await db
       .insert(profiles)
-      .values({ handle: fallbackHandle, displayName, updatedAt: new Date() })
+      .values({ ...baseValues, handle: fallbackHandle })
       .onConflictDoNothing()
       .returning({ id: profiles.id });
     if (!retry.length) {

@@ -43,6 +43,13 @@ interface SettingsModalProps {
   open: boolean;
   /** The bound profile, or null for anonymous sessions. */
   profile: ProfileSnapshot | null;
+  /**
+   * The wallet currently bound to the session via KV, or null. Used
+   * to detect the "wallet-connected but no profile row yet" state so
+   * Settings can show a "Complete your profile" form instead of the
+   * generic onboarding CTAs.
+   */
+  sessionWallet: string | null;
   premium: boolean;
   dark: boolean;
   onToggleDark: () => void;
@@ -86,6 +93,7 @@ const HANDLE_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export function SettingsModal({
   open,
   profile,
+  sessionWallet,
   premium,
   dark,
   onToggleDark,
@@ -194,19 +202,52 @@ export function SettingsModal({
     setProfileError(null);
     setProfileSavedAt(null);
 
-    // Only include fields that actually changed from the current
-    // profile. displayName and handle can't be cleared — the server
-    // rejects empty values and we show a specific error here. avatarUrl
-    // CAN be cleared by blanking the field; send explicit `null` in
-    // that case so the server drops the column back to the default
-    // silhouette.
-    const patch: { displayName?: string; handle?: string; avatarUrl?: string | null } = {};
     const trimmedName = displayNameDraft.trim();
     const trimmedHandle = handleDraft.trim().toLowerCase();
     const trimmedAvatar = avatarUrlDraft.trim();
-    const currentName = profile?.displayName ?? '';
-    const currentHandle = profile?.handle ?? '';
-    const currentAvatar = profile?.avatarUrl ?? '';
+
+    // Two modes:
+    //   a) profile exists → PATCH /api/profile with the diff of changed
+    //      fields (displayName / handle / avatarUrl). Empty blanks on
+    //      displayName or handle surface as specific errors; blank
+    //      avatarUrl sends explicit `null` to clear the column.
+    //   b) no profile yet (wallet-connected user completing onboarding
+    //      for the first time) → POST /api/profile/create with the
+    //      drafts, server auto-attaches the session wallet.
+    if (!profile) {
+      if (!trimmedName) {
+        setProfileError('Display name is required.');
+        return;
+      }
+      setProfileSaving(true);
+      try {
+        const res = await fetch('/api/profile/create', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            displayName: trimmedName,
+            ...(trimmedAvatar ? { avatarUrl: trimmedAvatar } : {}),
+          }),
+        });
+        if (!res.ok) {
+          const d = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(d.error ?? `Save failed (${res.status})`);
+        }
+        setProfileSavedAt(Date.now());
+        onProfileChanged();
+      } catch (err) {
+        setProfileError(err instanceof Error ? err.message : 'Save failed');
+      } finally {
+        setProfileSaving(false);
+      }
+      return;
+    }
+
+    // PATCH path — existing profile.
+    const patch: { displayName?: string; handle?: string; avatarUrl?: string | null } = {};
+    const currentName = profile.displayName ?? '';
+    const currentHandle = profile.handle ?? '';
+    const currentAvatar = profile.avatarUrl ?? '';
 
     if (trimmedName !== currentName) {
       if (!trimmedName) {
@@ -337,19 +378,18 @@ export function SettingsModal({
           </button>
         </div>
 
-        {/* Anonymous state — onboarding CTAs. Two sub-states: pure
-            anonymous (no profile, no premium) sees all three paths;
-            premium-but-profileless (fiat buyer who hasn't created a
-            profile yet) sees only Create profile + Connect wallet,
-            since showing "Unlock with card or crypto" to a user who
-            already paid would risk a duplicate purchase. */}
-        {!hasIdentity && !premium && (
+        {/* Fully anonymous — no profile, no wallet, no premium. The
+            anonymous surface for a brand-new visitor: sign-in entry,
+            wallet connect, and the upsell path. Worded as "sign in"
+            because the magic-link flow is idempotent — same button
+            for both new and returning users. */}
+        {!hasIdentity && !sessionWallet && !premium && (
           <div className="py-2 space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
-              Create a profile, connect a wallet, or unlock premium to get started.
+              Sign in to track your streaks, fastest times, and carry your progress across devices.
             </p>
             <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
-              Create profile
+              Sign in
             </button>
             <button type="button" onClick={onConnect} className="btn-secondary w-full">
               Connect wallet
@@ -360,13 +400,17 @@ export function SettingsModal({
             </button>
           </div>
         )}
-        {!hasIdentity && premium && (
+
+        {/* Premium but no identity — fiat buyer who hasn't created a
+            profile yet. Same sign-in affordance, no unlock CTA (they
+            already paid). */}
+        {!hasIdentity && !sessionWallet && premium && (
           <div className="py-2 space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
-              You’re premium. Attach a profile or wallet so your access follows you across devices.
+              You’re premium. Sign in so your access follows you across devices.
             </p>
             <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
-              Create profile
+              Sign in
             </button>
             <button type="button" onClick={onConnect} className="btn-secondary w-full">
               Connect wallet
@@ -374,9 +418,19 @@ export function SettingsModal({
           </div>
         )}
 
-        {/* Profile editor — shown when an identity exists */}
-        {hasIdentity && (
-          <Section title="Profile">
+        {/* Profile editor — shown for both existing profiles and
+            wallet-connected users completing onboarding. In
+            "complete" mode (no profile yet) we hide the handle field
+            since it's auto-slugged from the displayName on the
+            server, and the whole flow is framed as "Complete your
+            profile" rather than "edit." */}
+        {(hasIdentity || sessionWallet) && (
+          <Section title={hasIdentity ? 'Profile' : 'Complete your profile'}>
+            {!hasIdentity && (
+              <p className="text-[12px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                Your wallet is connected. Add a display name so your solves appear under a real identity on the leaderboard.
+              </p>
+            )}
             <LabeledInput
               label="Display name"
               value={displayNameDraft}
@@ -384,21 +438,25 @@ export function SettingsModal({
               placeholder="alice"
               maxLength={50}
             />
-            <LabeledInput
-              label="Handle"
-              value={handleDraft}
-              onChange={(v) => setHandleDraft(v.toLowerCase())}
-              placeholder="alice-42"
-              maxLength={32}
-              hint="2–32 chars, a–z, 0–9, hyphens"
-            />
+            {hasIdentity && (
+              <LabeledInput
+                label="Handle"
+                value={handleDraft}
+                onChange={(v) => setHandleDraft(v.toLowerCase())}
+                placeholder="alice-42"
+                maxLength={32}
+                hint="2–32 chars, a–z, 0–9, hyphens"
+              />
+            )}
             <LabeledInput
               label="Avatar URL"
               value={avatarUrlDraft}
               onChange={setAvatarUrlDraft}
               placeholder="https://…"
               maxLength={500}
-              hint="Leave blank to use the default silhouette"
+              hint={hasIdentity
+                ? 'Leave blank to use the default silhouette'
+                : 'Optional — we’ll use a silhouette if you skip'}
             />
 
             {profileError && (
@@ -422,13 +480,17 @@ export function SettingsModal({
               ) : (
                 <Check className="w-4 h-4" weight="bold" aria-hidden />
               )}
-              Save profile
+              {hasIdentity ? 'Save profile' : 'Complete profile'}
             </button>
           </Section>
         )}
 
-        {/* Identity anchors — add missing ones */}
-        {hasIdentity && (
+        {/* Identity anchors — render for any user with at least one
+            identity signal (profile row OR session wallet). Same as
+            the profile editor: the section gates on "does it make
+            sense to let them add anchors?" and a wallet-only user
+            who hasn't saved their profile yet still qualifies. */}
+        {(hasIdentity || sessionWallet) && (
           <Section title="Sign-in methods">
             <IdentityRow
               icon={<Envelope className="w-4 h-4" weight="bold" />}
@@ -436,8 +498,19 @@ export function SettingsModal({
               value={profile?.email ?? null}
               verified={!!profile?.emailVerifiedAt}
             />
-            {/* Inline add-email for users who don't have one yet */}
-            {!profile?.email && (
+            {/* Inline add-email flow. Only shown when the user
+                already has a saved profile row (hasIdentity). Gating
+                on hasIdentity (not hasIdentity || sessionWallet)
+                prevents a race where a wallet-only user sees both
+                the Complete-profile form and this email form at the
+                same time, fires the email first, and clicks the
+                magic link before completing the profile — the
+                verify route would then create an email-only profile
+                with no wallet (because no wallet-linked row exists
+                to merge into), orphaning the session wallet. For
+                wallet-only users we show a hint telling them to
+                complete the profile first. */}
+            {hasIdentity && !profile?.email && (
               <div className="space-y-2">
                 {emailSentTo ? (
                   <p className="text-[12px] text-gray-600 dark:text-gray-400 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md px-3 py-2">
@@ -471,15 +544,24 @@ export function SettingsModal({
                 )}
               </div>
             )}
+            {!hasIdentity && sessionWallet && (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                Complete your profile above first, then you can add an email to sign in from other devices.
+              </p>
+            )}
 
             <IdentityRow
               icon={<Wallet className="w-4 h-4" weight="bold" />}
               label="Wallet"
-              value={profile?.wallet
-                ? `${profile.wallet.slice(0, 6)}…${profile.wallet.slice(-4)}`
-                : null}
+              value={
+                profile?.wallet
+                  ? `${profile.wallet.slice(0, 6)}…${profile.wallet.slice(-4)}`
+                  : sessionWallet
+                    ? `${sessionWallet.slice(0, 6)}…${sessionWallet.slice(-4)}`
+                    : null
+              }
             />
-            {!profile?.wallet && (
+            {!profile?.wallet && !sessionWallet && (
               <button
                 type="button"
                 onClick={onConnect}
@@ -504,41 +586,54 @@ export function SettingsModal({
             onChange={onToggleDark}
           />
 
-          {premium && (
-            <>
-              <ToggleRow
-                icon={<ShieldCheck className="w-4 h-4" weight="bold" />}
-                label="Streak protection"
-                description={
-                  protectionOnCooldown
-                    ? `Available again in ${cooldownDaysLeft}d`
-                    : settings?.streakProtectionEnabled
-                      ? 'Armed — will save your streak once'
-                      : 'Saves your streak if you miss a day'
-                }
-                checked={settings?.streakProtectionEnabled ?? false}
-                disabled={savingProtection || protectionOnCooldown}
-                onChange={() => toggleSetting('streakProtectionEnabled')}
-              />
-              <ToggleRow
-                icon={settings?.unassistedModeEnabled
-                  ? <EyeSlash className="w-4 h-4" weight="bold" />
-                  : <Eye className="w-4 h-4" weight="bold" />}
-                label="Unassisted mode"
-                description="Hides cell hints — earn 🎯 Ace for solving blind"
-                checked={settings?.unassistedModeEnabled ?? false}
-                disabled={savingUnassisted}
-                onChange={() => toggleSetting('unassistedModeEnabled')}
-              />
-            </>
-          )}
+          {/* Premium preferences — always rendered so non-premium
+              users see them as a feature preview. When !premium the
+              toggles are disabled and get a "Premium" badge; the
+              description copy flips to an upsell tease. This is a
+              deliberate UX nudge: showing "you could have this" is
+              a stronger upgrade prompt than hiding the settings
+              entirely. */}
+          <ToggleRow
+            icon={<ShieldCheck className="w-4 h-4" weight="bold" />}
+            label="Streak protection"
+            premiumLocked={!premium}
+            description={
+              !premium
+                ? 'Save your streak once per week if you miss a day'
+                : protectionOnCooldown
+                  ? `Available again in ${cooldownDaysLeft}d`
+                  : settings?.streakProtectionEnabled
+                    ? 'Armed — will save your streak once'
+                    : 'Saves your streak if you miss a day'
+            }
+            checked={premium ? (settings?.streakProtectionEnabled ?? false) : false}
+            disabled={!premium || savingProtection || protectionOnCooldown}
+            onChange={() => toggleSetting('streakProtectionEnabled')}
+          />
+          <ToggleRow
+            icon={settings?.unassistedModeEnabled
+              ? <EyeSlash className="w-4 h-4" weight="bold" />
+              : <Eye className="w-4 h-4" weight="bold" />}
+            label="Unassisted mode"
+            premiumLocked={!premium}
+            description={
+              !premium
+                ? 'Hide cell hints for an Ace Wordmark on solves'
+                : 'Hides cell hints — earn 🎯 Ace for solving blind'
+            }
+            checked={premium ? (settings?.unassistedModeEnabled ?? false) : false}
+            disabled={!premium || savingUnassisted}
+            onChange={() => toggleSetting('unassistedModeEnabled')}
+          />
         </Section>
 
-        {/* Premium status — upsell if not premium but has an account,
-            badge if already premium. Anonymous users see the onboarding
-            CTAs above and don't need this section at all, so skip it
+        {/* Premium status — upsell if not premium but has an account
+            OR a connected wallet (covers the "wallet connected, no
+            profile row yet" path that the Complete-profile flow
+            created). Fully anonymous users see the onboarding CTAs
+            above and don't need this section at all, so skip it
             entirely to avoid an orphaned "PREMIUM" header with no body. */}
-        {(premium || hasIdentity) && (
+        {(premium || hasIdentity || sessionWallet) && (
           <Section title="Premium">
             {premium ? (
               <div className="flex items-center gap-3 bg-accent/10 border border-accent/20 rounded-md p-3">
@@ -663,7 +758,7 @@ function IdentityRow({
 }
 
 function ToggleRow({
-  icon, label, description, checked, disabled, onChange,
+  icon, label, description, checked, disabled, onChange, premiumLocked,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -671,12 +766,27 @@ function ToggleRow({
   checked: boolean;
   disabled: boolean;
   onChange: () => void;
+  /**
+   * When true, the row renders as a disabled preview with a "Premium"
+   * badge next to the label. Used to tease non-premium features so
+   * non-premium users can see what Premium unlocks instead of the
+   * settings disappearing entirely.
+   */
+  premiumLocked?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-accent flex-shrink-0">{icon}</span>
+    <div className={`flex items-center gap-3 ${premiumLocked ? 'opacity-70' : ''}`}>
+      <span className={`${premiumLocked ? 'text-gray-400' : 'text-accent'} flex-shrink-0`}>{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{label}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{label}</p>
+          {premiumLocked && (
+            <span className="text-[9px] font-bold uppercase tracking-wider text-accent bg-accent/10 rounded px-1.5 py-0.5 inline-flex items-center gap-0.5">
+              <Diamond className="w-2.5 h-2.5" weight="fill" aria-hidden />
+              Premium
+            </span>
+          )}
+        </div>
         <p className="text-[11px] text-gray-500">{description}</p>
       </div>
       <button
