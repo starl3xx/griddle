@@ -179,7 +179,7 @@ export function CreateProfileModal({
 
               <button
                 type="button"
-                onClick={() => { onClose(); onConnectWallet(); }}
+                onClick={onConnectWallet}
                 className="btn-secondary w-full text-sm"
               >
                 Connect a wallet instead

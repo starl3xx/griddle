@@ -1189,21 +1189,27 @@ export async function createMagicLink(
   const normalized = email.toLowerCase().trim();
   const since = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
 
-  // Rate limit: count recent tokens for this email
-  const recent = await db
-    .select({ id: magicLinks.id })
-    .from(magicLinks)
-    .where(and(eq(magicLinks.email, normalized), gte(magicLinks.createdAt, since)));
-
-  if (recent.length >= RATE_LIMIT_MAX) {
-    return { error: 'Too many sign-in requests. Try again in an hour.' };
-  }
-
   const raw = randomBytes(32).toString('base64url');
   const tokenHash = hashToken(raw);
   const expiresAt = new Date(Date.now() + MAGIC_LINK_TTL_MS);
 
-  await db.insert(magicLinks).values({ email: normalized, tokenHash, expiresAt });
+  // Atomic rate limit: a single INSERT ... SELECT that only inserts
+  // when the recent-token count is under the cap. Returns a row when
+  // the insert happened and nothing when it was rate-limited. Closes
+  // the TOCTOU gap between a separate count + insert.
+  const inserted = await db.execute<{ id: number }>(sql`
+    INSERT INTO magic_links (email, token_hash, expires_at)
+    SELECT ${normalized}, ${tokenHash}, ${expiresAt}
+    WHERE (
+      SELECT count(*) FROM magic_links
+      WHERE email = ${normalized} AND created_at >= ${since}
+    ) < ${RATE_LIMIT_MAX}
+    RETURNING id
+  `);
+
+  if (inserted.rows.length === 0) {
+    return { error: 'Too many sign-in requests. Try again in an hour.' };
+  }
   return { token: raw };
 }
 
@@ -1463,13 +1469,18 @@ export async function getOrCreateProfileByEmail(
     .limit(1);
 
   if (existing.length > 0) {
-    const r = existing[0];
-    // If email wasn't verified yet, verify it now
+    let r = existing[0];
+    // If email wasn't verified yet, verify it now — use .returning() so
+    // the returned profile object matches what's actually in the DB
+    // (same updatedAt, same emailVerifiedAt).
     if (!r.emailVerifiedAt) {
-      await db
+      const now = new Date();
+      const updated = await db
         .update(profiles)
-        .set({ emailVerifiedAt: new Date(), updatedAt: new Date() })
-        .where(eq(profiles.id, r.id));
+        .set({ emailVerifiedAt: now, updatedAt: now })
+        .where(eq(profiles.id, r.id))
+        .returning();
+      if (updated[0]) r = updated[0];
     }
     return {
       id: r.id,
@@ -1480,7 +1491,7 @@ export async function getOrCreateProfileByEmail(
       reason: r.reason,
       stripeSessionId: r.stripeSessionId,
       email: r.email,
-      emailVerifiedAt: r.emailVerifiedAt ?? new Date(),
+      emailVerifiedAt: r.emailVerifiedAt,
       displayName: r.displayName,
       avatarUrl: r.avatarUrl,
       farcasterFid: r.farcasterFid ?? null,
