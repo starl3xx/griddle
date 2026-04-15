@@ -4,18 +4,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CircleNotch, ArrowsClockwise, ChartLineUp, Timer } from '@phosphor-icons/react';
-
-type FunnelWindow = '24h' | '7d' | '30d' | 'all';
-
-interface StageRow { eventName: string; sessions: number; total: number }
-interface BreakdownRow { eventName: string; bucket: string; sessions: number; total: number }
-
-interface FunnelStats {
-  window: FunnelWindow;
-  stages: StageRow[];
-  breakdown: BreakdownRow[];
-  medianTimeToConvertMs: { method: 'crypto' | 'fiat'; ms: number | null }[];
-}
+import type {
+  FunnelWindow,
+  FunnelStageRow,
+  FunnelBreakdownRow,
+  FunnelStats,
+} from '@/lib/funnel/types';
 
 // The canonical funnel order. Stages render top-to-bottom with
 // conversion % computed against the first populated stage. Events
@@ -77,13 +71,13 @@ export function FunnelTab() {
   }, [win, retryNonce]);
 
   const stageMap = useMemo(() => {
-    const m = new Map<string, StageRow>();
+    const m = new Map<string, FunnelStageRow>();
     data?.stages.forEach((s) => m.set(s.eventName, s));
     return m;
   }, [data]);
 
   const breakdownByEvent = useMemo(() => {
-    const m = new Map<string, BreakdownRow[]>();
+    const m = new Map<string, FunnelBreakdownRow[]>();
     data?.breakdown.forEach((b) => {
       const list = m.get(b.eventName) ?? [];
       list.push(b);

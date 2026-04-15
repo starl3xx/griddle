@@ -1586,39 +1586,19 @@ export async function upsertUserSettings(
 
 // ─── Funnel telemetry rollups ──────────────────────────────────────
 
-export type FunnelWindow = '24h' | '7d' | '30d' | 'all';
-
-/**
- * Per-stage stats for the admin Funnel tab. `sessions` is distinct
- * sessions that fired the event at least once in the window — the
- * user-count denominator for conversion rates. `total` is the raw
- * event count (useful to spot stuck retry loops, etc.).
- */
-export interface FunnelStageRow {
-  eventName: string;
-  sessions: number;
-  total: number;
-}
-
-export interface FunnelBreakdownRow {
-  eventName: string;
-  bucket: string;
-  sessions: number;
-  total: number;
-}
-
-export interface FunnelStats {
-  window: FunnelWindow;
-  stages: FunnelStageRow[];
-  /**
-   * Event × metadata-bucket breakdown. Lets the Funnel tab split
-   * `upgrade_clicked` and `checkout_*` by method, `premium_gate_shown`
-   * by feature, etc., without re-scanning the table per dimension.
-   */
-  breakdown: FunnelBreakdownRow[];
-  /** Median ms from upgrade_clicked to checkout_completed, per method. */
-  medianTimeToConvertMs: { method: 'crypto' | 'fiat'; ms: number | null }[];
-}
+// Type definitions live in `lib/funnel/types.ts` so the admin Funnel
+// tab (a `'use client'` component) can import the same shapes without
+// dragging db/client.ts and the postgres driver into the client bundle.
+// Re-exported here so existing server-side call sites keep their
+// import paths.
+export type {
+  FunnelWindow,
+  FunnelStageRow,
+  FunnelBreakdownRow,
+  FunnelTimeToConvertRow,
+  FunnelStats,
+} from '@/lib/funnel/types';
+import type { FunnelWindow, FunnelStats } from '@/lib/funnel/types';
 
 /** SQL interval string for a FunnelWindow. `all` returns null = no bound. */
 function windowIntervalSql(window: FunnelWindow) {
