@@ -71,9 +71,20 @@ const PROTECTION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Handles are lowercase letters, digits, and underscores only —
 // no hyphens, no special characters, no unicode glyphs. "starl3xx"
-// works; "$t✪rl3xx" does not. Matches the same pattern enforced by
-// PATCH /api/profile and the slugifier in /api/profile/create.
-const HANDLE_RE = /^[a-z0-9_]+$/;
+// works; "$t✪rl3xx" does not.
+//
+// The structure `[a-z0-9]+(_[a-z0-9]+)*` is equivalent to
+// "one or more runs of alphanumerics separated by single
+// underscores" — this enforces the same structural invariants the
+// old hyphen regex did:
+//   - must contain at least one alphanumeric (rejects `__`)
+//   - no leading/trailing underscore (rejects `_foo` / `foo_`)
+//   - no consecutive underscores (rejects `foo__bar`)
+// A flat `/^[a-z0-9_]+$/` would accept all of those, which the
+// slugifier in /api/profile/create explicitly cleans up — keeping
+// the validator in sync means anything the slugifier produces
+// round-trips through PATCH /api/profile.
+const HANDLE_RE = /^[a-z0-9]+(_[a-z0-9]+)*$/;
 
 /**
  * Settings modal — all identity and preferences surfaces, accessed via

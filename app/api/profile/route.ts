@@ -118,9 +118,12 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     // handle as display identity. Validate the slug shape either way.
     const handle = body.handle.trim().toLowerCase().slice(0, 32);
     // Lowercase letters, digits, underscores. No hyphens, no unicode,
-    // no special characters. Mirrors SettingsModal's client-side check
-    // and the slugifier in /api/profile/create.
-    if (!/^[a-z0-9_]+$/.test(handle) || handle.length < 2) {
+    // no special characters. Structural equivalent to the old hyphen
+    // regex: alphanumeric runs joined by single underscores, so
+    // `__`, `_foo`, `foo_`, and `foo__bar` are all rejected. Kept in
+    // sync with HANDLE_RE in SettingsModal and the slugifier in
+    // /api/profile/create.
+    if (!/^[a-z0-9]+(_[a-z0-9]+)*$/.test(handle) || handle.length < 2) {
       return NextResponse.json(
         { error: 'handle must be 2–32 chars, lowercase letters, numbers, or underscores' },
         { status: 400 },
