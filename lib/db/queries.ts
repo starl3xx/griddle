@@ -1359,9 +1359,22 @@ export async function upsertProfileForFarcaster(input: {
   const fidRow  = byFid[0]   ?? null;
   const walletRow = byWallet[0] ?? null;
 
-  // Auto-merge if two different rows
+  // Auto-merge if two different rows, then apply fresh Farcaster input
+  // on top of the merged survivor so the latest username/avatar/wallet
+  // aren't silently lost (mergeProfiles only combines existing row data).
   if (fidRow && walletRow && fidRow.id !== walletRow.id) {
-    return mergeProfiles(fidRow.id, walletRow.id);
+    const merged = await mergeProfiles(fidRow.id, walletRow.id);
+    const freshPatch: Record<string, unknown> = { updatedAt: new Date() };
+    if (input.username) freshPatch.farcasterUsername = input.username;
+    if (input.displayName && !merged.displayName) freshPatch.displayName = input.displayName;
+    if (input.avatarUrl && !merged.avatarUrl) freshPatch.avatarUrl = input.avatarUrl;
+    if (wallet && !merged.wallet) freshPatch.wallet = wallet;
+    if (Object.keys(freshPatch).length > 1) {
+      const rows = await db.update(profiles).set(freshPatch).where(eq(profiles.id, merged.id)).returning();
+      const r = rows[0];
+      return { ...merged, farcasterUsername: (r.farcasterUsername ?? merged.farcasterUsername), displayName: (r.displayName ?? merged.displayName), avatarUrl: (r.avatarUrl ?? merged.avatarUrl), wallet: (r.wallet ?? merged.wallet) };
+    }
+    return merged;
   }
 
   const existing = fidRow ?? walletRow ?? null;

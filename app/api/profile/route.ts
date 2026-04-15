@@ -83,7 +83,16 @@ export async function GET(): Promise<NextResponse> {
 export async function PATCH(req: Request): Promise<NextResponse> {
   const sessionId = await getSessionId();
 
-  const profileId = await getSessionProfile(sessionId);
+  // Mirror GET: try session-profile first, fall back to wallet-linked profile.
+  let profileId = await getSessionProfile(sessionId);
+  if (profileId === null) {
+    const wallet = await getSessionWallet(sessionId);
+    if (wallet) {
+      const rows = await db.select({ id: profiles.id }).from(profiles)
+        .where(eq(profiles.wallet, wallet)).limit(1);
+      if (rows.length > 0) profileId = rows[0].id;
+    }
+  }
   if (profileId === null) {
     return NextResponse.json({ error: 'no profile bound to session' }, { status: 401 });
   }

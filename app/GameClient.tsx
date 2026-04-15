@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { Diamond } from '@phosphor-icons/react';
@@ -61,6 +61,19 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
 export default function GameClient({ initialPuzzle }: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
   const router = useRouter();
+
+  // Refs so handleWalletConnect (empty deps array) always reads the
+  // latest Farcaster values without being re-created on every context update.
+  const inMiniAppRef = useRef(inMiniApp);
+  const fidRef = useRef(fid);
+  const usernameRef = useRef(username);
+  const displayNameRef = useRef(displayName);
+  const pfpUrlRef = useRef(pfpUrl);
+  useEffect(() => { inMiniAppRef.current = inMiniApp; }, [inMiniApp]);
+  useEffect(() => { fidRef.current = fid; }, [fid]);
+  useEffect(() => { usernameRef.current = username; }, [username]);
+  useEffect(() => { displayNameRef.current = displayName; }, [displayName]);
+  useEffect(() => { pfpUrlRef.current = pfpUrl; }, [pfpUrl]);
 
   /** The wallet currently bound to this session, or null if none. */
   const [sessionWallet, setSessionWallet] = useState<string | null>(null);
@@ -212,15 +225,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // Farcaster miniapp: upsert a rich profile using FID + username + pfp.
       // The API auto-merges with any existing wallet profile and binds the
       // result to the session so /api/profile reads correctly.
-      if (inMiniApp && fid) {
+      // Read from refs — not from closure — so we always get the
+      // latest Farcaster context even though this callback has empty deps.
+      if (inMiniAppRef.current && fidRef.current) {
         fetch('/api/profile/farcaster', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            fid,
-            username: username ?? null,
-            displayName: displayName ?? null,
-            avatarUrl: pfpUrl ?? null,
+            fid: fidRef.current,
+            username: usernameRef.current ?? null,
+            displayName: displayNameRef.current ?? null,
+            avatarUrl: pfpUrlRef.current ?? null,
             wallet: normalized,
           }),
         }).catch(() => {/* best-effort */});
