@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { Diamond, Moon, Sun, ShieldCheck, Eye, EyeSlash, Question } from '@phosphor-icons/react';
-import { CreateProfileModal } from './CreateProfileModal';
 import { formatMs } from '@/lib/format';
 import { Avatar } from './Avatar';
 import type { WalletStats } from '@/lib/db/queries';
@@ -22,6 +21,14 @@ interface SettingsResponse {
 interface StatsModalProps {
   open: boolean;
   premium: boolean;
+  /**
+   * True when a session-profile KV binding exists (email/handle-only
+   * profile created without wallet). Used to show the account state
+   * instead of the anonymous CTA after profile creation.
+   */
+  hasSessionProfile: boolean;
+  /** Fires when user clicks "Create profile" — parent shows CreateProfileModal. */
+  onCreateProfile: () => void;
   dark: boolean;
   onToggleDark: () => void;
   onClose: () => void;
@@ -31,15 +38,9 @@ interface StatsModalProps {
   onUpgrade: () => void;
   /**
    * Re-checks premium status server-side. Surfaced as a "Refresh" button
-   * for users who just paid but whose wallet hasn't flipped to premium yet
-   * (race between Stripe webhook and page load).
+   * for users who just paid but whose wallet hasn't flipped to premium yet.
    */
   onRefreshPremium: () => void;
-  /**
-   * Called once a profile is created via the CreateProfileModal so the
-   * parent can re-fetch stats and update the display name.
-   */
-  onProfileCreated: () => void;
   pfpUrl: string | null;
   displayName: string | null;
 }
@@ -61,17 +62,17 @@ const PROTECTION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 export function StatsModal({
   open,
   premium,
+  hasSessionProfile,
+  onCreateProfile,
   dark,
   onToggleDark,
   onClose,
   onConnect,
   onUpgrade,
   onRefreshPremium,
-  onProfileCreated,
   pfpUrl,
   displayName,
 }: StatsModalProps) {
-  const [showCreateProfile, setShowCreateProfile] = useState(false);
   const [statsData, setStatsData] = useState<StatsResponse | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
@@ -132,11 +133,12 @@ export function StatsModal({
 
   const wallet = statsData?.wallet ?? null;
   const stats = statsData?.stats;
-  // hasAccount: wallet connected OR session-premium (fiat buyer not yet linked
-  // to a wallet). A fiat premium user without a wallet has premium=true and
-  // wallet=null; treating them as anonymous would show "Unlock" CTAs to
-  // someone who already paid.
-  const hasAccount = !!wallet || premium;
+  // hasAccount: wallet connected, session-premium, OR session-profile
+  // (email/handle-only profile created without wallet). Without the
+  // hasSessionProfile check, creating a display-name-only profile via
+  // CreateProfileModal leaves the user in the anonymous state because
+  // wallet is still null and premium is still false.
+  const hasAccount = !!wallet || premium || hasSessionProfile;
   const monogram = wallet ? wallet.slice(2, 3).toUpperCase() : '?';
   const label = displayName ?? (wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Anonymous');
 
@@ -199,7 +201,7 @@ export function StatsModal({
           {statsLoading ? (
             <StatsSkeleton />
           ) : !hasAccount ? (
-            <AnonymousState onCreateProfile={() => setShowCreateProfile(true)} onConnect={onConnect} onUpgrade={onUpgrade} />
+            <AnonymousState onCreateProfile={onCreateProfile} onConnect={onConnect} onUpgrade={onUpgrade} />
           ) : !stats || stats.totalSolves === 0 ? (
             <div className="py-4 text-center text-sm text-gray-500">
               No solves yet. Today's puzzle is waiting.
@@ -275,14 +277,6 @@ export function StatsModal({
             <p className="text-xs text-gray-400 italic">Coming soon — achievements for your best solves.</p>
           </div>
         )}
-
-      {showCreateProfile && (
-        <CreateProfileModal
-          onClose={() => setShowCreateProfile(false)}
-          onConnectWallet={() => { setShowCreateProfile(false); onConnect(); }}
-          onProfileCreated={() => { setShowCreateProfile(false); onProfileCreated(); }}
-        />
-      )}
 
         {/* FAQ link */}
         <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-3 flex items-center justify-center gap-1.5">

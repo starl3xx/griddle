@@ -12,6 +12,7 @@ import { TutorialModal } from '@/components/TutorialModal';
 import { HomeTiles } from '@/components/HomeTiles';
 import { FoundWords } from '@/components/FoundWords';
 import { StatsModal } from '@/components/StatsModal';
+import { CreateProfileModal } from '@/components/CreateProfileModal';
 import { PremiumGateModal } from '@/components/PremiumGateModal';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
@@ -317,6 +318,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // time — the parent owns the premium-gate decision so the tiles stay
   // dumb (just emit click events).
   const [showStats, setShowStats] = useState(false);
+  const [showCreateProfile, setShowCreateProfile] = useState(false);
+  // True once a session-profile KV binding exists (email/handle-only profile).
+  // Passed to StatsModal so hasAccount reflects it immediately post-creation.
+  const [hasSessionProfile, setHasSessionProfile] = useState(false);
   const [premiumGate, setPremiumGate] =
     useState<null | 'leaderboard' | 'archive' | 'premium'>(null);
 
@@ -474,28 +479,32 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       <StatsModal
         open={showStats}
         premium={premium}
+        hasSessionProfile={hasSessionProfile}
+        onCreateProfile={() => { setShowStats(false); setShowCreateProfile(true); }}
         dark={dark}
         onToggleDark={toggleDark}
         onClose={() => setShowStats(false)}
-        onConnect={() => {
-          setShowStats(false);
-          triggerConnect();
-        }}
-        onUpgrade={() => {
-          setShowStats(false);
-          setPremiumGate('premium');
-        }}
-        onRefreshPremium={() => {
-          if (sessionWallet) void refreshPremium(sessionWallet);
-        }}
-        onProfileCreated={() => {
-          // Re-fetch stats so the modal updates after profile creation.
-          setShowStats(false);
-          setTimeout(() => setShowStats(true), 50);
-        }}
+        onConnect={() => { setShowStats(false); triggerConnect(); }}
+        onUpgrade={() => { setShowStats(false); setPremiumGate('premium'); }}
+        onRefreshPremium={() => { if (sessionWallet) void refreshPremium(sessionWallet); }}
         pfpUrl={pfpUrl}
         displayName={displayName}
       />
+
+      {/* CreateProfileModal rendered at top level — NOT inside StatsModal —
+          so its position:fixed overlay escapes the animate-slide-up transform
+          that would create a containing block and clip fixed descendants. */}
+      {showCreateProfile && (
+        <CreateProfileModal
+          onClose={() => { setShowCreateProfile(false); setShowStats(true); }}
+          onConnectWallet={() => { setShowCreateProfile(false); triggerConnect(); }}
+          onProfileCreated={() => {
+            setHasSessionProfile(true);
+            setShowCreateProfile(false);
+            setShowStats(true);
+          }}
+        />
+      )}
 
       {premiumGate !== null && (
         <PremiumGateModal
