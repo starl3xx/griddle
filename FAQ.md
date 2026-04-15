@@ -55,6 +55,28 @@ Connecting a wallet unlocks optional extras: streak tracking, personal archive, 
 
 ---
 
+## Do I need a wallet to buy Premium?
+
+**No.** You have three ways to create an account and unlock Premium:
+
+1. **Connect a wallet** — $5 in $WORD, permit-signed and burned in one transaction
+2. **Apple Pay or card** — $6 via Stripe Checkout, no wallet needed. Your unlock binds to your browser session and automatically migrates to a wallet-keyed record the first time you connect one
+3. **Magic-link email** — drop in your email, click the link we send, and you have a profile immediately. You can pay to upgrade later, or just use it for streak tracking
+
+Each path produces a real profile in our database. The leaderboard shows your handle (or a shortened wallet if you have one) regardless of how you signed up.
+
+---
+
+## How does email sign-in work?
+
+Open **Stats** → **Create profile**. Enter your email and optionally a display name. We send you a one-time magic link that expires in 15 minutes. Click it, and you’re signed in on that browser. We rate-limit to 5 magic link emails per hour per address.
+
+No passwords. No authenticator apps. The token is single-use — once you click it, it’s dead — and we only store a SHA-256 hash of it on our side, never the raw token. Your session binds to your profile in our edge cache with a 1-year TTL, so clearing cookies will make you re-authenticate.
+
+If you opened the link on a different device than the one you submitted from, your display name won’t follow the link (it’s stashed in the original browser’s localStorage). Re-enter it from your Stats panel after you sign in.
+
+---
+
 ## What happens when I solve it?
 
 The grid celebrates with a green pulse-glow animation, your solve time is locked in, and a share prompt appears immediately. If your wallet is connected, your solve counts toward your streak and the daily leaderboard.
@@ -79,25 +101,45 @@ In Griddle, $WORD powers:
 
 ## What is Premium?
 
-Premium is a one-time unlock that enables extra features for wallet-connected players. **$5 in $WORD, burned permanently, forever.** Not a subscription.
+Premium is a one-time unlock. **$5 in $WORD (burned permanently) or $6 via Apple Pay / card.** Not a subscription.
 
 **What you get:**
 
-- **Personal solve history** — every puzzle you’ve ever played, time and path preserved
-- **Full archive access** — play previous puzzles, not just today’s
-- **Streak protection** — one free streak save per month if you miss a day
-- **Stats dashboard** — average solve time, best solve, heatmaps, unassisted percentage
-- **Unassisted mode** — toggle the "available cell" green tinting OFF for a pure skill challenge. Unassisted solves get a separate leaderboard marker
+- **Full archive access** — play every past puzzle, not just today’s
+- **Daily leaderboard** — ranked view of the fastest solves each day
+- **Stats dashboard** — full solve history, averages, fastest, unassisted count, current/longest streak
+- **Streak protection** — one free streak save with a 7-day cooldown if you miss a day
+- **Unassisted mode** — hide cell hints during play for the Ace Wordmark on solves
+- **Dark mode** — universal toggle (free tier has it too, but the setting syncs across devices once you have an account)
+- **Wordmarks** — achievements for your best solves (coming soon)
+
+Premium status is recorded in our database, not onchain. The token burn is the deflationary signal — not the access-control mechanism.
 
 ---
 
 ## How does the Premium unlock work?
 
-You click **Unlock Premium**, the app fetches the live $WORD/USD price from our oracle, and shows you the exact token amount needed for $5.00. You sign a single EIP-2612 permit in your wallet — no gas, no approval, no multi-step flow — and the contract burns the tokens from your wallet in a single transaction.
+From the Premium modal you pick a path:
 
-Once confirmed onchain, your wallet is flagged as Premium **forever**. Even if $WORD price changes, you’re done. No renewals.
+**Crypto ($5).** Your wallet fetches the live $WORD/USD price from our oracle and we show you the exact token amount needed. You sign a single EIP-2612 permit — no gas, no approval, no multi-step flow — and `GriddlePremium.unlockWithPermit` burns the tokens in a single transaction. We read the `UnlockedWithBurn` event from the receipt server-side (we don’t trust the client) before flipping you to Premium. Price tolerance is ±15% and the oracle must be fresh (≤ 5 min old) or the transaction reverts.
 
-The price has a ±15% slippage tolerance and the oracle must be fresh (updated within 5 minutes) or the transaction reverts to protect you from stale prices.
+**Apple Pay / card ($6).** You’re redirected to a Stripe Checkout session with Apple Pay enabled. The $1 premium over the crypto path covers Stripe fees, DEX swap costs, and a small treasury margin. Stripe sends a signed webhook back to us when payment settles, and we flip you to Premium immediately — no wallet needed. If you later connect a wallet, your session-bound unlock automatically migrates to a wallet-keyed record. Fiat unlocks use **escrow-then-burn**: the tokens sit in a hold contract for ~30 days before final burn, so a chargeback can be refunded back to treasury.
+
+Once unlocked, you’re Premium **forever**. No renewals.
+
+---
+
+## What settings do I have?
+
+Settings live in your Stats panel (click the **Stats** tile on the home screen). Everyone gets:
+
+- **Dark mode** toggle — persisted per-wallet when connected, otherwise stored locally
+- **FAQ** link
+
+Premium users additionally get:
+
+- **Streak protection** — arm a one-shot save that covers a missed day. 7-day cooldown after use
+- **Unassisted mode** — hide the green/dimmed cell hints during play so the game is pure recall. Solves in unassisted mode earn the **Ace** Wordmark
 
 ---
 
@@ -166,6 +208,14 @@ Yes — with Premium. The full puzzle archive is available to Premium wallets, l
 ## Does Griddle work on mobile?
 
 Yes. Griddle is a web app first, so it runs in any mobile browser. It also runs as a **Farcaster mini app** inside Farcaster clients, and as a **Base App mini app** inside the Coinbase Wallet mobile app. Sharing from inside those contexts uses the native compose-cast flow and embeds a playable puzzle frame directly in your cast.
+
+---
+
+## Where are my stats stored?
+
+If you’re signed in — by wallet, by email, or by Farcaster — your solves attach to a **profile** row in our database. One profile can carry any combination of identity anchors: a wallet address, an email, a display name / handle, a Farcaster FID. When two of them overlap (e.g. you used magic-link first and then connected a wallet later), the profiles auto-merge into one.
+
+Anonymous solves live against a rotating session id. If you later create a profile or connect a wallet in the same browser, those anonymous solves get retroactively attributed to your new profile.
 
 ---
 
