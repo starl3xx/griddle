@@ -486,19 +486,14 @@ export interface ProfileRow {
 }
 
 /**
- * Lookup by wallet address. Normalized to lowercase before the query so
- * mixed-case input (e.g. the checksummed form from wagmi) hits the same
- * row as the lowercased form stored on write.
+ * Map a `profiles` table row (as returned by drizzle's `select()`) to
+ * the public `ProfileRow` shape. Collapses ten near-identical hand-
+ * written blocks across the query helpers into one place — adding a
+ * new identity column now means updating this function, not hunting
+ * for every return site.
  */
-export async function getProfileByWallet(wallet: string): Promise<ProfileRow | null> {
-  const normalized = wallet.toLowerCase();
-  const rows = await db
-    .select()
-    .from(profiles)
-    .where(eq(profiles.wallet, normalized))
-    .limit(1);
-  if (rows.length === 0) return null;
-  const r = rows[0];
+type RawProfileRow = typeof profiles.$inferSelect;
+function toProfileRow(r: RawProfileRow): ProfileRow {
   return {
     id: r.id,
     wallet: r.wallet,
@@ -519,6 +514,21 @@ export async function getProfileByWallet(wallet: string): Promise<ProfileRow | n
 }
 
 /**
+ * Lookup by wallet address. Normalized to lowercase before the query so
+ * mixed-case input (e.g. the checksummed form from wagmi) hits the same
+ * row as the lowercased form stored on write.
+ */
+export async function getProfileByWallet(wallet: string): Promise<ProfileRow | null> {
+  const normalized = wallet.toLowerCase();
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.wallet, normalized))
+    .limit(1);
+  return rows.length === 0 ? null : toProfileRow(rows[0]);
+}
+
+/**
  * Lookup by handle, case-insensitive. Uses `lower(handle)` to hit the
  * `profiles_handle_lower_idx` unique index rather than scanning.
  */
@@ -528,25 +538,7 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
     .from(profiles)
     .where(sql`lower(${profiles.handle}) = lower(${handle})`)
     .limit(1);
-  if (rows.length === 0) return null;
-  const r = rows[0];
-  return {
-    id: r.id,
-    wallet: r.wallet,
-    handle: r.handle,
-    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: r.grantedBy,
-    reason: r.reason,
-    stripeSessionId: r.stripeSessionId,
-    email: r.email ?? null,
-    emailVerifiedAt: r.emailVerifiedAt ?? null,
-    displayName: r.displayName ?? null,
-    avatarUrl: r.avatarUrl ?? null,
-    farcasterFid: r.farcasterFid ?? null,
-    farcasterUsername: r.farcasterUsername ?? null,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  };
+  return rows.length === 0 ? null : toProfileRow(rows[0]);
 }
 
 /**
@@ -717,24 +709,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
     .returning();
 
   if (insertedRows.length > 0) {
-    const r = insertedRows[0];
-    return {
-      id: r.id,
-      wallet: r.wallet,
-      handle: r.handle,
-      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-      grantedBy: r.grantedBy,
-      reason: r.reason,
-      stripeSessionId: r.stripeSessionId,
-      email: r.email ?? null,
-      emailVerifiedAt: r.emailVerifiedAt ?? null,
-      displayName: r.displayName ?? null,
-      avatarUrl: r.avatarUrl ?? null,
-      farcasterFid: r.farcasterFid ?? null,
-      farcasterUsername: r.farcasterUsername ?? null,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    };
+    return toProfileRow(insertedRows[0]);
   }
 
   // Race: a concurrent upsert created the row we wanted to insert.
@@ -810,24 +785,7 @@ async function updateProfileInPlace(
       `updateProfileInPlace: profile ${id} was concurrently deleted`,
     );
   }
-  const updated = updatedRows[0];
-  return {
-    id: updated.id,
-    wallet: updated.wallet,
-    handle: updated.handle,
-    premiumSource: updated.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: updated.grantedBy,
-    reason: updated.reason,
-    stripeSessionId: updated.stripeSessionId,
-    email: updated.email ?? null,
-    emailVerifiedAt: updated.emailVerifiedAt ?? null,
-    displayName: updated.displayName ?? null,
-    avatarUrl: updated.avatarUrl ?? null,
-    farcasterFid: updated.farcasterFid ?? null,
-    farcasterUsername: updated.farcasterUsername ?? null,
-    createdAt: updated.createdAt,
-    updatedAt: updated.updatedAt,
-  };
+  return toProfileRow(updatedRows[0]);
 }
 
 /**
@@ -1315,24 +1273,7 @@ export async function mergeProfiles(
   `);
 
   const result = await db.select().from(profiles).where(eq(profiles.id, older.id)).limit(1);
-  const r = result[0];
-  return {
-    id: r.id,
-    wallet: r.wallet,
-    handle: r.handle,
-    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: r.grantedBy,
-    reason: r.reason,
-    stripeSessionId: r.stripeSessionId,
-    email: r.email ?? null,
-    emailVerifiedAt: r.emailVerifiedAt ?? null,
-    displayName: r.displayName ?? null,
-    avatarUrl: r.avatarUrl ?? null,
-    farcasterFid: (r as { farcasterFid?: number | null }).farcasterFid ?? null,
-    farcasterUsername: (r as { farcasterUsername?: string | null }).farcasterUsername ?? null,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  };
+  return toProfileRow(result[0]);
 }
 
 /**
@@ -1382,33 +1323,21 @@ export async function upsertProfileForFarcaster(input: {
     if (input.username) freshPatch.farcasterUsername = input.username;
     if (input.displayName && !merged.displayName) freshPatch.displayName = input.displayName;
     if (input.avatarUrl && !merged.avatarUrl) freshPatch.avatarUrl = input.avatarUrl;
-    if (wallet && !merged.wallet) freshPatch.wallet = wallet;
+    // Always overwrite the merged wallet with the user's current one
+    // when supplied. mergeProfiles picks `older.wallet ?? newer.wallet`,
+    // so if both rows had wallets the older one wins and the user's
+    // *current* wallet (carried by walletRow, which mergeProfiles just
+    // deleted) would disappear from the profiles table entirely,
+    // leaving the session-wallet KV referencing a wallet no profile
+    // owns. Authoritative source here is the wallet the user is
+    // actively connecting with.
+    if (wallet) freshPatch.wallet = wallet;
     const rows = await db
       .update(profiles)
       .set(freshPatch)
       .where(eq(profiles.id, merged.id))
       .returning();
-    const r = rows[0];
-    // Return the fresh DB row, not a merge of `merged` + partial fields.
-    // Using merged as a base left updatedAt and any other untouched
-    // columns stale; r is the authoritative post-UPDATE state.
-    return {
-      id: r.id,
-      wallet: r.wallet,
-      handle: r.handle,
-      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-      grantedBy: r.grantedBy,
-      reason: r.reason,
-      stripeSessionId: r.stripeSessionId,
-      email: r.email ?? null,
-      emailVerifiedAt: r.emailVerifiedAt ?? null,
-      displayName: r.displayName ?? null,
-      avatarUrl: r.avatarUrl ?? null,
-      farcasterFid: r.farcasterFid ?? null,
-      farcasterUsername: r.farcasterUsername ?? null,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    };
+    return toProfileRow(rows[0]);
   }
 
   const existing = fidRow ?? walletRow ?? null;
@@ -1428,17 +1357,7 @@ export async function upsertProfileForFarcaster(input: {
       .set(patch)
       .where(eq(profiles.id, existing.id))
       .returning();
-    const r = rows[0];
-    return {
-      id: r.id, wallet: r.wallet, handle: r.handle,
-      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-      grantedBy: r.grantedBy, reason: r.reason, stripeSessionId: r.stripeSessionId,
-      email: r.email ?? null, emailVerifiedAt: r.emailVerifiedAt ?? null,
-      displayName: r.displayName ?? null, avatarUrl: r.avatarUrl ?? null,
-      farcasterFid: r.farcasterFid ?? null,
-      farcasterUsername: r.farcasterUsername ?? null,
-      createdAt: r.createdAt, updatedAt: r.updatedAt,
-    };
+    return toProfileRow(rows[0]);
   }
 
   // New profile. Use onConflictDoNothing to absorb the TOCTOU race where
@@ -1468,16 +1387,7 @@ export async function upsertProfileForFarcaster(input: {
         : undefined);
     if (!r) throw new Error('upsertProfileForFarcaster: insert conflict but no row found on re-fetch');
   }
-  return {
-    id: r.id, wallet: r.wallet, handle: r.handle,
-    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: r.grantedBy, reason: r.reason, stripeSessionId: r.stripeSessionId,
-    email: r.email ?? null, emailVerifiedAt: r.emailVerifiedAt ?? null,
-    displayName: r.displayName ?? null, avatarUrl: r.avatarUrl ?? null,
-    farcasterFid: r.farcasterFid ?? null,
-    farcasterUsername: r.farcasterUsername ?? null,
-    createdAt: r.createdAt, updatedAt: r.updatedAt,
-  };
+  return toProfileRow(r);
 }
 
 /**
@@ -1510,23 +1420,7 @@ export async function getOrCreateProfileByEmail(
         .returning();
       if (updated[0]) r = updated[0];
     }
-    return {
-      id: r.id,
-      wallet: r.wallet,
-      handle: r.handle,
-      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-      grantedBy: r.grantedBy,
-      reason: r.reason,
-      stripeSessionId: r.stripeSessionId,
-      email: r.email,
-      emailVerifiedAt: r.emailVerifiedAt,
-      displayName: r.displayName,
-      avatarUrl: r.avatarUrl,
-      farcasterFid: r.farcasterFid ?? null,
-      farcasterUsername: r.farcasterUsername ?? null,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    };
+    return toProfileRow(r);
   }
 
   // Create new email-only profile — onConflictDoNothing guards the
@@ -1561,23 +1455,7 @@ export async function getOrCreateProfileByEmail(
     // crashing on undefined.id.
     throw new Error(`getOrCreateProfileByEmail: conflict on ${normalized} but no row on re-fetch`);
   }
-  return {
-    id: r.id,
-    wallet: r.wallet,
-    handle: r.handle,
-    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: r.grantedBy,
-    reason: r.reason,
-    stripeSessionId: r.stripeSessionId,
-    email: r.email ?? null,
-    emailVerifiedAt: r.emailVerifiedAt ?? null,
-    displayName: r.displayName ?? null,
-    avatarUrl: r.avatarUrl ?? null,
-    farcasterFid: r.farcasterFid ?? null,
-    farcasterUsername: r.farcasterUsername ?? null,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  };
+  return toProfileRow(r);
 }
 
 // ─── User settings ──────────────────────────────────────────────────────────
