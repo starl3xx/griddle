@@ -57,6 +57,13 @@
       "when": 1776203184052,
       "tag": "0007_blushing_saracen",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776211665143,
+      "tag": "0008_bouncy_korath",
+      "breakpoints": true
     }
   ]
 }

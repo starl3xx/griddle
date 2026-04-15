@@ -455,6 +455,11 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         onRefreshPremium={() => {
           if (sessionWallet) void refreshPremium(sessionWallet);
         }}
+        onProfileCreated={() => {
+          // Re-fetch stats so the modal updates after profile creation.
+          setShowStats(false);
+          setTimeout(() => setShowStats(true), 50);
+        }}
         pfpUrl={pfpUrl}
         displayName={displayName}
       />

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Diamond, Moon, Sun, ShieldCheck, Eye, EyeSlash, Question } from '@phosphor-icons/react';
+import { CreateProfileModal } from './CreateProfileModal';
 import { formatMs } from '@/lib/format';
 import { Avatar } from './Avatar';
 import type { WalletStats } from '@/lib/db/queries';
@@ -34,6 +35,11 @@ interface StatsModalProps {
    * (race between Stripe webhook and page load).
    */
   onRefreshPremium: () => void;
+  /**
+   * Called once a profile is created via the CreateProfileModal so the
+   * parent can re-fetch stats and update the display name.
+   */
+  onProfileCreated: () => void;
   pfpUrl: string | null;
   displayName: string | null;
 }
@@ -61,9 +67,11 @@ export function StatsModal({
   onConnect,
   onUpgrade,
   onRefreshPremium,
+  onProfileCreated,
   pfpUrl,
   displayName,
 }: StatsModalProps) {
+  const [showCreateProfile, setShowCreateProfile] = useState(false);
   const [statsData, setStatsData] = useState<StatsResponse | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
@@ -191,7 +199,7 @@ export function StatsModal({
           {statsLoading ? (
             <StatsSkeleton />
           ) : !hasAccount ? (
-            <AnonymousState onConnect={onConnect} onUpgrade={onUpgrade} />
+            <AnonymousState onCreateProfile={() => setShowCreateProfile(true)} onConnect={onConnect} onUpgrade={onUpgrade} />
           ) : !stats || stats.totalSolves === 0 ? (
             <div className="py-4 text-center text-sm text-gray-500">
               No solves yet. Today's puzzle is waiting.
@@ -268,6 +276,14 @@ export function StatsModal({
           </div>
         )}
 
+      {showCreateProfile && (
+        <CreateProfileModal
+          onClose={() => setShowCreateProfile(false)}
+          onConnectWallet={() => { setShowCreateProfile(false); onConnect(); }}
+          onProfileCreated={() => { setShowCreateProfile(false); onProfileCreated(); }}
+        />
+      )}
+
         {/* FAQ link */}
         <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-3 flex items-center justify-center gap-1.5">
           <Question className="w-3.5 h-3.5 text-gray-400" weight="bold" aria-hidden />
@@ -283,13 +299,16 @@ export function StatsModal({
   );
 }
 
-function AnonymousState({ onConnect, onUpgrade }: { onConnect: () => void; onUpgrade: () => void }) {
+function AnonymousState({ onCreateProfile, onConnect, onUpgrade }: { onCreateProfile: () => void; onConnect: () => void; onUpgrade: () => void }) {
   return (
     <div className="py-4 space-y-3">
       <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
-        Track your streaks and fastest times by connecting a wallet or unlocking premium.
+        Create a profile to track your streaks and fastest times.
       </p>
-      <button type="button" onClick={onConnect} className="btn-primary w-full">
+      <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
+        Create profile
+      </button>
+      <button type="button" onClick={onConnect} className="btn-secondary w-full">
         Connect wallet
       </button>
       <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">

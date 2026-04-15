@@ -18,6 +18,7 @@ import {
   uniqueIndex,
   check,
 } from 'drizzle-orm/pg-core';
+// Note: `index` is now used for magic_links
 import { sql } from 'drizzle-orm';
 
 export const puzzles = pgTable('puzzles', {
@@ -179,6 +180,14 @@ export const profiles = pgTable(
      * profiles created through a non-checkout account flow).
      */
     stripeSessionId: varchar('stripe_session_id', { length: 128 }),
+    /** Email address — primary identity for email-auth (magic link) profiles. */
+    email: varchar('email', { length: 254 }),
+    /** Set when the user clicks the magic link. Null until then. */
+    emailVerifiedAt: timestamp('email_verified_at'),
+    /** Display name chosen by the user. Distinct from handle (slug). */
+    displayName: varchar('display_name', { length: 50 }),
+    /** URL to the user's avatar image (Farcaster pfp, uploaded, etc.). */
+    avatarUrl: varchar('avatar_url', { length: 500 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -192,14 +201,43 @@ export const profiles = pgTable(
     stripeSessionIdx: uniqueIndex('profiles_stripe_session_idx')
       .on(t.stripeSessionId)
       .where(sql`${t.stripeSessionId} is not null`),
-    walletOrHandleRequired: check(
-      'profiles_wallet_or_handle_required',
-      sql`${t.wallet} is not null or ${t.handle} is not null`,
+    emailLowerIdx: uniqueIndex('profiles_email_lower_idx')
+      .on(sql`lower(${t.email})`)
+      .where(sql`${t.email} is not null`),
+    // Relaxed to allow email-only profiles (magic link auth users who
+    // haven't yet connected a wallet or chosen a handle).
+    walletOrHandleOrEmailRequired: check(
+      'profiles_identity_required',
+      sql`${t.wallet} is not null or ${t.handle} is not null or ${t.email} is not null`,
     ),
     walletLowercase: check(
       'profiles_wallet_lowercase',
       sql`${t.wallet} is null or ${t.wallet} = lower(${t.wallet})`,
     ),
+  }),
+);
+
+/**
+ * Magic link tokens for email-based authentication.
+ *
+ * Only the SHA-256 hash of the token is stored — never the raw token.
+ * On verify: re-hash the query param, look up by hash, check expiry
+ * and usedAt, then mark used immediately to prevent replay.
+ */
+export const magicLinks = pgTable(
+  'magic_links',
+  {
+    id: serial('id').primaryKey(),
+    email: varchar('email', { length: 254 }).notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    tokenHashIdx: uniqueIndex('magic_links_token_hash_idx').on(t.tokenHash),
+    emailIdx: index('magic_links_email_idx').on(t.email),
+    expiresAtIdx: index('magic_links_expires_at_idx').on(t.expiresAt),
   }),
 );
 
