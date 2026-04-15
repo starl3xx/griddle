@@ -182,6 +182,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    */
   const [premium, setPremium] = useState(false);
 
+  // Refs that mirror the reactive identity state so stable callbacks
+  // (useCallback with []) can read the latest value without taking
+  // `premium` / `sessionWallet` as deps — avoids re-creating the
+  // callback on every state change and the downstream re-renders in
+  // memoized children.
+  const premiumRef = useRef(premium);
+  const sessionWalletRef = useRef(sessionWallet);
+  useEffect(() => { premiumRef.current = premium; }, [premium]);
+  useEffect(() => { sessionWalletRef.current = sessionWallet; }, [sessionWallet]);
+
   // Check session-based premium on mount (covers fiat buyers who haven't
   // connected a wallet yet). This runs once, client-side only.
   useEffect(() => {
@@ -462,13 +472,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   );
 
   const handleStatsClick = useCallback(() => {
-    // variant depends on current identity state — sessionWallet or
-    // premium both imply "account"; premium adds a premium-state tag
-    // so we can see how often each group opens stats.
-    const variant = premium ? 'premium' : sessionWallet ? 'account' : 'anon';
+    // variant depends on current identity state — read from refs so
+    // the callback stays stable across premium/sessionWallet changes
+    // (HomeTiles memoizes on its click handlers).
+    const variant = premiumRef.current
+      ? 'premium'
+      : sessionWalletRef.current
+        ? 'account'
+        : 'anon';
     trackEvent({ name: 'stats_opened', variant });
     setShowStats(true);
-  }, [premium, sessionWallet]);
+  }, []);
   const handleLeaderboardClick = useCallback(() => {
     if (premium) {
       router.push(`/leaderboard/${initialPuzzle.dayNumber}`);
