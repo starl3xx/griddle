@@ -274,18 +274,27 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // result to the session so /api/profile reads correctly.
       // Read from refs — not from closure — so we always get the
       // latest Farcaster context even though this callback has empty deps.
+      //
+      // Await this BEFORE the premium migration runs. The farcaster
+      // endpoint calls setSessionProfile, and the premium migration
+      // path may read session identity state — racing them could leave
+      // a window where the wallet is bound but the profile binding
+      // isn't. Awaiting serializes the two so downstream reads see a
+      // fully-formed session.
       if (inMiniAppRef.current && fidRef.current) {
-        fetch('/api/profile/farcaster', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            fid: fidRef.current,
-            username: usernameRef.current ?? null,
-            displayName: displayNameRef.current ?? null,
-            avatarUrl: pfpUrlRef.current ?? null,
-            wallet: normalized,
-          }),
-        }).catch(() => {/* best-effort */});
+        try {
+          await fetch('/api/profile/farcaster', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              fid: fidRef.current,
+              username: usernameRef.current ?? null,
+              displayName: displayNameRef.current ?? null,
+              avatarUrl: pfpUrlRef.current ?? null,
+              wallet: normalized,
+            }),
+          });
+        } catch {/* best-effort — non-fatal */}
       }
 
       setSessionWallet(normalized);

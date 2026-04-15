@@ -1368,19 +1368,47 @@ export async function upsertProfileForFarcaster(input: {
   // Auto-merge if two different rows, then apply fresh Farcaster input
   // on top of the merged survivor so the latest username/avatar/wallet
   // aren't silently lost (mergeProfiles only combines existing row data).
+  // Crucially includes farcasterFid in the patch: mergeProfiles uses
+  // `older.farcasterFid ?? newer.farcasterFid`, so if the older wallet
+  // row had a stale FID (or none), the merged row might not carry the
+  // FID belonging to the user who's currently authing. Always overwrite
+  // with the incoming FID since we were looked up by it.
   if (fidRow && walletRow && fidRow.id !== walletRow.id) {
     const merged = await mergeProfiles(fidRow.id, walletRow.id);
-    const freshPatch: Record<string, unknown> = { updatedAt: new Date() };
+    const freshPatch: Record<string, unknown> = {
+      farcasterFid: input.fid,
+      updatedAt: new Date(),
+    };
     if (input.username) freshPatch.farcasterUsername = input.username;
     if (input.displayName && !merged.displayName) freshPatch.displayName = input.displayName;
     if (input.avatarUrl && !merged.avatarUrl) freshPatch.avatarUrl = input.avatarUrl;
     if (wallet && !merged.wallet) freshPatch.wallet = wallet;
-    if (Object.keys(freshPatch).length > 1) {
-      const rows = await db.update(profiles).set(freshPatch).where(eq(profiles.id, merged.id)).returning();
-      const r = rows[0];
-      return { ...merged, farcasterUsername: (r.farcasterUsername ?? merged.farcasterUsername), displayName: (r.displayName ?? merged.displayName), avatarUrl: (r.avatarUrl ?? merged.avatarUrl), wallet: (r.wallet ?? merged.wallet) };
-    }
-    return merged;
+    const rows = await db
+      .update(profiles)
+      .set(freshPatch)
+      .where(eq(profiles.id, merged.id))
+      .returning();
+    const r = rows[0];
+    // Return the fresh DB row, not a merge of `merged` + partial fields.
+    // Using merged as a base left updatedAt and any other untouched
+    // columns stale; r is the authoritative post-UPDATE state.
+    return {
+      id: r.id,
+      wallet: r.wallet,
+      handle: r.handle,
+      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+      grantedBy: r.grantedBy,
+      reason: r.reason,
+      stripeSessionId: r.stripeSessionId,
+      email: r.email ?? null,
+      emailVerifiedAt: r.emailVerifiedAt ?? null,
+      displayName: r.displayName ?? null,
+      avatarUrl: r.avatarUrl ?? null,
+      farcasterFid: r.farcasterFid ?? null,
+      farcasterUsername: r.farcasterUsername ?? null,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    };
   }
 
   const existing = fidRow ?? walletRow ?? null;
