@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
+import { getSessionWallet } from '@/lib/wallet-session';
 import { setSessionProfile } from '@/lib/session-profile';
 import { upsertProfileForFarcaster } from '@/lib/db/queries';
 
@@ -36,15 +37,32 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'fid required' }, { status: 400 });
   }
 
+  const sessionId = await getSessionId();
+
+  // Security: require the wallet in the request body to match the wallet
+  // already bound to this session in KV (set by /api/wallet/link earlier
+  // in the connect flow). This prevents arbitrary callers from claiming
+  // any FID — the caller must have already proven wallet ownership via
+  // the wagmi connector before we trust the Farcaster context data they
+  // report. Note: FID verification via SIWF is not used (miniapp-only),
+  // so the wallet match is the primary guard here.
+  const sessionWallet = await getSessionWallet(sessionId);
+  const requestWallet = body.wallet ? body.wallet.toLowerCase() : null;
+
+  if (!sessionWallet || sessionWallet !== requestWallet) {
+    return NextResponse.json(
+      { error: 'wallet mismatch — connect wallet before updating Farcaster profile' },
+      { status: 403 },
+    );
+  }
+
   const profile = await upsertProfileForFarcaster({
     fid: body.fid,
     username: body.username ?? null,
     displayName: body.displayName ?? null,
     avatarUrl: body.avatarUrl ?? null,
-    wallet: body.wallet ?? null,
+    wallet: requestWallet,
   });
-
-  const sessionId = await getSessionId();
   await setSessionProfile(sessionId, profile.id);
 
   return NextResponse.json({

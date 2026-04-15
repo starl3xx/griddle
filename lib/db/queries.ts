@@ -1216,9 +1216,13 @@ export async function verifyMagicLink(
 ): Promise<{ email: string } | { error: string }> {
   const tokenHash = hashToken(token);
 
+  // Single atomic UPDATE: only one concurrent request can set usedAt from
+  // NULL to a timestamp. The second concurrent request finds no matching
+  // row (usedAt IS NULL fails) and gets an empty returning() array —
+  // no SELECT+UPDATE race, no double-verification.
   const rows = await db
-    .select()
-    .from(magicLinks)
+    .update(magicLinks)
+    .set({ usedAt: new Date() })
     .where(
       and(
         eq(magicLinks.tokenHash, tokenHash),
@@ -1226,19 +1230,13 @@ export async function verifyMagicLink(
         gte(magicLinks.expiresAt, new Date()),
       ),
     )
-    .limit(1);
+    .returning({ email: magicLinks.email });
 
   if (rows.length === 0) {
     return { error: 'Invalid or expired sign-in link.' };
   }
 
-  const record = rows[0];
-  await db
-    .update(magicLinks)
-    .set({ usedAt: new Date() })
-    .where(eq(magicLinks.id, record.id));
-
-  return { email: record.email };
+  return { email: rows[0].email };
 }
 
 /**
@@ -1462,7 +1460,13 @@ export async function getOrCreateProfileByEmail(
     };
   }
 
-  // Create new email-only profile
+  // Create new email-only profile — onConflictDoNothing guards the
+  // race where two concurrent verify requests for the same email both
+  // pass the SELECT above and reach the INSERT simultaneously. The
+  // second request gets an empty returning() and falls through to the
+  // re-query below. Without this, the second request would throw an
+  // uncaught unique constraint violation, consuming the magic link
+  // token with no profile created.
   const inserted = await db
     .insert(profiles)
     .values({
@@ -1470,9 +1474,18 @@ export async function getOrCreateProfileByEmail(
       emailVerifiedAt: new Date(),
       updatedAt: new Date(),
     })
+    .onConflictDoNothing()
     .returning();
 
-  const r = inserted[0];
+  // Re-fetch if the concurrent insert won the race
+  const rawRow = inserted[0] ?? (await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.email}) = lower(${normalized})`)
+    .limit(1)
+  )[0];
+
+  const r = rawRow;
   return {
     id: r.id,
     wallet: r.wallet,
