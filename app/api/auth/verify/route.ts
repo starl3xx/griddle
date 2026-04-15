@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyMagicLink, getOrCreateProfileByEmail } from '@/lib/db/queries';
 import { getSessionId } from '@/lib/session';
-import { setSessionProfile } from '@/lib/session-profile';
+import { setSessionProfileOrThrow } from '@/lib/session-profile';
 import { SITE_URL } from '@/lib/site';
 
 /**
@@ -37,8 +37,19 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const profile = await getOrCreateProfileByEmail(verifyResult.email);
 
-  const sessionId = await getSessionId();
-  await setSessionProfile(sessionId, profile.id);
+  // Bind the profile to the browser session. This MUST succeed or the
+  // user is stranded with a consumed (single-use) magic-link token and
+  // no session binding — on reload /api/profile returns null and the
+  // UI re-renders the anonymous CTA. Using the throwing variant so a
+  // KV flake surfaces as /?auth=error (the client shows a retry
+  // message) instead of silently redirecting to /?auth=ok.
+  try {
+    const sessionId = await getSessionId();
+    await setSessionProfileOrThrow(sessionId, profile.id);
+  } catch (err) {
+    console.error('[auth/verify] setSessionProfile failed after token consume', err);
+    return NextResponse.redirect(fail);
+  }
 
   return NextResponse.redirect(ok);
 }
