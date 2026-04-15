@@ -102,21 +102,11 @@ export const WORDMARK_ZINDEX: Record<WordmarkId, number> = Object.fromEntries(
 ) as Record<WordmarkId, number>;
 
 /**
- * Group suppression: within each group, only the highest-ranked earned
- * wordmark displays on the leaderboard (all remain visible on the full
- * profile grid). Lightning suppresses Quicksand + Clockwork; Centurion
- * suppresses Steadfast + Fireproof.
+ * Group suppression + leaderboard row selection (`getLeaderboardWordmarks`,
+ * `SPEED_GROUP`, `STREAK_GROUP`) land in the follow-up PR that wires
+ * up-to-3 wordmark emojis into leaderboard rows. Keeping them out of
+ * this PR since they'd ship as dead code — no caller yet.
  */
-export const SPEED_GROUP: readonly WordmarkId[] = [
-  'lightning',
-  'quicksand',
-  'clockwork',
-];
-export const STREAK_GROUP: readonly WordmarkId[] = [
-  'centurion',
-  'steadfast',
-  'fireproof',
-];
 
 /** Type guard — is this arbitrary string a known wordmark id? */
 export function isWordmarkId(s: string): s is WordmarkId {

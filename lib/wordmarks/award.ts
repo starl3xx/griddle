@@ -19,8 +19,14 @@ export interface AwardContext {
    */
   solveTimeMs: number | null;
   unassisted: boolean;
-  backspaceCount: number;
-  resetCount: number;
+  /**
+   * Times the player hit Backspace / Reset during the attempt. Null
+   * when the client bundle didn't report the field (old client
+   * mid-deploy) — this suppresses Blameless rather than defaulting to
+   * 0 and awarding it trivially to every solve.
+   */
+  backspaceCount: number | null;
+  resetCount: number | null;
   /** De-duped list of 4–8 letter Crumbs found during the attempt. */
   foundWords: readonly string[];
   /**
@@ -64,8 +70,19 @@ export async function awardWordmarks(ctx: AwardContext): Promise<string[]> {
   if (ctx.lifetimeSolves === 1) toAward.push('fledgling');
   if (ctx.lifetimeSolves >= 100) toAward.push('goldfinch');
 
-  // Skill
-  if (ctx.backspaceCount === 0 && ctx.resetCount === 0) toAward.push('blameless');
+  // Skill — Blameless requires BOTH counts to be explicitly reported
+  // as 0. If either is null (old client didn't send the field), we
+  // can't attest the player didn't hit Backspace/Reset, so the award
+  // is conservatively skipped. Prevents mid-deploy old-bundle users
+  // from getting Blameless on every solve.
+  if (
+    ctx.backspaceCount !== null &&
+    ctx.resetCount !== null &&
+    ctx.backspaceCount === 0 &&
+    ctx.resetCount === 0
+  ) {
+    toAward.push('blameless');
+  }
   if (ctx.unassisted) toAward.push('nightclub');
   if (ctx.foundWords.length >= 9) toAward.push('wordsmith');
 
@@ -97,8 +114,11 @@ export async function awardWordmarks(ctx: AwardContext): Promise<string[]> {
 
   // Streak — highest applicable tier only. The player's current
   // streak determines which single streak wordmark is in scope for
-  // this solve; getLeaderboardWordmarks() later handles display
-  // suppression when multiple tiers have been earned historically.
+  // this solve. Leaderboard-row display suppression (Lightning hides
+  // Quicksand hides Clockwork; Centurion hides Steadfast hides
+  // Fireproof) will ship in the follow-up PR that wires wordmark
+  // emojis into leaderboard rows — it's out of scope here since
+  // there's no caller yet.
   if (ctx.currentStreak >= 100) toAward.push('centurion');
   else if (ctx.currentStreak >= 30) toAward.push('steadfast');
   else if (ctx.currentStreak >= 7) toAward.push('fireproof');

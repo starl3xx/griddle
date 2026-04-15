@@ -135,8 +135,21 @@ export async function POST(
     return NextResponse.json({ error: 'malformed wordmark payload' }, { status: 400 });
   }
 
-  const backspaceCount = body.backspaceCount ?? 0;
-  const resetCount = body.resetCount ?? 0;
+  // Preserve `undefined` for missing counts via `?? null`. Defaulting
+  // to 0 here would incorrectly award Blameless to every solve from
+  // an old client bundle mid-deploy: the award check
+  // `backspaceCount === 0 && resetCount === 0` would trivially pass.
+  // Null is the "unknown — don't evaluate rules that need this" sentinel
+  // and awardWordmarks skips Blameless when either count is null.
+  // `foundWords ?? []` stays — an empty array correctly suppresses
+  // both Wordsmith (>= 9) and Labyrinth (any 8-letter crumb) since
+  // neither can match an empty list.
+  //
+  // Still persisted to solves as 0 because the column is a count, and
+  // writing a real 0 keeps admin aggregates clean; the wordmark logic
+  // uses the separate null-aware values below.
+  const backspaceCount: number | null = body.backspaceCount ?? null;
+  const resetCount: number | null = body.resetCount ?? null;
   const foundWords = body.foundWords ?? [];
 
   // Clamp dayNumber to today’s puzzle. M4b only allows submitting solves

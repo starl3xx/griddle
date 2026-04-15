@@ -312,18 +312,20 @@ export function useGriddle({
 
   const backspace = useCallback(() => {
     if (solved || disabled || pendingSolve) return;
-    setPath((p) => {
-      if (p.length === 0) return p;
-      // Wordmark counter: only count a Backspace that actually
-      // shortens the path. No-op backspaces (empty path) don't
-      // disqualify Blameless.
-      backspaceCountRef.current += 1;
-      return p.slice(0, -1);
-    });
+    // Wordmark counter: only count a Backspace that actually shortens
+    // the path. Read the current path directly (not inside setPath's
+    // updater) because React's StrictMode double-invokes state updater
+    // functions in dev to detect impurities, which would double-
+    // increment the ref every backspace and make Blameless impossible
+    // to earn while testing. The ref mutation stays outside the
+    // updater; the updater is pure.
+    if (path.length === 0) return;
+    backspaceCountRef.current += 1;
+    setPath((p) => (p.length === 0 ? p : p.slice(0, -1)));
     // Reset the found-word dedup so typing back up to the same
     // word after a backspace re-animates the pill via the useEffect.
     lastFoundWordRef.current = null;
-  }, [solved, disabled, pendingSolve]);
+  }, [path.length, solved, disabled, pendingSolve]);
 
   // Global keyboard listener. Disabled/pending both skip attachment so
   // the browser handles keys normally during modals + in-flight solves.
