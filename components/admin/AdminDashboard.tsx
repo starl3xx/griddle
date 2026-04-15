@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { PulseTab } from './PulseTab';
 import { AnomaliesTab } from './AnomaliesTab';
 import { GrantTab } from './GrantTab';
-import { Gauge, Warning, Gift } from '@phosphor-icons/react';
+import { UsersTab } from './UsersTab';
+import { Gauge, Warning, Gift, Users } from '@phosphor-icons/react';
 
-type Tab = 'pulse' | 'anomalies' | 'grant';
+type Tab = 'pulse' | 'anomalies' | 'grant' | 'users';
 
 interface AdminDashboardProps {
   /** Connected admin wallet — shown in the header for context. */
@@ -52,6 +53,12 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
 
         <TabGroup title="Operations">
           <TabButton
+            active={activeTab === 'users'}
+            onClick={() => setActiveTab('users')}
+            icon={<Users className="h-4 w-4" weight="bold" />}
+            label="Users"
+          />
+          <TabButton
             active={activeTab === 'anomalies'}
             onClick={() => setActiveTab('anomalies')}
             icon={<Warning className="h-4 w-4" weight="bold" />}
@@ -67,6 +74,7 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
 
         <div className="mt-6">
           {activeTab === 'pulse' && <PulseTab />}
+          {activeTab === 'users' && <UsersTab />}
           {activeTab === 'anomalies' && <AnomaliesTab />}
           {activeTab === 'grant' && <GrantTab />}
         </div>
