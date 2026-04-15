@@ -38,5 +38,17 @@ export async function GET(
     .where(eq(premiumUsers.wallet, normalized))
     .limit(1);
 
+  // TEMPORARY DIAGNOSTIC: admin-grant drift investigation. Remove
+  // once the root cause of /api/premium/[wallet] returning premium:false
+  // for a wallet that has a verified row in premium_users is understood.
+  console.log('[premium/wallet/debug]', JSON.stringify({
+    rawWalletParam: wallet,
+    normalized,
+    rowCount: rows.length,
+    firstRow: rows[0] ?? null,
+    dbHostHint: (process.env.DATABASE_URL ?? '').match(/@([^/]+)/)?.[1]?.slice(0, 32) ?? 'no-match',
+    buildTime: new Date().toISOString(),
+  }));
+
   return NextResponse.json({ wallet: normalized, premium: rows.length > 0 });
 }
