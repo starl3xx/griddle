@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Diamond, Moon, Sun, ShieldCheck, Eye, EyeSlash, Question } from '@phosphor-icons/react';
+import { Diamond, Trophy } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
 import { Avatar } from './Avatar';
 import type { WalletStats } from '@/lib/db/queries';
@@ -11,147 +11,84 @@ interface StatsResponse {
   stats?: WalletStats;
 }
 
-interface SettingsResponse {
-  streakProtectionEnabled: boolean;
-  streakProtectionUsedAt: string | null;
-  unassistedModeEnabled: boolean;
-  darkModeEnabled: boolean;
-}
-
 interface StatsModalProps {
   open: boolean;
   premium: boolean;
   /**
    * True when a session-profile KV binding exists (email/handle-only
-   * profile created without wallet). Used to show the account state
-   * instead of the anonymous CTA after profile creation.
+   * profile created without wallet). Used to decide between the
+   * anonymous CTA and the account stats view.
    */
   hasSessionProfile: boolean;
-  /** Fires when user clicks "Create profile" — parent shows CreateProfileModal. */
+  /** Fires when an anonymous user clicks "Create profile". */
   onCreateProfile: () => void;
-  dark: boolean;
-  onToggleDark: () => void;
-  onClose: () => void;
-  /** Opens the wallet connector picker in the parent. */
-  onConnect: () => void;
-  /** Opens the premium gate modal for users who want to upgrade. */
+  /** Opens the premium gate modal — only used from the post-profile upsell card. */
   onUpgrade: () => void;
-  /**
-   * Re-checks premium status server-side. Surfaced as a "Refresh" button
-   * for users who just paid but whose wallet hasn't flipped to premium yet.
-   */
-  onRefreshPremium: () => void;
+  onClose: () => void;
   pfpUrl: string | null;
+  /** User's display name from the bound profile (or Farcaster fallback). */
   displayName: string | null;
 }
 
-// 7-day streak protection cooldown
-const PROTECTION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-
 /**
- * Stats modal — three states based on identity + premium:
+ * Stats modal — read-only dashboard view of the user's solve data and
+ * Wordmarks. All identity editing, preferences, and premium unlock
+ * flows live in SettingsModal (opened via the top-right gear button).
  *
- *  1. **Anonymous** — no wallet, no session premium. Shows upgrade CTAs.
- *  2. **Account** — wallet connected or session premium, no premium unlocked.
- *     Shows basic stats + upsell strip.
- *  3. **Premium** — full stats grid + settings panel (streak protection,
- *     unassisted mode) + dark mode toggle + Wordmarks + FAQ link.
+ * Three states based on identity + premium:
  *
- * Dark mode toggle is visible to everyone regardless of premium state.
+ *   1. **Anonymous** — no wallet, no session profile. Shows a single
+ *      CTA: "Create a free profile to track your streaks and fastest
+ *      times." No connect-wallet or unlock-premium buttons — those
+ *      live in Settings so Stats stays focused on the dashboard.
+ *   2. **Account (free)** — profile exists, no premium. Shows stats
+ *      grid + a post-profile upsell strip that previews what Premium
+ *      adds (Wordmarks, leaderboard, archive), without the Unlock
+ *      buttons. Users upgrade from the Settings gear.
+ *   3. **Premium** — full stats grid + Wordmarks card.
  */
 export function StatsModal({
   open,
   premium,
   hasSessionProfile,
   onCreateProfile,
-  dark,
-  onToggleDark,
-  onClose,
-  onConnect,
   onUpgrade,
-  onRefreshPremium,
+  onClose,
   pfpUrl,
   displayName,
 }: StatsModalProps) {
   const [statsData, setStatsData] = useState<StatsResponse | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
-  const [settings, setSettings] = useState<SettingsResponse | null>(null);
-  const [savingProtection, setSavingProtection] = useState(false);
-  const [savingUnassisted, setSavingUnassisted] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setStatsLoading(true);
     setStatsData(null);
-    setSettings(null);
 
-    const fetches: Promise<void>[] = [
-      fetch('/api/stats')
-        .then((r) => r.ok ? r.json() : null)
-        .then((j: StatsResponse | null) => { if (!cancelled) { setStatsData(j); setStatsLoading(false); } })
-        .catch(() => { if (!cancelled) setStatsLoading(false); }),
-    ];
+    fetch('/api/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: StatsResponse | null) => {
+        if (!cancelled) {
+          setStatsData(j);
+          setStatsLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setStatsLoading(false); });
 
-    if (premium) {
-      fetches.push(
-        fetch('/api/settings')
-          .then((r) => r.ok ? r.json() : null)
-          .then((s: SettingsResponse | null) => { if (!cancelled) setSettings(s); })
-          .catch(() => {}),
-      );
-    }
-
-    Promise.all(fetches).catch(() => {});
     return () => { cancelled = true; };
-  }, [open, premium]);
-
-  const toggleSetting = async (field: 'streakProtectionEnabled' | 'unassistedModeEnabled') => {
-    if (!settings) return;
-    const current = field === 'streakProtectionEnabled'
-      ? settings.streakProtectionEnabled
-      : settings.unassistedModeEnabled;
-    const next = !current;
-    const setSaving = field === 'streakProtectionEnabled' ? setSavingProtection : setSavingUnassisted;
-    setSaving(true);
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ [field]: next }),
-      });
-      if (res.ok) {
-        const updated = (await res.json()) as SettingsResponse;
-        setSettings(updated);
-      }
-    } catch {/* best-effort */} finally {
-      setSaving(false);
-    }
-  };
+  }, [open]);
 
   if (!open) return null;
 
   const wallet = statsData?.wallet ?? null;
   const stats = statsData?.stats;
-  // hasAccount: wallet connected, session-premium, OR session-profile
-  // (email/handle-only profile created without wallet). Without the
-  // hasSessionProfile check, creating a display-name-only profile via
-  // CreateProfileModal leaves the user in the anonymous state because
-  // wallet is still null and premium is still false.
+  // hasAccount: wallet connected, session premium, OR a session-profile
+  // binding exists (email/handle-only profile). Without the hasSessionProfile
+  // check, creating a display-name-only profile leaves the user in the
+  // anonymous state because wallet is still null and premium is still false.
   const hasAccount = !!wallet || premium || hasSessionProfile;
-  const monogram = wallet ? wallet.slice(2, 3).toUpperCase() : '?';
   const label = displayName ?? (wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Anonymous');
-
-  // Streak protection cooldown
-  const protectionUsedAt = settings?.streakProtectionUsedAt
-    ? new Date(settings.streakProtectionUsedAt)
-    : null;
-  const protectionOnCooldown = protectionUsedAt
-    ? Date.now() - protectionUsedAt.getTime() < PROTECTION_COOLDOWN_MS
-    : false;
-  const cooldownDaysLeft = protectionOnCooldown && protectionUsedAt
-    ? Math.ceil((PROTECTION_COOLDOWN_MS - (Date.now() - protectionUsedAt.getTime())) / (24 * 60 * 60 * 1000))
-    : 0;
 
   return (
     <div
@@ -164,36 +101,23 @@ export function StatsModal({
       >
         {/* Header */}
         <div className="flex items-center gap-3">
-          <Avatar pfpUrl={pfpUrl} monogram={monogram} />
+          <Avatar pfpUrl={pfpUrl} />
           <div className="min-w-0">
             <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-gray-100 truncate">
               {label}
             </h2>
             <p className="text-xs font-medium text-gray-500">Your Griddle stats</p>
           </div>
-          <div className="ml-auto flex items-center gap-1">
-            {/* Dark mode toggle — universal */}
-            <button
-              type="button"
-              onClick={onToggleDark}
-              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast"
-            >
-              {dark
-                ? <Sun className="w-4 h-4" weight="bold" aria-hidden />
-                : <Moon className="w-4 h-4" weight="bold" aria-hidden />}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close stats"
-              className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4" aria-hidden>
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close stats"
+            className="ml-auto w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
         </div>
 
         {/* Stats body */}
@@ -201,146 +125,77 @@ export function StatsModal({
           {statsLoading ? (
             <StatsSkeleton />
           ) : !hasAccount ? (
-            <AnonymousState onCreateProfile={onCreateProfile} onConnect={onConnect} onUpgrade={onUpgrade} />
+            <AnonymousCta onCreateProfile={onCreateProfile} />
           ) : !stats || stats.totalSolves === 0 ? (
             <div className="py-4 text-center text-sm text-gray-500">
-              No solves yet. Today's puzzle is waiting.
+              No solves yet. Today’s puzzle is waiting.
             </div>
           ) : (
             <StatsGrid stats={stats} />
           )}
         </div>
 
-        {/* Premium upsell for non-premium accounts */}
-        {!premium && hasAccount && (
-          <div className="mt-4 border border-accent/30 rounded-md p-3 flex items-center gap-3">
-            <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock premium</p>
-              <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
-            </div>
-            <div className="flex gap-1.5 flex-shrink-0">
-              <button
-                type="button"
-                onClick={onRefreshPremium}
-                title="Already paid? Tap to refresh"
-                className="py-1.5 px-2 text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded transition-colors"
-              >
-                Refresh
-              </button>
-              <button type="button" onClick={onUpgrade} className="btn-accent py-1.5 px-3 text-xs">
-                Upgrade
-              </button>
-            </div>
-          </div>
+        {/* Post-profile premium upsell — preview what Premium adds.
+            NO Unlock buttons here on purpose: unlock flows live in
+            SettingsModal. This strip is an educational teaser to drive
+            users toward the gear icon when they're interested. */}
+        {!premium && hasAccount && !statsLoading && (
+          <PremiumTeaser onUpgrade={onUpgrade} />
         )}
 
-        {/* Premium settings — only when wallet is connected (settings PATCH
-            requires a wallet; session-only premium users see the upsell strip
-            which prompts them to connect a wallet to unlock settings). */}
-        {premium && hasAccount && (
-          <div className="mt-5 border-t border-gray-100 dark:border-gray-800 pt-4 space-y-3">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Settings</p>
-
-            <SettingRow
-              icon={<ShieldCheck className="w-4 h-4" weight="bold" />}
-              label="Streak protection"
-              description={
-                protectionOnCooldown
-                  ? `Available again in ${cooldownDaysLeft}d`
-                  : settings?.streakProtectionEnabled
-                    ? 'Armed — will save your streak once'
-                    : 'Saves your streak if you miss a day'
-              }
-              checked={settings?.streakProtectionEnabled ?? false}
-              disabled={savingProtection || protectionOnCooldown}
-              onChange={() => toggleSetting('streakProtectionEnabled')}
-            />
-
-            <SettingRow
-              icon={settings?.unassistedModeEnabled
-                ? <EyeSlash className="w-4 h-4" weight="bold" />
-                : <Eye className="w-4 h-4" weight="bold" />}
-              label="Unassisted mode"
-              description="Hides cell hints — earn 🎯 Ace for solving blind"
-              checked={settings?.unassistedModeEnabled ?? false}
-              disabled={savingUnassisted}
-              onChange={() => toggleSetting('unassistedModeEnabled')}
-            />
-          </div>
-        )}
-
-        {/* Wordmarks placeholder */}
-        {premium && hasAccount && (
+        {/* Wordmarks placeholder — free users see a locked preview,
+            premium users get the "coming soon" tease (same for now). */}
+        {hasAccount && (
           <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Wordmarks</p>
-            <p className="text-xs text-gray-400 italic">Coming soon — achievements for your best solves.</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
+              Wordmarks
+            </p>
+            <p className="text-xs text-gray-400 italic">
+              Coming soon — achievements for your best solves.
+            </p>
           </div>
         )}
-
-        {/* FAQ link */}
-        <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-3 flex items-center justify-center gap-1.5">
-          <Question className="w-3.5 h-3.5 text-gray-400" weight="bold" aria-hidden />
-          <a
-            href="/faq"
-            className="text-xs font-semibold text-gray-400 hover:text-brand transition-colors"
-          >
-            FAQ
-          </a>
-        </div>
       </div>
     </div>
   );
 }
 
-function AnonymousState({ onCreateProfile, onConnect, onUpgrade }: { onCreateProfile: () => void; onConnect: () => void; onUpgrade: () => void }) {
+function AnonymousCta({ onCreateProfile }: { onCreateProfile: () => void }) {
   return (
     <div className="py-4 space-y-3">
       <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
-        Create a profile to track your streaks and fastest times.
+        Create a free profile to track your streaks and fastest times.
       </p>
       <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
         Create profile
       </button>
-      <button type="button" onClick={onConnect} className="btn-secondary w-full">
-        Connect wallet
-      </button>
-      <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">
-        <Diamond className="w-4 h-4 text-accent" weight="fill" aria-hidden />
-        Unlock with card or crypto
-      </button>
     </div>
   );
 }
 
-function SettingRow({
-  icon, label, description, checked, disabled, onChange,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  description: string;
-  checked: boolean;
-  disabled: boolean;
-  onChange: () => void;
-}) {
+function PremiumTeaser({ onUpgrade }: { onUpgrade: () => void }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-accent flex-shrink-0">{icon}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{label}</p>
-        <p className="text-[11px] text-gray-500">{description}</p>
+    <div className="mt-4 border border-accent/30 rounded-md p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <Diamond className="w-4 h-4 text-accent flex-shrink-0" weight="fill" aria-hidden />
+        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+          More stats with Premium
+        </p>
       </div>
+      <ul className="text-[11px] text-gray-500 dark:text-gray-400 space-y-1 pl-6">
+        <li className="flex items-center gap-1.5">
+          <Trophy className="w-3 h-3 text-accent" weight="bold" aria-hidden />
+          Wordmarks — earn achievements for unassisted solves and streak milestones
+        </li>
+        <li>· Daily leaderboard rank &amp; archive access</li>
+        <li>· Streak protection (one miss forgiven per 7 days)</li>
+      </ul>
       <button
         type="button"
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={onChange}
-        className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50 disabled:cursor-not-allowed ${checked ? 'bg-accent' : 'bg-gray-300 dark:bg-gray-600'}`}
+        onClick={onUpgrade}
+        className="text-[11px] font-bold uppercase tracking-wider text-accent hover:text-accent/80 transition-colors"
       >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-fast mt-0.5 ${checked ? 'translate-x-4' : 'translate-x-0.5'}`}
-        />
+        See premium options →
       </button>
     </div>
   );

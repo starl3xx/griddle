@@ -1,16 +1,11 @@
 'use client';
 
-import { Trophy, Archive, Diamond } from '@phosphor-icons/react';
-import { Avatar } from './Avatar';
+import { Trophy, Archive, Diamond, ChartBar } from '@phosphor-icons/react';
 
 interface HomeTilesProps {
   onStatsClick: () => void;
   onLeaderboardClick: () => void;
   onArchiveClick: () => void;
-  /** Farcaster profile picture URL, if the user is authed in a miniapp. */
-  pfpUrl: string | null;
-  /** Short label (monogram or truncated address) rendered when pfp is missing. */
-  monogram: string;
   /** True when the user has premium unlocked — drives the lock badge on gated tiles. */
   premium: boolean;
 }
@@ -21,19 +16,22 @@ interface HomeTilesProps {
  * premium-gate decision so unit-level premium logic doesn't leak into
  * this component. Tiles share a single visual rhythm (square icon,
  * label, optional lock badge) so the row reads as one unit at a glance.
+ *
+ * Stats tile uses a bar-chart icon (not an avatar) — profile identity
+ * lives in the top-right Settings button; this row is purely about
+ * jumping into data surfaces (your own stats, the ranked leaderboard,
+ * the puzzle archive).
  */
 export function HomeTiles({
   onStatsClick,
   onLeaderboardClick,
   onArchiveClick,
-  pfpUrl,
-  monogram,
   premium,
 }: HomeTilesProps) {
   return (
     <div className="w-full max-w-[420px] grid grid-cols-3 gap-3">
       <Tile label="Stats" onClick={onStatsClick}>
-        <Avatar pfpUrl={pfpUrl} monogram={monogram} size="xs" />
+        <ChartBar className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
       <Tile label="Leaderboard" onClick={onLeaderboardClick} locked={!premium}>
         <Trophy className="w-5 h-5 text-accent" weight="bold" aria-hidden />

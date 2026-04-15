@@ -97,20 +97,25 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'no profile bound to session' }, { status: 401 });
   }
 
-  let body: { handle?: string; displayName?: string; avatarUrl?: string };
+  let body: {
+    handle?: string;
+    displayName?: string;
+    avatarUrl?: string | null;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
-  const patch: Record<string, string> = {};
+  // Patch values are `string` for set-to-value and `null` for
+  // clear-this-column. Drizzle's .set() happily writes null into a
+  // nullable varchar; the schema marks all three fields nullable.
+  const patch: Record<string, string | null> = {};
   if (body.handle !== undefined) {
-    // Handles must match the same slug shape /api/profile/create enforces:
-    // lowercase alphanumerics with single hyphens, 2–32 chars. An empty
-    // or whitespace-only handle would pass the CHECK constraint but still
-    // participate in profiles_handle_lower_idx, meaning only one profile
-    // could ever have an empty handle — reject it explicitly.
+    // Handles can't be cleared — losing a handle is destructive since
+    // another user could immediately claim it, and the leaderboard uses
+    // handle as display identity. Validate the slug shape either way.
     const handle = body.handle.trim().toLowerCase().slice(0, 32);
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(handle) || handle.length < 2) {
       return NextResponse.json(
@@ -121,6 +126,8 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     patch.handle = handle;
   }
   if (body.displayName !== undefined) {
+    // displayName is required once the user has a profile — empty would
+    // render as a literal "" everywhere it surfaces. Reject blanks.
     const displayName = body.displayName.trim().slice(0, 50);
     if (!displayName) {
       return NextResponse.json({ error: 'displayName cannot be empty' }, { status: 400 });
@@ -128,15 +135,15 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     patch.displayName = displayName;
   }
   if (body.avatarUrl !== undefined) {
-    // Empty-string avatarUrl is truthy and would render as <img src="">
-    // in any component that checks `if (profile.avatarUrl)`. Reject
-    // empty values explicitly — callers should omit the field to
-    // leave the existing value untouched.
-    const avatarUrl = body.avatarUrl.trim().slice(0, 500);
-    if (!avatarUrl) {
-      return NextResponse.json({ error: 'avatarUrl cannot be empty' }, { status: 400 });
+    // avatarUrl CAN be cleared — send `null` explicitly to drop it
+    // back to the default silhouette. Empty string is treated the same
+    // as null (common mistake) to be forgiving to clients. A real URL
+    // must be non-empty after trim so it can't render as <img src="">.
+    if (body.avatarUrl === null || body.avatarUrl.trim() === '') {
+      patch.avatarUrl = null;
+    } else {
+      patch.avatarUrl = body.avatarUrl.trim().slice(0, 500);
     }
-    patch.avatarUrl = avatarUrl;
   }
 
   if (Object.keys(patch).length === 0) {
