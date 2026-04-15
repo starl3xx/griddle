@@ -116,6 +116,14 @@ export function SettingsModal({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSentTo, setEmailSentTo] = useState<string | null>(null);
 
+  // Reset all edit state on every *open* transition, not every profile
+  // change. Previously this effect depended on `profile` too, which meant
+  // the post-save refetch cleared the "Saved." confirmation before the
+  // user could see it (saveProfile → onProfileChanged → parent refetch →
+  // new profile prop → this effect → setProfileSavedAt(null)). Splitting
+  // `open` (reset everything) from `profile` (seed drafts only if the
+  // user hasn't started editing) keeps the confirmation stable across
+  // refetches and also protects in-flight edits from being clobbered.
   useEffect(() => {
     if (!open) return;
     setDisplayNameDraft(profile?.displayName ?? '');
@@ -126,7 +134,17 @@ export function SettingsModal({
     setEmailDraft('');
     setEmailError(null);
     setEmailSentTo(null);
-  }, [open, profile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Auto-dismiss the "Saved." confirmation after 2.5s. Beats leaving it
+  // stuck until the next modal open, and gives the user enough time to
+  // read it without requiring an acknowledge click.
+  useEffect(() => {
+    if (profileSavedAt === null) return;
+    const t = setTimeout(() => setProfileSavedAt(null), 2500);
+    return () => clearTimeout(t);
+  }, [profileSavedAt]);
 
   useEffect(() => {
     if (!open) return;
@@ -473,46 +491,51 @@ export function SettingsModal({
           )}
         </Section>
 
-        {/* Premium status — upsell if not premium, badge if yes */}
-        <Section title="Premium">
-          {premium ? (
-            <div className="flex items-center gap-3 bg-accent/10 border border-accent/20 rounded-md p-3">
-              <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  Premium unlocked
-                </p>
-                <p className="text-[11px] text-gray-500">
-                  {profile?.premiumSource === 'crypto' && 'Unlocked via $WORD burn'}
-                  {profile?.premiumSource === 'fiat' && 'Unlocked via Apple Pay / card'}
-                  {profile?.premiumSource === 'admin_grant' && 'Comped by an admin'}
-                  {!profile?.premiumSource && 'Full access to leaderboard, archive, and settings'}
-                </p>
+        {/* Premium status — upsell if not premium but has an account,
+            badge if already premium. Anonymous users see the onboarding
+            CTAs above and don't need this section at all, so skip it
+            entirely to avoid an orphaned "PREMIUM" header with no body. */}
+        {(premium || hasIdentity) && (
+          <Section title="Premium">
+            {premium ? (
+              <div className="flex items-center gap-3 bg-accent/10 border border-accent/20 rounded-md p-3">
+                <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                    Premium unlocked
+                  </p>
+                  <p className="text-[11px] text-gray-500">
+                    {profile?.premiumSource === 'crypto' && 'Unlocked via $WORD burn'}
+                    {profile?.premiumSource === 'fiat' && 'Unlocked via Apple Pay / card'}
+                    {profile?.premiumSource === 'admin_grant' && 'Comped by an admin'}
+                    {!profile?.premiumSource && 'Full access to leaderboard, archive, and settings'}
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : hasIdentity ? (
-            <div className="border border-accent/30 rounded-md p-3 flex items-center gap-3">
-              <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock premium</p>
-                <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
+            ) : (
+              <div className="border border-accent/30 rounded-md p-3 flex items-center gap-3">
+                <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock premium</p>
+                  <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
+                </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={onRefreshPremium}
+                    title="Already paid? Tap to refresh"
+                    className="py-1.5 px-2 text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded transition-colors"
+                  >
+                    Refresh
+                  </button>
+                  <button type="button" onClick={onUpgrade} className="btn-accent py-1.5 px-3 text-xs">
+                    Upgrade
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={onRefreshPremium}
-                  title="Already paid? Tap to refresh"
-                  className="py-1.5 px-2 text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 rounded transition-colors"
-                >
-                  Refresh
-                </button>
-                <button type="button" onClick={onUpgrade} className="btn-accent py-1.5 px-3 text-xs">
-                  Upgrade
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </Section>
+            )}
+          </Section>
+        )}
 
         {/* Footer — FAQ link */}
         <div className="mt-5 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-1.5">
