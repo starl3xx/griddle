@@ -1230,7 +1230,7 @@ export async function mergeProfiles(
   // COALESCEs inside the CTE can't observe a stale version of one row
   // while the DELETE/UPDATE commit another. Neon-http still can't start
   // a transaction, but one statement is an implicit one.
-  const rows = await db.execute<RawProfileRow>(sql`
+  const rows = await db.execute<{ older_id: number }>(sql`
     WITH pair AS (
       SELECT
         older.id            AS older_id,
@@ -1276,16 +1276,26 @@ export async function mergeProfiles(
         updated_at         = now()
       FROM pair
       WHERE p.id = pair.older_id
-      RETURNING p.*
+      RETURNING p.id AS older_id
     )
-    SELECT * FROM updated
+    SELECT older_id FROM updated
   `);
 
+  // `db.execute()` returns raw driver rows with snake_case column
+  // names; toProfileRow expects drizzle-mapped camelCase. Instead of
+  // renaming keys, just fetch the survivor through the query builder —
+  // the atomic CTE above already did the merge, so this read is free
+  // and guaranteed to see the merged state.
   const resultRows = Array.isArray(rows) ? rows : rows.rows;
-  if (!resultRows[0]) {
+  const olderId = resultRows[0]?.older_id;
+  if (olderId == null) {
     throw new Error('mergeProfiles: one or both profiles not found');
   }
-  return toProfileRow(resultRows[0]);
+  const survivor = await db.select().from(profiles).where(eq(profiles.id, olderId)).limit(1);
+  if (!survivor[0]) {
+    throw new Error('mergeProfiles: survivor row disappeared immediately after merge');
+  }
+  return toProfileRow(survivor[0]);
 }
 
 /**
