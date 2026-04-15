@@ -31,17 +31,23 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'displayName required' }, { status: 400 });
   }
 
-  // Use displayName as the handle (slugified) if no handle exists.
-  // The slug is lowercase alphanumeric + hyphen, max 32 chars, min 2
-  // to match the PATCH /api/profile validator — single-char handles
-  // created here would otherwise get rejected the next time the user
-  // edited any profile field.
-  let handle = displayName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32) || 'player';
-  if (handle.length < 2) handle = `${handle}-player`.slice(0, 32);
+  // Slugify the display name into a handle that matches the same shape
+  // PATCH /api/profile validates against: /^[a-z0-9]+(-[a-z0-9]+)*$/,
+  // 2–32 chars. Crucially, trim trailing hyphens AFTER the length slice
+  // — stripping before slice lets the slice itself re-introduce a
+  // hyphen at the cut point, producing handles the PATCH validator
+  // then rejects (making the profile uneditable).
+  const toValidSlug = (raw: string): string => {
+    let s = raw
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .slice(0, 32)
+      .replace(/^-+|-+$/g, '');
+    if (!s) s = 'player';
+    if (s.length < 2) s = `${s}-player`.slice(0, 32).replace(/-+$/, '');
+    return s;
+  };
+  const handle = toValidSlug(displayName);
 
   // Try the slugified handle first. If it's taken, fall back to a
   // 4-digit random suffix. Use onConflictDoNothing + empty-returning
@@ -59,7 +65,10 @@ export async function POST(req: Request): Promise<NextResponse> {
     profileId = firstTry[0].id;
   } else {
     const suffix = Math.floor(Math.random() * 9000 + 1000).toString();
-    const fallbackHandle = `${handle.slice(0, 27)}-${suffix}`;
+    // Strip a trailing hyphen from the base before appending the suffix
+    // so we never produce "xxx--1234" when the base was slice-trimmed.
+    const base = handle.slice(0, 27).replace(/-+$/, '');
+    const fallbackHandle = `${base}-${suffix}`;
     const retry = await db
       .insert(profiles)
       .values({ handle: fallbackHandle, displayName, updatedAt: new Date() })
