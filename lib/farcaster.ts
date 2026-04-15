@@ -31,6 +31,10 @@ export interface FarcasterState {
   inMiniApp: boolean;
   /** True once the detection check has resolved (either way). */
   hydrated: boolean;
+  /** Farcaster user id (numeric). Null outside a Farcaster miniapp. */
+  fid: number | null;
+  /** Farcaster @username (without the @). Null outside a Farcaster miniapp. */
+  username: string | null;
   /** Profile picture URL if the user is authed inside a Farcaster client. */
   pfpUrl: string | null;
   /** Display name if the user is authed inside a Farcaster client. */
@@ -43,6 +47,8 @@ export function useFarcaster(): FarcasterState {
   const [state, setState] = useState<FarcasterState>({
     inMiniApp: false,
     hydrated: false,
+    fid: null,
+    username: null,
     pfpUrl: null,
     displayName: null,
   });
@@ -56,7 +62,7 @@ export function useFarcaster(): FarcasterState {
       } catch {
         // Dynamic import failed — definitely not in Farcaster.
         if (!cancelled) {
-          setState({ inMiniApp: false, hydrated: true, pfpUrl: null, displayName: null });
+          setState({ inMiniApp: false, hydrated: true, fid: null, username: null, pfpUrl: null, displayName: null });
         }
         return;
       }
@@ -82,13 +88,15 @@ export function useFarcaster(): FarcasterState {
           setState({
             inMiniApp: clientFid != null,
             hydrated: true,
+            fid: context?.user?.fid ?? null,
+            username: context?.user?.username ?? null,
             pfpUrl: context?.user?.pfpUrl ?? null,
             displayName: context?.user?.displayName ?? null,
           });
         }
       } catch {
         if (!cancelled) {
-          setState({ inMiniApp: false, hydrated: true, pfpUrl: null, displayName: null });
+          setState({ inMiniApp: false, hydrated: true, fid: null, username: null, pfpUrl: null, displayName: null });
         }
       }
     })();

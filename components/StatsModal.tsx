@@ -21,6 +21,14 @@ interface SettingsResponse {
 interface StatsModalProps {
   open: boolean;
   premium: boolean;
+  /**
+   * True when a session-profile KV binding exists (email/handle-only
+   * profile created without wallet). Used to show the account state
+   * instead of the anonymous CTA after profile creation.
+   */
+  hasSessionProfile: boolean;
+  /** Fires when user clicks "Create profile" — parent shows CreateProfileModal. */
+  onCreateProfile: () => void;
   dark: boolean;
   onToggleDark: () => void;
   onClose: () => void;
@@ -30,8 +38,7 @@ interface StatsModalProps {
   onUpgrade: () => void;
   /**
    * Re-checks premium status server-side. Surfaced as a "Refresh" button
-   * for users who just paid but whose wallet hasn't flipped to premium yet
-   * (race between Stripe webhook and page load).
+   * for users who just paid but whose wallet hasn't flipped to premium yet.
    */
   onRefreshPremium: () => void;
   pfpUrl: string | null;
@@ -55,6 +62,8 @@ const PROTECTION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 export function StatsModal({
   open,
   premium,
+  hasSessionProfile,
+  onCreateProfile,
   dark,
   onToggleDark,
   onClose,
@@ -124,11 +133,12 @@ export function StatsModal({
 
   const wallet = statsData?.wallet ?? null;
   const stats = statsData?.stats;
-  // hasAccount: wallet connected OR session-premium (fiat buyer not yet linked
-  // to a wallet). A fiat premium user without a wallet has premium=true and
-  // wallet=null; treating them as anonymous would show "Unlock" CTAs to
-  // someone who already paid.
-  const hasAccount = !!wallet || premium;
+  // hasAccount: wallet connected, session-premium, OR session-profile
+  // (email/handle-only profile created without wallet). Without the
+  // hasSessionProfile check, creating a display-name-only profile via
+  // CreateProfileModal leaves the user in the anonymous state because
+  // wallet is still null and premium is still false.
+  const hasAccount = !!wallet || premium || hasSessionProfile;
   const monogram = wallet ? wallet.slice(2, 3).toUpperCase() : '?';
   const label = displayName ?? (wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Anonymous');
 
@@ -191,7 +201,7 @@ export function StatsModal({
           {statsLoading ? (
             <StatsSkeleton />
           ) : !hasAccount ? (
-            <AnonymousState onConnect={onConnect} onUpgrade={onUpgrade} />
+            <AnonymousState onCreateProfile={onCreateProfile} onConnect={onConnect} onUpgrade={onUpgrade} />
           ) : !stats || stats.totalSolves === 0 ? (
             <div className="py-4 text-center text-sm text-gray-500">
               No solves yet. Today's puzzle is waiting.
@@ -283,13 +293,16 @@ export function StatsModal({
   );
 }
 
-function AnonymousState({ onConnect, onUpgrade }: { onConnect: () => void; onUpgrade: () => void }) {
+function AnonymousState({ onCreateProfile, onConnect, onUpgrade }: { onCreateProfile: () => void; onConnect: () => void; onUpgrade: () => void }) {
   return (
     <div className="py-4 space-y-3">
       <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
-        Track your streaks and fastest times by connecting a wallet or unlocking premium.
+        Create a profile to track your streaks and fastest times.
       </p>
-      <button type="button" onClick={onConnect} className="btn-primary w-full">
+      <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
+        Create profile
+      </button>
+      <button type="button" onClick={onConnect} className="btn-secondary w-full">
         Connect wallet
       </button>
       <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">

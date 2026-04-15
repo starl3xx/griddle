@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { Diamond } from '@phosphor-icons/react';
@@ -12,6 +12,7 @@ import { TutorialModal } from '@/components/TutorialModal';
 import { HomeTiles } from '@/components/HomeTiles';
 import { FoundWords } from '@/components/FoundWords';
 import { StatsModal } from '@/components/StatsModal';
+import { CreateProfileModal } from '@/components/CreateProfileModal';
 import { PremiumGateModal } from '@/components/PremiumGateModal';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
@@ -59,8 +60,21 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
  * on this side of the server/client boundary.
  */
 export default function GameClient({ initialPuzzle }: GameClientProps) {
-  const { inMiniApp, pfpUrl, displayName } = useFarcaster();
+  const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
   const router = useRouter();
+
+  // Refs so handleWalletConnect (empty deps array) always reads the
+  // latest Farcaster values without being re-created on every context update.
+  const inMiniAppRef = useRef(inMiniApp);
+  const fidRef = useRef(fid);
+  const usernameRef = useRef(username);
+  const displayNameRef = useRef(displayName);
+  const pfpUrlRef = useRef(pfpUrl);
+  useEffect(() => { inMiniAppRef.current = inMiniApp; }, [inMiniApp]);
+  useEffect(() => { fidRef.current = fid; }, [fid]);
+  useEffect(() => { usernameRef.current = username; }, [username]);
+  useEffect(() => { displayNameRef.current = displayName; }, [displayName]);
+  useEffect(() => { pfpUrlRef.current = pfpUrl; }, [pfpUrl]);
 
   /** The wallet currently bound to this session, or null if none. */
   const [sessionWallet, setSessionWallet] = useState<string | null>(null);
@@ -178,6 +192,52 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       .catch(() => {/* best-effort */});
   }, []);
 
+  // Hydrate hasSessionProfile from /api/profile on mount. Required so the
+  // account state survives a page reload — including the post-magic-link
+  // redirect to /?auth=ok, which otherwise resets hasSessionProfile to
+  // false and leaves StatsModal showing the anonymous CTA.
+  useEffect(() => {
+    fetch('/api/profile')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { profile: unknown | null } | null) => {
+        if (data?.profile) setHasSessionProfile(true);
+      })
+      .catch(() => {/* best-effort */});
+  }, []);
+
+  // Post-magic-link: /?auth=ok means the verify endpoint just bound a
+  // session profile. Open the stats modal so the user sees their new
+  // account state immediately, and strip the query param so a subsequent
+  // reload doesn't re-pop the modal. If CreateProfileModal stashed a
+  // pending display name before sending the link, apply it via PATCH
+  // now (same-browser case) so the user doesn't lose what they typed.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth') === 'ok') {
+      setHasSessionProfile(true);
+      setShowStats(true);
+      params.delete('auth');
+      const qs = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
+      );
+
+      let pending: string | null = null;
+      try { pending = localStorage.getItem('griddle:pending-display-name'); } catch {/* ignore */}
+      if (pending) {
+        try { localStorage.removeItem('griddle:pending-display-name'); } catch {/* ignore */}
+        fetch('/api/profile', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ displayName: pending }),
+        }).catch(() => {/* best-effort */});
+      }
+    }
+  }, []);
+
   const refreshPremium = useCallback(async (wallet: string) => {
     try {
       const res = await fetch(`/api/premium/${wallet}`);
@@ -208,6 +268,42 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       } catch {
         // link is best-effort — proceed even on failure so UI updates
       }
+
+      // Farcaster miniapp: upsert a rich profile using FID + username + pfp.
+      // The API auto-merges with any existing wallet profile and binds the
+      // result to the session so /api/profile reads correctly.
+      // Read from refs — not from closure — so we always get the
+      // latest Farcaster context even though this callback has empty deps.
+      //
+      // Await this BEFORE the premium migration runs. The farcaster
+      // endpoint calls setSessionProfile, and the premium migration
+      // path may read session identity state — racing them could leave
+      // a window where the wallet is bound but the profile binding
+      // isn't. Awaiting serializes the two so downstream reads see a
+      // fully-formed session.
+      if (inMiniAppRef.current && fidRef.current) {
+        try {
+          const res = await fetch('/api/profile/farcaster', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              fid: fidRef.current,
+              username: usernameRef.current ?? null,
+              displayName: displayNameRef.current ?? null,
+              avatarUrl: pfpUrlRef.current ?? null,
+              wallet: normalized,
+            }),
+          });
+          // Mirror the handle-only and email-verify paths: once the
+          // server-side profile is bound to this session, flip the
+          // client flag so StatsModal stops showing the anonymous CTA
+          // immediately. Without this, Farcaster users stayed stuck
+          // on the anon state until the next reload rehydrated via
+          // /api/profile.
+          if (res.ok) setHasSessionProfile(true);
+        } catch {/* best-effort — non-fatal */}
+      }
+
       setSessionWallet(normalized);
       // Check wallet premium. If the wallet doesn't have a premium_users
       // row but the session does (fiat paid before wallet connect), migrate
@@ -284,6 +380,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // time — the parent owns the premium-gate decision so the tiles stay
   // dumb (just emit click events).
   const [showStats, setShowStats] = useState(false);
+  const [showCreateProfile, setShowCreateProfile] = useState(false);
+  // True once a session-profile KV binding exists (email/handle-only profile).
+  // Passed to StatsModal so hasAccount reflects it immediately post-creation.
+  const [hasSessionProfile, setHasSessionProfile] = useState(false);
   const [premiumGate, setPremiumGate] =
     useState<null | 'leaderboard' | 'archive' | 'premium'>(null);
 
@@ -441,23 +541,32 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       <StatsModal
         open={showStats}
         premium={premium}
+        hasSessionProfile={hasSessionProfile}
+        onCreateProfile={() => { setShowStats(false); setShowCreateProfile(true); }}
         dark={dark}
         onToggleDark={toggleDark}
         onClose={() => setShowStats(false)}
-        onConnect={() => {
-          setShowStats(false);
-          triggerConnect();
-        }}
-        onUpgrade={() => {
-          setShowStats(false);
-          setPremiumGate('premium');
-        }}
-        onRefreshPremium={() => {
-          if (sessionWallet) void refreshPremium(sessionWallet);
-        }}
+        onConnect={() => { setShowStats(false); triggerConnect(); }}
+        onUpgrade={() => { setShowStats(false); setPremiumGate('premium'); }}
+        onRefreshPremium={() => { if (sessionWallet) void refreshPremium(sessionWallet); }}
         pfpUrl={pfpUrl}
         displayName={displayName}
       />
+
+      {/* CreateProfileModal rendered at top level — NOT inside StatsModal —
+          so its position:fixed overlay escapes the animate-slide-up transform
+          that would create a containing block and clip fixed descendants. */}
+      {showCreateProfile && (
+        <CreateProfileModal
+          onClose={() => { setShowCreateProfile(false); setShowStats(true); }}
+          onConnectWallet={() => { setShowCreateProfile(false); triggerConnect(); }}
+          onProfileCreated={() => {
+            setHasSessionProfile(true);
+            setShowCreateProfile(false);
+            setShowStats(true);
+          }}
+        />
+      )}
 
       {premiumGate !== null && (
         <PremiumGateModal

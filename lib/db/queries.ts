@@ -8,6 +8,7 @@ import {
   premiumUsers,
   profiles,
   userSettings,
+  magicLinks,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
@@ -24,12 +25,12 @@ import { kv } from '@/lib/kv';
  * **Cache key separation is a security boundary, not just an optimization.**
  * The public payload (no word) and the answer word live under DIFFERENT
  * cache keys so a future contributor literally cannot accidentally serve
- * the answer to a public surface — `getTodayPuzzle()` only ever reads
+ * the answer to a public surface  -  `getTodayPuzzle()` only ever reads
  * from the public key. Same type-level guarantee that the original
  * non-cached version had.
  */
 
-/** Public puzzle payload — sent to the client. NEVER includes the word. */
+/** Public puzzle payload  -  sent to the client. NEVER includes the word. */
 export interface TodayPuzzlePayload {
   /** Internal DB id (not sent to client). */
   id: number;
@@ -41,7 +42,7 @@ export interface TodayPuzzlePayload {
   grid: string;
 }
 
-/** Server-only payload — used by /api/solve to verify the claim. */
+/** Server-only payload  -  used by /api/solve to verify the claim. */
 interface PuzzleAnswer {
   id: number;
   word: string;
@@ -53,7 +54,7 @@ const ANSWER_KEY = (dayNumber: number) => `griddle:puzzle:answer:${dayNumber}`;
 /**
  * Cache-safe wrappers around Upstash. Every kv.get / kv.set call goes
  * through these so a transient Upstash failure (network blip, rate
- * limit, brief outage) never breaks the request — we just log and fall
+ * limit, brief outage) never breaks the request  -  we just log and fall
  * through to the DB. The cache is a performance optimization, NOT an
  * availability dependency. The non-cached version of these queries
  * worked fine; the cached version must never be *less* resilient.
@@ -93,7 +94,7 @@ export async function getTodayPuzzle(): Promise<TodayPuzzlePayload | null> {
 
 /**
  * Fetch the puzzle answer word by dayNumber. Only used from solve
- * verification — never call this from any code path that touches the
+ * verification  -  never call this from any code path that touches the
  * client response.
  */
 export async function getPuzzleWordByDayNumber(
@@ -109,11 +110,11 @@ export async function getPuzzleWordByDayNumber(
 /**
  * Cold-cache path: query Neon once for the full row and populate both
  * cache keys in parallel. Called from `getTodayPuzzle` and
- * `getPuzzleWordByDayNumber` on a miss — whichever fires first warms
+ * `getPuzzleWordByDayNumber` on a miss  -  whichever fires first warms
  * the cache for the other.
  *
  * TTL is `secondsUntilUtcMidnight()` so the cached row expires exactly
- * when the daily puzzle rolls over. Avoids serving yesterday’s puzzle
+ * when the daily puzzle rolls over. Avoids serving yesterday's puzzle
  * after midnight.
  */
 async function refreshCacheForDay(dayNumber: number): Promise<{
@@ -137,13 +138,13 @@ async function refreshCacheForDay(dayNumber: number): Promise<{
   if (rows.length === 0) return null;
   const row = rows[0];
 
-  // TTL must be ≥ 1 — Upstash rejects 0. If we’re within the same
+  // TTL must be ≥ 1  -  Upstash rejects 0. If we're within the same
   // second as midnight, fall back to a 60-second TTL.
   const ttl = Math.max(60, secondsUntilUtcMidnight());
 
   // Two cache keys, populated in parallel via safeKvSet so a transient
   // Upstash failure can never block returning the freshly-fetched row.
-  // Public key intentionally omits the word — type-level word stripping
+  // Public key intentionally omits the word  -  type-level word stripping
   // carried over from the non-cached version.
   await Promise.all([
     safeKvSet(PUBLIC_KEY(dayNumber), toPublicPayload(row), ttl),
@@ -169,12 +170,12 @@ function toPublicPayload(row: {
 
 /**
  * Record that `sessionId` first saw `puzzleId` at now(). Idempotent via
- * `ON CONFLICT DO NOTHING` — later loads of the same puzzle by the same
+ * `ON CONFLICT DO NOTHING`  -  later loads of the same puzzle by the same
  * session keep the earliest `loaded_at`, which is the correct start
  * time for `server_solve_ms`.
  *
  * NOT cached: this is a write-only path and each row is per-session,
- * so there’s no shared row to cache.
+ * so there's no shared row to cache.
  */
 export async function recordPuzzleLoad(sessionId: string, puzzleId: number): Promise<void> {
   await db
@@ -184,7 +185,7 @@ export async function recordPuzzleLoad(sessionId: string, puzzleId: number): Pro
 }
 
 /**
- * Daily leaderboard row — one wallet, their fastest legitimate solve.
+ * Daily leaderboard row  -  one wallet, their fastest legitimate solve.
  */
 export interface LeaderboardEntry {
   rank: number;
@@ -196,7 +197,7 @@ export interface LeaderboardEntry {
 /**
  * Top N solvers for a given day. Filters:
  *   - solved = true (no failed attempts)
- *   - flag IS NULL (no ineligible/suspicious — anti-bot drops them)
+ *   - flag IS NULL (no ineligible/suspicious  -  anti-bot drops them)
  *   - wallet IS NOT NULL (no anonymous solves on the leaderboard)
  *
  * Each wallet appears once with their fastest serverSolveMs. Drizzle
@@ -218,7 +219,7 @@ export async function getDailyLeaderboard(
   const puzzleId = puzzleRows[0].id;
 
   // Pull all eligible solves for the puzzle, sorted by speed. Walk the
-  // result once and keep the first occurrence per wallet — that's their
+  // result once and keep the first occurrence per wallet  -  that's their
   // fastest. For a real puzzle this is at most ~hundreds of rows; for
   // viral days we can swap to DISTINCT ON later.
   const rows = await db
@@ -357,17 +358,17 @@ export async function getWalletStats(wallet: string): Promise<WalletStats> {
 }
 
 /**
- * Admin Pulse aggregate — one-shot snapshot feeding the Pulse tab on
+ * Admin Pulse aggregate  -  one-shot snapshot feeding the Pulse tab on
  * the admin dashboard. Five headline numbers, each with enough context
  * for a one-glance health read. Kept cheap: every query is indexed on
  * `created_at` or `puzzle_id` + `wallet`, and the 24h/7d windows are
  * small constant-bound scans on recent rows.
  *
- * NOT cached — the admin page is low-traffic by definition, staleness
+ * NOT cached  -  the admin page is low-traffic by definition, staleness
  * hurts more than latency.
  */
 export interface AdminPulse {
-  /** Successful solves in the last 24h (no flag filter — includes flagged). */
+  /** Successful solves in the last 24h (no flag filter  -  includes flagged). */
   solves24h: number;
   /** Successful solves in the last 7d. */
   solves7d: number;
@@ -391,13 +392,13 @@ export async function getAdminPulse(): Promise<AdminPulse> {
 
   const [row] = await db
     .select({
-      // Successful solves in the last 24h — includes flagged rows. This
+      // Successful solves in the last 24h  -  includes flagged rows. This
       // is the denominator for `flaggedRatePct`, so the numerator below
       // MUST also filter on `solved = true` or the ratio skews.
       solves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.solved} = true)::int`,
       solves7d: sql<number>`count(*) filter (where ${solves.solved} = true)::int`,
       activeWallets7d: sql<number>`count(distinct ${solves.wallet}) filter (where ${solves.wallet} is not null)::int`,
-      // Intersection: flagged AND solved=true — matches the denominator.
+      // Intersection: flagged AND solved=true  -  matches the denominator.
       flaggedSolves24h: sql<number>`count(*) filter (where ${solves.createdAt} >= now() - interval '1 day' and ${solves.solved} = true and ${solves.flag} is not null)::int`,
     })
     .from(solves)
@@ -424,7 +425,7 @@ export async function getAdminPulse(): Promise<AdminPulse> {
 }
 
 /**
- * Archive listing — past puzzle days (excluding today), newest first.
+ * Archive listing  -  past puzzle days (excluding today), newest first.
  * Used by the /archive page. Caller is responsible for premium gating.
  */
 export interface ArchiveEntry {
@@ -444,11 +445,11 @@ export async function getArchiveList(limit = 60): Promise<ArchiveEntry[]> {
 }
 
 /**
- * Player profile queries — scaffolding for the inclusive leaderboard in
+ * Player profile queries  -  scaffolding for the inclusive leaderboard in
  * M4f. A profile is identified by a wallet, a handle, or both; the UI
  * renders `handle` when set and falls back to a truncated wallet.
  *
- * These helpers are safe to call before M4f's UI ships — nothing in the
+ * These helpers are safe to call before M4f's UI ships  -  nothing in the
  * game currently reads from `profiles`, so an empty table is a no-op
  * for existing flows. The leaderboard render path will start consuming
  * these once the profile-collection UI lands.
@@ -468,8 +469,48 @@ export interface ProfileRow {
    * unlocks, which record their session id on `premium_users` instead).
    */
   stripeSessionId: string | null;
+  /** Email address  -  primary identity for magic link auth profiles. */
+  email: string | null;
+  /** Set when the user clicks the magic link. Null until verified. */
+  emailVerifiedAt: Date | null;
+  /** User-chosen display name (distinct from handle slug). */
+  displayName: string | null;
+  /** URL to the user's avatar image. */
+  avatarUrl: string | null;
+  /** Farcaster user id. Set when connected via Farcaster miniapp. */
+  farcasterFid: number | null;
+  /** Farcaster @username. */
+  farcasterUsername: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Map a `profiles` table row (as returned by drizzle's `select()`) to
+ * the public `ProfileRow` shape. Collapses ten near-identical hand-
+ * written blocks across the query helpers into one place — adding a
+ * new identity column now means updating this function, not hunting
+ * for every return site.
+ */
+type RawProfileRow = typeof profiles.$inferSelect;
+function toProfileRow(r: RawProfileRow): ProfileRow {
+  return {
+    id: r.id,
+    wallet: r.wallet,
+    handle: r.handle,
+    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
+    grantedBy: r.grantedBy,
+    reason: r.reason,
+    stripeSessionId: r.stripeSessionId,
+    email: r.email ?? null,
+    emailVerifiedAt: r.emailVerifiedAt ?? null,
+    displayName: r.displayName ?? null,
+    avatarUrl: r.avatarUrl ?? null,
+    farcasterFid: r.farcasterFid ?? null,
+    farcasterUsername: r.farcasterUsername ?? null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
 }
 
 /**
@@ -484,19 +525,7 @@ export async function getProfileByWallet(wallet: string): Promise<ProfileRow | n
     .from(profiles)
     .where(eq(profiles.wallet, normalized))
     .limit(1);
-  if (rows.length === 0) return null;
-  const r = rows[0];
-  return {
-    id: r.id,
-    wallet: r.wallet,
-    handle: r.handle,
-    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: r.grantedBy,
-    reason: r.reason,
-    stripeSessionId: r.stripeSessionId,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  };
+  return rows.length === 0 ? null : toProfileRow(rows[0]);
 }
 
 /**
@@ -509,27 +538,15 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
     .from(profiles)
     .where(sql`lower(${profiles.handle}) = lower(${handle})`)
     .limit(1);
-  if (rows.length === 0) return null;
-  const r = rows[0];
-  return {
-    id: r.id,
-    wallet: r.wallet,
-    handle: r.handle,
-    premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: r.grantedBy,
-    reason: r.reason,
-    stripeSessionId: r.stripeSessionId,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  };
+  return rows.length === 0 ? null : toProfileRow(rows[0]);
 }
 
 /**
  * Upsert a profile. Used by both premium unlock paths:
  *
- *   - **Crypto**: `upsertProfile({ wallet, premiumSource: 'crypto' })` —
+ *   - **Crypto**: `upsertProfile({ wallet, premiumSource: 'crypto' })`  - 
  *     creates or updates the wallet-keyed profile on unlock.
- *   - **Fiat**: `upsertProfile({ handle, premiumSource: 'fiat' })` —
+ *   - **Fiat**: `upsertProfile({ handle, premiumSource: 'fiat' })`  - 
  *     creates the handle-keyed profile during Stripe checkout, before
  *     the player has connected a wallet.
  *
@@ -546,14 +563,14 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
  */
 /**
  * `wallet` and `handle` accept `null` so callers can pass through
- * normalized input that may have been emptied out — `normalizeIdentity`
+ * normalized input that may have been emptied out  -  `normalizeIdentity`
  * treats `null`, `undefined`, and empty-string the same.
  *
  * The other three fields are `T | undefined` only (not `| null`): the
  * implementation below collapses undefined into "keep existing", and
  * there's no current need for a caller to explicitly clear a
  * `premiumSource` / `grantedBy` / `reason`. Admin grant audit fields
- * in particular are append-only — once recorded, they're part of the
+ * in particular are append-only  -  once recorded, they're part of the
  * audit trail forever. If a future caller ever needs to clear them,
  * the type contract will flag it and we can add the distinction then.
  */
@@ -566,10 +583,10 @@ export interface UpsertProfileInput {
   /** Operator note, only for `premiumSource='admin_grant'`. */
   reason?: string;
   /**
-   * Stripe checkout session id — three states:
-   *   - `undefined` (omitted) — keep existing value on update
-   *   - `null`                — explicitly clear (crypto re-unlock wipes stale fiat id)
-   *   - `string`              — set to new value (fiat unlock)
+   * Stripe checkout session id  -  three states:
+   *   - `undefined` (omitted)  -  keep existing value on update
+   *   - `null`                 -  explicitly clear (crypto re-unlock wipes stale fiat id)
+   *   - `string`               -  set to new value (fiat unlock)
    * (where the unlock doesn't produce a `premium_users` row to carry
    * the session id). Persisting it here gives us the same two
    * guarantees the wallet-path fiat unlock already has:
@@ -600,7 +617,7 @@ export class MergeConflictError extends Error {
 /**
  * Normalize a possibly-empty / whitespace-only string to null. Used so
  * `upsertProfile({ handle: '' })` is treated the same as omitting
- * `handle` entirely — an empty string is never a valid identity, so
+ * `handle` entirely  -  an empty string is never a valid identity, so
  * accepting it would both bypass the "wallet OR handle required" guard
  * AND fail the lookup paths (since `''` is falsy in the `if (handle)`
  * branches below).
@@ -632,8 +649,8 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // Look up BOTH identities before deciding what to do. The two unique
   // partial indexes on `profiles` mean we can't catch duplicates via
   // `onConflictDoUpdate` against both columns at once, and we also need
-  // to detect the "merge" case — where wallet and handle each already
-  // own a different row — before we try to write to either.
+  // to detect the "merge" case  -  where wallet and handle each already
+  // own a different row  -  before we try to write to either.
   const [byWallet, byHandle] = await Promise.all([
     wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
     handle ? getProfileByHandle(handle) : Promise.resolve(null),
@@ -643,7 +660,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // This is the "handle-only fiat profile later connects a wallet that
   // already has a crypto profile" scenario. The cross-row merge needs
   // to atomically DELETE the handle-only row and UPDATE the wallet row
-  // to pick up the handle — but the runtime `db` client uses the
+  // to pick up the handle  -  but the runtime `db` client uses the
   // stateless neon-http driver, which does not support interactive
   // `db.transaction()`. Implementing this atomically requires a single
   // raw-SQL CTE (one HTTP round trip = one implicit server transaction).
@@ -676,7 +693,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // Insert-fresh path with TOCTOU protection. Between the parallel
   // lookup above and this insert, a concurrent `upsertProfile` call
   // with the same wallet/handle could race us to the insert and win
-  // — a bare insert would then throw an unhandled unique constraint
+  //  -  a bare insert would then throw an unhandled unique constraint
   // violation from one of the two partial unique indexes.
   //
   // `onConflictDoNothing()` targets any unique conflict: if someone
@@ -692,23 +709,12 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
     .returning();
 
   if (insertedRows.length > 0) {
-    const r = insertedRows[0];
-    return {
-      id: r.id,
-      wallet: r.wallet,
-      handle: r.handle,
-      premiumSource: r.premiumSource as ProfileRow['premiumSource'],
-      grantedBy: r.grantedBy,
-      reason: r.reason,
-      stripeSessionId: r.stripeSessionId,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    };
+    return toProfileRow(insertedRows[0]);
   }
 
   // Race: a concurrent upsert created the row we wanted to insert.
   // Re-query and update in place. We intentionally do NOT recurse
-  // into `upsertProfile` — recursion would double the lookup + risk
+  // into `upsertProfile`  -  recursion would double the lookup + risk
   // re-entering the merge-conflict branch if the race winner happened
   // to combine wallet+handle differently than we expected.
   const [retryByWallet, retryByHandle] = await Promise.all([
@@ -779,31 +785,20 @@ async function updateProfileInPlace(
       `updateProfileInPlace: profile ${id} was concurrently deleted`,
     );
   }
-  const updated = updatedRows[0];
-  return {
-    id: updated.id,
-    wallet: updated.wallet,
-    handle: updated.handle,
-    premiumSource: updated.premiumSource as ProfileRow['premiumSource'],
-    grantedBy: updated.grantedBy,
-    reason: updated.reason,
-    stripeSessionId: updated.stripeSessionId,
-    createdAt: updated.createdAt,
-    updatedAt: updated.updatedAt,
-  };
+  return toProfileRow(updatedRows[0]);
 }
 
 /**
- * Admin premium grant — comp premium to a wallet or a handle with no
+ * Admin premium grant  -  comp premium to a wallet or a handle with no
  * burn, no tx, no Stripe charge. Used by operators from /admin to
  * resolve support issues, reward contributors, hand out comps for
  * Farcaster giveaways, etc.
  *
  * Two identity modes:
- *   - `{ wallet }` — inserts a `premium_users` row with `source='admin_grant'`,
+ *   - `{ wallet }`  -  inserts a `premium_users` row with `source='admin_grant'`,
  *     `txHash=null`, `grantedBy`, and an optional `reason`. The wallet
  *     immediately reads as premium from `/api/premium/[wallet]`.
- *   - `{ handle }` — upserts a `profiles` row with `premium_source='admin_grant'`
+ *   - `{ handle }`  -  upserts a `profiles` row with `premium_source='admin_grant'`
  *     and no wallet. The handle becomes premium via the profiles-table
  *     path (wiring up in M4f). For now this creates the profile row so
  *     the grant is recorded even before the M4f check-path lands.
@@ -811,14 +806,14 @@ async function updateProfileInPlace(
  * Both modes are idempotent: re-granting the same wallet/handle just
  * updates the existing row.
  *
- * Caller is responsible for admin authentication — this function does
+ * Caller is responsible for admin authentication  -  this function does
  * NOT check the allowlist. The `/api/admin/grant-premium` route guards
  * via `requireAdminWallet()` before calling here.
  */
 export interface GrantPremiumInput {
   wallet?: string | null;
   handle?: string | null;
-  /** Admin wallet performing the grant — stored for audit. */
+  /** Admin wallet performing the grant  -  stored for audit. */
   grantedBy: string;
   /** Optional free-form note (max 200 chars). */
   reason?: string | null;
@@ -855,7 +850,7 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
       .onConflictDoUpdate({
         target: premiumUsers.wallet,
         set: {
-          // Explicitly null txHash on conflict — if this wallet
+          // Explicitly null txHash on conflict  -  if this wallet
           // previously paid with crypto, its tx_hash is stale now
           // that source flips to 'admin_grant'. Leaving the old
           // hash would leave the audit row internally inconsistent
@@ -890,8 +885,8 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
 /**
  * One row in the admin grant audit list. Grants live in two different
  * tables depending on identity kind:
- *   - `premium_users` — grant-by-wallet path
- *   - `profiles` — grant-by-handle path (no wallet, M4f-facing)
+ *   - `premium_users`  -  grant-by-wallet path
+ *   - `profiles`  -  grant-by-handle path (no wallet, M4f-facing)
  *
  * The discriminated `identity` field lets the audit UI render both
  * without the client needing to know which table each row came from.
@@ -981,7 +976,7 @@ export async function getRecentPremiumGrants(limit = 50): Promise<PremiumGrantRo
  * Record a paid premium unlock from the crypto path (direct permit-burn).
  * Called by `/api/premium/verify` after the server independently confirms
  * the `UnlockedWithBurn` event on the GriddlePremium contract. Idempotent
- * on wallet — a replayed verify re-runs the same upsert with the same
+ * on wallet  -  a replayed verify re-runs the same upsert with the same
  * txHash and ends up at identical state.
  */
 export async function recordCryptoUnlock(
@@ -1006,7 +1001,7 @@ export async function recordCryptoUnlock(
         source: 'crypto',
         grantedBy: null,
         reason: null,
-        // Explicitly null stripeSessionId on conflict — if this wallet
+        // Explicitly null stripeSessionId on conflict  -  if this wallet
         // previously paid via fiat, its session id is stale now that
         // source flips to 'crypto'. Leaving the old id would leave the
         // row internally inconsistent (claims to be a crypto unlock,
@@ -1019,12 +1014,12 @@ export async function recordCryptoUnlock(
 
   // Mirror into profiles so the leaderboard / archive reads can eventually
   // resolve premium status by handle as well. Intentionally a fire-and-
-  // forget pattern from the caller's point of view — if the profile
+  // forget pattern from the caller's point of view  -  if the profile
   // upsert races another writer, the error is surfaced here and retried
   // at the verify endpoint level, not silently swallowed.
   // Explicitly null stripeSessionId so a user who previously paid via
   // fiat doesn't retain the stale Stripe session id on their profile row
-  // after re-unlocking via crypto — mirrors the same clearing done on
+  // after re-unlocking via crypto  -  mirrors the same clearing done on
   // the premium_users row above.
   await upsertProfile({ wallet: normalized, premiumSource: 'crypto', stripeSessionId: null });
 }
@@ -1032,7 +1027,7 @@ export async function recordCryptoUnlock(
 /**
  * Record a paid premium unlock from the fiat path (Stripe checkout).
  * Called by the `checkout.session.completed` webhook after signature
- * verification. `stripeSessionId` is the idempotency key — a replayed
+ * verification. `stripeSessionId` is the idempotency key  -  a replayed
  * webhook matches the partial unique index on `stripe_session_id` and
  * no-ops instead of double-granting.
  *
@@ -1059,7 +1054,7 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
     const normalizedWallet = wallet.toLowerCase();
     // Wallet path: wallet IS the primary key, so wallet-keyed idempotency
     // is guaranteed by onConflictDoUpdate alone. We do NOT store the
-    // stripeSessionId on this row — that column exists for handle-only
+    // stripeSessionId on this row  -  that column exists for handle-only
     // fiat buyers who have no wallet PK to anchor their row. Storing it
     // here would create a unique-index conflict on the stripe_session_idx
     // when a second wallet tries to migrate from the same session (e.g.
@@ -1068,7 +1063,7 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
     // below, which always carries the stripe_session_id.
     // onConflictDoNothing: if the wallet already has a premium_users row
     // (from a prior crypto unlock, admin grant, or a previous fiat purchase),
-    // the existing row wins. We must NOT overwrite it — doing so would
+    // the existing row wins. We must NOT overwrite it  -  doing so would
     // destroy the txHash and source from a crypto premium row, making the
     // on-chain burn untraceable from the DB alone. The wallet is already
     // premium; no update is needed in any case.
@@ -1087,12 +1082,12 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
 
   // Persist the stripe session id on the profile row. For wallet-path
   // fiat unlocks this is the ONLY place the session id lives (we don't
-  // store it on premium_users for the wallet path — see comment above).
+  // store it on premium_users for the wallet path  -  see comment above).
   // For handle-only fiat buyers, profiles is the sole identity row.
   // The partial unique index on profiles.stripe_session_id gives
   // idempotency: a replayed webhook updates in place rather than
   // inserting a duplicate.
-  // upsertProfile is supplementary audit — premium access is already
+  // upsertProfile is supplementary audit  -  premium access is already
   // granted via the premium_users row above (wallet path) or the session
   // key (no-wallet path). A profile write failure must NOT propagate: if it
   // did, the migrate route's catch block would restore the session key even
@@ -1127,6 +1122,381 @@ export async function getPuzzleLoadedAt(
     .limit(1);
   if (rows.length === 0) return null;
   return new Date(rows[0].loadedAt);
+}
+
+// ─── Magic link auth ─────────────────────────────────────────────────────────
+
+import { createHash, randomBytes } from 'crypto';
+
+const MAGIC_LINK_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_MAX = 5;
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Generate a magic link token for the given email. Returns the raw
+ * token to embed in the link URL; stores only the SHA-256 hash.
+ * Rate-limited to 5 requests per email per hour.
+ */
+export async function createMagicLink(
+  email: string,
+): Promise<{ token: string } | { error: string }> {
+  const normalized = email.toLowerCase().trim();
+  const since = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
+
+  const raw = randomBytes(32).toString('base64url');
+  const tokenHash = hashToken(raw);
+  const expiresAt = new Date(Date.now() + MAGIC_LINK_TTL_MS);
+
+  // Atomic rate limit: a single INSERT ... SELECT that only inserts
+  // when the recent-token count is under the cap. Returns a row when
+  // the insert happened and nothing when it was rate-limited. Closes
+  // the TOCTOU gap between a separate count + insert.
+  //
+  // Counts ALL tokens created in the last hour, used or not. The
+  // rate limit is a spam guard on the email transport — 5 magic link
+  // emails per hour is the hard ceiling on how many messages we'll
+  // send to a single address, regardless of whether the user clicked
+  // them. A legit user needing >5 in an hour is an extreme edge case
+  // (most never need more than 1) and is worth the trade against
+  // leaving the transport uncapped.
+  const inserted = await db.execute<{ id: number }>(sql`
+    INSERT INTO magic_links (email, token_hash, expires_at)
+    SELECT ${normalized}, ${tokenHash}, ${expiresAt}
+    WHERE (
+      SELECT count(*) FROM magic_links
+      WHERE email = ${normalized}
+        AND created_at >= ${since}
+    ) < ${RATE_LIMIT_MAX}
+    RETURNING id
+  `);
+
+  if (inserted.rows.length === 0) {
+    return { error: 'Too many sign-in requests. Try again in an hour.' };
+  }
+  return { token: raw };
+}
+
+/**
+ * Delete a magic link by its raw token. Used by the request route to
+ * roll back a just-created token when the email transport fails, so
+ * the wasted slot doesn't count against the hourly rate limit.
+ */
+export async function deleteMagicLink(token: string): Promise<void> {
+  const tokenHash = hashToken(token);
+  await db.delete(magicLinks).where(eq(magicLinks.tokenHash, tokenHash));
+}
+
+/**
+ * Verify a magic link token. Marks it used immediately on success
+ * to prevent replay. Returns the email on success.
+ */
+export async function verifyMagicLink(
+  token: string,
+): Promise<{ email: string } | { error: string }> {
+  const tokenHash = hashToken(token);
+
+  // Single atomic UPDATE: only one concurrent request can set usedAt from
+  // NULL to a timestamp. The second concurrent request finds no matching
+  // row (usedAt IS NULL fails) and gets an empty returning() array —
+  // no SELECT+UPDATE race, no double-verification.
+  const rows = await db
+    .update(magicLinks)
+    .set({ usedAt: new Date() })
+    .where(
+      and(
+        eq(magicLinks.tokenHash, tokenHash),
+        isNull(magicLinks.usedAt),
+        gte(magicLinks.expiresAt, new Date()),
+      ),
+    )
+    .returning({ email: magicLinks.email });
+
+  if (rows.length === 0) {
+    return { error: 'Invalid or expired sign-in link.' };
+  }
+
+  return { email: rows[0].email };
+}
+
+/**
+ * Auto-merge two profile rows into one. The older row (by createdAt) is
+ * kept as the "survivor" — its id, createdAt, and any non-null identity
+ * fields are preserved. Non-null fields from the newer row fill in any
+ * gaps. The newer row is then deleted.
+ *
+ * Implemented as a raw-SQL CTE so both the DELETE and the UPDATE land in
+ * a single implicit server transaction on the neon-http driver (one HTTP
+ * roundtrip = one transaction on the serverless HTTP protocol).
+ *
+ * Callers receive the merged survivor ProfileRow.
+ */
+export async function mergeProfiles(
+  idA: number,
+  idB: number,
+): Promise<ProfileRow> {
+  // Fully atomic merge. Previously this function read both rows into JS,
+  // computed the merged patch, then issued a CTE to DELETE+UPDATE. The
+  // read-compute-write sequence wasn't atomic — a concurrent writer
+  // mutating the donor row between the read and the CTE (e.g. an email
+  // just getting verified) would silently lose the fresh value.
+  //
+  // The rewritten version is a single SQL statement. All reads of
+  // `profiles` happen from the statement-start MVCC snapshot, so the
+  // COALESCEs inside the CTE can't observe a stale version of one row
+  // while the DELETE/UPDATE commit another. Neon-http still can't start
+  // a transaction, but one statement is an implicit one.
+  const rows = await db.execute<{ older_id: number }>(sql`
+    WITH pair AS (
+      SELECT
+        older.id            AS older_id,
+        newer.id            AS newer_id,
+        COALESCE(older.wallet,             newer.wallet)             AS wallet,
+        COALESCE(older.handle,             newer.handle)             AS handle,
+        COALESCE(older.email,              newer.email)              AS email,
+        COALESCE(older.email_verified_at,  newer.email_verified_at)  AS email_verified_at,
+        COALESCE(older.display_name,       newer.display_name)       AS display_name,
+        COALESCE(older.avatar_url,         newer.avatar_url)         AS avatar_url,
+        COALESCE(older.farcaster_fid,      newer.farcaster_fid)      AS farcaster_fid,
+        COALESCE(older.farcaster_username, newer.farcaster_username) AS farcaster_username,
+        COALESCE(older.premium_source,     newer.premium_source)     AS premium_source,
+        COALESCE(older.granted_by,         newer.granted_by)         AS granted_by,
+        COALESCE(older.reason,             newer.reason)             AS reason,
+        COALESCE(older.stripe_session_id,  newer.stripe_session_id)  AS stripe_session_id
+      FROM
+        profiles older,
+        profiles newer
+      WHERE older.id IN (${idA}, ${idB})
+        AND newer.id IN (${idA}, ${idB})
+        AND older.id <> newer.id
+        AND (older.created_at, older.id) <= (newer.created_at, newer.id)
+    ),
+    deleted AS (
+      DELETE FROM profiles
+      WHERE id = (SELECT newer_id FROM pair)
+    ),
+    updated AS (
+      UPDATE profiles p SET
+        wallet             = pair.wallet,
+        handle             = pair.handle,
+        email              = pair.email,
+        email_verified_at  = pair.email_verified_at,
+        display_name       = pair.display_name,
+        avatar_url         = pair.avatar_url,
+        farcaster_fid      = pair.farcaster_fid,
+        farcaster_username = pair.farcaster_username,
+        premium_source     = pair.premium_source,
+        granted_by         = pair.granted_by,
+        reason             = pair.reason,
+        stripe_session_id  = pair.stripe_session_id,
+        updated_at         = now()
+      FROM pair
+      WHERE p.id = pair.older_id
+      RETURNING p.id AS older_id
+    )
+    SELECT older_id FROM updated
+  `);
+
+  // `db.execute()` returns raw driver rows with snake_case column
+  // names; toProfileRow expects drizzle-mapped camelCase. Instead of
+  // renaming keys, just fetch the survivor through the query builder —
+  // the atomic CTE above already did the merge, so this read is free
+  // and guaranteed to see the merged state.
+  const resultRows = Array.isArray(rows) ? rows : rows.rows;
+  const olderId = resultRows[0]?.older_id;
+  if (olderId == null) {
+    throw new Error('mergeProfiles: one or both profiles not found');
+  }
+  const survivor = await db.select().from(profiles).where(eq(profiles.id, olderId)).limit(1);
+  if (!survivor[0]) {
+    throw new Error('mergeProfiles: survivor row disappeared immediately after merge');
+  }
+  return toProfileRow(survivor[0]);
+}
+
+/**
+ * Upsert a profile for a Farcaster miniapp user. Called from GameClient
+ * when a wallet connects and `inMiniApp === true`.
+ *
+ * Strategy:
+ *   1. Look up by Farcaster FID — if found, bind session and return.
+ *   2. Look up by wallet — if found, add FID/username/pfp and return.
+ *   3. If both exist as different rows → auto-merge.
+ *   4. If neither exists → create a new profile with all Farcaster data.
+ */
+export async function upsertProfileForFarcaster(input: {
+  fid: number;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  wallet: string | null;
+}): Promise<ProfileRow> {
+  const wallet = input.wallet ? input.wallet.toLowerCase() : null;
+
+  const [byFid, byWallet] = await Promise.all([
+    db.select().from(profiles)
+      .where(eq(profiles.farcasterFid, input.fid)).limit(1),
+    wallet ? db.select().from(profiles)
+      .where(eq(profiles.wallet, wallet)).limit(1)
+      : Promise.resolve([] as typeof profiles.$inferSelect[]),
+  ]);
+
+  const fidRow  = byFid[0]   ?? null;
+  const walletRow = byWallet[0] ?? null;
+
+  // Auto-merge if two different rows, then apply fresh Farcaster input
+  // on top of the merged survivor so the latest username/avatar/wallet
+  // aren't silently lost (mergeProfiles only combines existing row data).
+  // Crucially includes farcasterFid in the patch: mergeProfiles uses
+  // `older.farcasterFid ?? newer.farcasterFid`, so if the older wallet
+  // row had a stale FID (or none), the merged row might not carry the
+  // FID belonging to the user who's currently authing. Always overwrite
+  // with the incoming FID since we were looked up by it.
+  if (fidRow && walletRow && fidRow.id !== walletRow.id) {
+    const merged = await mergeProfiles(fidRow.id, walletRow.id);
+    const freshPatch: Record<string, unknown> = {
+      farcasterFid: input.fid,
+      updatedAt: new Date(),
+    };
+    if (input.username) freshPatch.farcasterUsername = input.username;
+    if (input.displayName && !merged.displayName) freshPatch.displayName = input.displayName;
+    if (input.avatarUrl && !merged.avatarUrl) freshPatch.avatarUrl = input.avatarUrl;
+    // Always overwrite the merged wallet with the user's current one
+    // when supplied. mergeProfiles picks `older.wallet ?? newer.wallet`,
+    // so if both rows had wallets the older one wins and the user's
+    // *current* wallet (carried by walletRow, which mergeProfiles just
+    // deleted) would disappear from the profiles table entirely,
+    // leaving the session-wallet KV referencing a wallet no profile
+    // owns. Authoritative source here is the wallet the user is
+    // actively connecting with.
+    if (wallet) freshPatch.wallet = wallet;
+    const rows = await db
+      .update(profiles)
+      .set(freshPatch)
+      .where(eq(profiles.id, merged.id))
+      .returning();
+    return toProfileRow(rows[0]);
+  }
+
+  const existing = fidRow ?? walletRow ?? null;
+
+  const patch = {
+    farcasterFid:      input.fid,
+    farcasterUsername: input.username ?? existing?.farcasterUsername ?? null,
+    displayName:       existing?.displayName ?? input.displayName ?? null,
+    avatarUrl:         existing?.avatarUrl   ?? input.avatarUrl   ?? null,
+    wallet:            wallet ?? existing?.wallet ?? null,
+    updatedAt:         new Date(),
+  };
+
+  if (existing) {
+    const rows = await db
+      .update(profiles)
+      .set(patch)
+      .where(eq(profiles.id, existing.id))
+      .returning();
+    return toProfileRow(rows[0]);
+  }
+
+  // New profile. Use onConflictDoNothing to absorb the TOCTOU race where
+  // a concurrent request creates a row with the same farcaster_fid or
+  // wallet between the SELECT lookups above and this INSERT. On conflict
+  // we re-query to return whichever row won the race.
+  const inserted = await db.insert(profiles).values({
+    farcasterFid: input.fid,
+    farcasterUsername: input.username ?? null,
+    displayName: input.displayName ?? null,
+    avatarUrl: input.avatarUrl ?? null,
+    wallet,
+    updatedAt: new Date(),
+  }).onConflictDoNothing().returning();
+
+  let r = inserted[0];
+  if (!r) {
+    // Another request won — re-fetch by FID (preferred) or wallet.
+    const refetch = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.farcasterFid, input.fid))
+      .limit(1);
+    r = refetch[0]
+      ?? (wallet
+        ? (await db.select().from(profiles).where(eq(profiles.wallet, wallet)).limit(1))[0]
+        : undefined);
+    if (!r) throw new Error('upsertProfileForFarcaster: insert conflict but no row found on re-fetch');
+  }
+  return toProfileRow(r);
+}
+
+/**
+ * Get or create a profile keyed on email. Used after magic link
+ * verification to give the user a profile they can enrich later.
+ */
+export async function getOrCreateProfileByEmail(
+  email: string,
+): Promise<ProfileRow> {
+  const normalized = email.toLowerCase().trim();
+
+  // Look for existing profile by email
+  const existing = await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.email}) = lower(${normalized})`)
+    .limit(1);
+
+  if (existing.length > 0) {
+    let r = existing[0];
+    // If email wasn't verified yet, verify it now — use .returning() so
+    // the returned profile object matches what's actually in the DB
+    // (same updatedAt, same emailVerifiedAt).
+    if (!r.emailVerifiedAt) {
+      const now = new Date();
+      const updated = await db
+        .update(profiles)
+        .set({ emailVerifiedAt: now, updatedAt: now })
+        .where(eq(profiles.id, r.id))
+        .returning();
+      if (updated[0]) r = updated[0];
+    }
+    return toProfileRow(r);
+  }
+
+  // Create new email-only profile — onConflictDoNothing guards the
+  // race where two concurrent verify requests for the same email both
+  // pass the SELECT above and reach the INSERT simultaneously. The
+  // second request gets an empty returning() and falls through to the
+  // re-query below. Without this, the second request would throw an
+  // uncaught unique constraint violation, consuming the magic link
+  // token with no profile created.
+  const inserted = await db
+    .insert(profiles)
+    .values({
+      email: normalized,
+      emailVerifiedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  // Re-fetch if the concurrent insert won the race
+  const r = inserted[0] ?? (await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.email}) = lower(${normalized})`)
+    .limit(1)
+  )[0];
+
+  if (!r) {
+    // Insert hit a conflict but the re-fetch also returned nothing —
+    // the racing row must have been deleted between the two queries.
+    // Extremely unlikely in practice; surface a clear error instead of
+    // crashing on undefined.id.
+    throw new Error(`getOrCreateProfileByEmail: conflict on ${normalized} but no row on re-fetch`);
+  }
+  return toProfileRow(r);
 }
 
 // ─── User settings ──────────────────────────────────────────────────────────
