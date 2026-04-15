@@ -1,11 +1,15 @@
 'use client';
 
 import { Trophy, Archive, Diamond, ChartBar } from '@phosphor-icons/react';
+import type { BrowseTab } from './BrowseModal';
 
 interface HomeTilesProps {
-  onStatsClick: () => void;
-  onLeaderboardClick: () => void;
-  onArchiveClick: () => void;
+  /**
+   * Called with the requested tab name. GameClient decides whether
+   * to open BrowseModal (premium / stats path) or to show the
+   * PremiumGateModal for locked tabs.
+   */
+  onTileClick: (tab: BrowseTab) => void;
   /** True when the user has premium unlocked — drives the lock badge on gated tiles. */
   premium: boolean;
 }
@@ -22,21 +26,24 @@ interface HomeTilesProps {
  * jumping into data surfaces (your own stats, the ranked leaderboard,
  * the puzzle archive).
  */
-export function HomeTiles({
-  onStatsClick,
-  onLeaderboardClick,
-  onArchiveClick,
-  premium,
-}: HomeTilesProps) {
+export function HomeTiles({ onTileClick, premium }: HomeTilesProps) {
   return (
     <div className="w-full max-w-[420px] grid grid-cols-3 gap-3">
-      <Tile label="Stats" onClick={onStatsClick}>
+      <Tile label="Stats" onClick={() => onTileClick('stats')}>
         <ChartBar className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
-      <Tile label="Leaderboard" onClick={onLeaderboardClick} locked={!premium}>
+      <Tile
+        label="Leaderboard"
+        onClick={() => onTileClick('leaderboard')}
+        locked={!premium}
+      >
         <Trophy className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
-      <Tile label="Archive" onClick={onArchiveClick} locked={!premium}>
+      <Tile
+        label="Archive"
+        onClick={() => onTileClick('archive')}
+        locked={!premium}
+      >
         <Archive className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
     </div>

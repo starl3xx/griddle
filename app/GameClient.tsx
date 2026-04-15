@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
 import { Diamond, Backspace, ArrowCounterClockwise, Info } from '@phosphor-icons/react';
 import { useDarkMode } from '@/lib/useDarkMode';
 import { Grid } from '@/components/Grid';
@@ -11,7 +10,7 @@ import { SolveModal } from '@/components/SolveModal';
 import { TutorialModal } from '@/components/TutorialModal';
 import { HomeTiles } from '@/components/HomeTiles';
 import { FoundWords } from '@/components/FoundWords';
-import { StatsModal } from '@/components/StatsModal';
+import { BrowseModal, type BrowseTab } from '@/components/BrowseModal';
 import { CreateProfileModal } from '@/components/CreateProfileModal';
 import { PremiumGateModal } from '@/components/PremiumGateModal';
 import { SettingsModal, type ProfileSnapshot } from '@/components/SettingsModal';
@@ -64,7 +63,6 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
  */
 export default function GameClient({ initialPuzzle }: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
-  const router = useRouter();
 
   // Refs so handleWalletConnect (empty deps array) always reads the
   // latest Farcaster values without being re-created on every context update.
@@ -453,10 +451,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     setPickerOpenKey((k) => k + 1);
   }, []);
 
-  // Modal state for the three HomeTiles. Only one can be open at a
-  // time — the parent owns the premium-gate decision so the tiles stay
-  // dumb (just emit click events).
-  const [showStats, setShowStats] = useState(false);
+  // Modal state. `browseTab` drives the single BrowseModal that hosts
+  // Stats, Leaderboard, and Archive as three tabs at the bottom of the
+  // sheet (iOS-style). Whichever HomeTile the user taps determines the
+  // initial tab; they can switch between tabs inside the modal without
+  // closing. Null = modal closed.
+  const [browseTab, setBrowseTab] = useState<BrowseTab | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showCreateProfile, setShowCreateProfile] = useState(false);
   const [premiumGate, setPremiumGate] =
@@ -532,34 +532,32 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     [refreshPremium],
   );
 
-  const handleStatsClick = useCallback(() => {
-    // variant depends on current identity state — read from refs so
-    // the callback stays stable across premium/sessionWallet changes
-    // (HomeTiles memoizes on its click handlers).
-    const variant = premiumRef.current
-      ? 'premium'
-      : sessionWalletRef.current
-        ? 'account'
-        : 'anon';
-    trackEvent({ name: 'stats_opened', variant });
-    setShowStats(true);
+  /**
+   * Single HomeTile click handler. The three tiles (Stats, Leaderboard,
+   * Archive) all dispatch the same signal differing only by tab name —
+   * the gate + telemetry logic lives here so tiles stay dumb. Stats is
+   * always free; Leaderboard and Archive are premium-gated. Reads
+   * premium from a ref so this callback's identity stays stable across
+   * re-renders (HomeTiles memoizes on handler identity).
+   */
+  const handleTileClick = useCallback((tab: BrowseTab) => {
+    if (tab === 'stats') {
+      const variant = premiumRef.current
+        ? 'premium'
+        : sessionWalletRef.current
+          ? 'account'
+          : 'anon';
+      trackEvent({ name: 'stats_opened', variant });
+      setBrowseTab('stats');
+      return;
+    }
+    if (!premiumRef.current) {
+      trackEvent({ name: 'premium_gate_shown', feature: tab });
+      setPremiumGate(tab);
+      return;
+    }
+    setBrowseTab(tab);
   }, []);
-  const handleLeaderboardClick = useCallback(() => {
-    if (premium) {
-      router.push(`/leaderboard/${initialPuzzle.dayNumber}`);
-    } else {
-      trackEvent({ name: 'premium_gate_shown', feature: 'leaderboard' });
-      setPremiumGate('leaderboard');
-    }
-  }, [premium, router, initialPuzzle.dayNumber]);
-  const handleArchiveClick = useCallback(() => {
-    if (premium) {
-      router.push('/archive');
-    } else {
-      trackEvent({ name: 'premium_gate_shown', feature: 'archive' });
-      setPremiumGate('archive');
-    }
-  }, [premium, router]);
 
   return (
     <>
@@ -647,31 +645,28 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           </button>
         </div>
 
-        <HomeTiles
-          onStatsClick={handleStatsClick}
-          onLeaderboardClick={handleLeaderboardClick}
-          onArchiveClick={handleArchiveClick}
-          premium={premium}
-        />
+        <HomeTiles onTileClick={handleTileClick} premium={premium} />
 
         <NextPuzzleCountdown />
       </main>
 
       <TutorialModal open={showTutorial} onDismiss={dismissTutorial} />
 
-      <StatsModal
-        open={showStats}
+      <BrowseModal
+        openTab={browseTab}
+        onTabChange={setBrowseTab}
+        onClose={() => setBrowseTab(null)}
         premium={premium}
         hasSessionProfile={hasSessionProfile}
-        onCreateProfile={() => { setShowStats(false); setShowCreateProfile(true); }}
+        pfpUrl={profile?.avatarUrl ?? pfpUrl}
+        displayName={profile?.displayName ?? displayName}
+        onCreateProfile={() => { setBrowseTab(null); setShowCreateProfile(true); }}
         onUpgrade={() => {
-          setShowStats(false);
+          setBrowseTab(null);
           trackEvent({ name: 'premium_gate_shown', feature: 'premium' });
           setPremiumGate('premium');
         }}
-        onClose={() => setShowStats(false)}
-        pfpUrl={profile?.avatarUrl ?? pfpUrl}
-        displayName={profile?.displayName ?? displayName}
+        todayDayNumber={initialPuzzle.dayNumber}
       />
 
       <SettingsModal
