@@ -195,7 +195,7 @@ function PremiumTeaser({ onUpgrade }: { onUpgrade: () => void }) {
         onClick={onUpgrade}
         className="text-[11px] font-bold uppercase tracking-wider text-accent hover:text-accent/80 transition-colors"
       >
-        See premium options →
+        See Premium options →
       </button>
     </div>
   );

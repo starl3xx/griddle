@@ -65,7 +65,7 @@ export const FAQ_ITEMS: FaqItem[] = [
     ),
   },
   {
-    question: 'What is premium?',
+    question: 'What is Premium?',
     answer: (
       <>
         Griddle Premium is a one-time unlock (no subscription). It gives you access to every
@@ -84,12 +84,12 @@ export const FAQ_ITEMS: FaqItem[] = [
     ),
   },
   {
-    question: 'Is my wallet required?',
+    question: 'Is a crypto wallet required?',
     answer: (
       <>
         No. You can play and track solves without a wallet. Connecting a wallet links your
         history across devices and enables the crypto ($WORD) payment path. Fiat (Stripe)
-        checkout works without a wallet — your premium is bound to your browser session and
+        checkout works without a wallet — your Premium is bound to your browser session and
         migrates to a wallet if you connect one later.
       </>
     ),
