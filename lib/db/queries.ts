@@ -1156,13 +1156,13 @@ export async function createMagicLink(
   // the insert happened and nothing when it was rate-limited. Closes
   // the TOCTOU gap between a separate count + insert.
   //
-  // Only counts UNUSED tokens within the rate-limit window. A consumed
-  // token represents a successful auth and shouldn't block further
-  // requests — otherwise a legit user who clicked all 5 links in an
-  // hour gets locked out. No expires_at filter: if we only counted
-  // unexpired tokens, the TTL (15 min) would subsume the 1-hour
-  // window and the effective limit would silently become 5 per 15
-  // min instead of the documented 5 per hour.
+  // Counts ALL tokens created in the last hour, used or not. The
+  // rate limit is a spam guard on the email transport — 5 magic link
+  // emails per hour is the hard ceiling on how many messages we'll
+  // send to a single address, regardless of whether the user clicked
+  // them. A legit user needing >5 in an hour is an extreme edge case
+  // (most never need more than 1) and is worth the trade against
+  // leaving the transport uncapped.
   const inserted = await db.execute<{ id: number }>(sql`
     INSERT INTO magic_links (email, token_hash, expires_at)
     SELECT ${normalized}, ${tokenHash}, ${expiresAt}
@@ -1170,7 +1170,6 @@ export async function createMagicLink(
       SELECT count(*) FROM magic_links
       WHERE email = ${normalized}
         AND created_at >= ${since}
-        AND used_at IS NULL
     ) < ${RATE_LIMIT_MAX}
     RETURNING id
   `);
