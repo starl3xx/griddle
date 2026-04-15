@@ -14,6 +14,8 @@ import { FoundWords } from '@/components/FoundWords';
 import { StatsModal } from '@/components/StatsModal';
 import { CreateProfileModal } from '@/components/CreateProfileModal';
 import { PremiumGateModal } from '@/components/PremiumGateModal';
+import { SettingsModal, type ProfileSnapshot } from '@/components/SettingsModal';
+import { SettingsButton } from '@/components/SettingsButton';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
 import { useFarcaster } from '@/lib/farcaster';
@@ -182,6 +184,29 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    */
   const [premium, setPremium] = useState(false);
 
+  /**
+   * The full profile snapshot for the bound identity, or null if the
+   * session is anonymous. Owned here (not inside each modal) so the
+   * gear button, StatsModal, and SettingsModal all render from the
+   * same source of truth — refetched on mount and whenever a mutation
+   * needs to be observed.
+   */
+  const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
+  const hasSessionProfile = profile !== null;
+
+  /** Fetches /api/profile and updates local state. Returns the snapshot. */
+  const refetchProfile = useCallback(async (): Promise<ProfileSnapshot | null> => {
+    try {
+      const res = await fetch('/api/profile');
+      if (!res.ok) return null;
+      const data = (await res.json()) as { profile: ProfileSnapshot | null };
+      setProfile(data.profile);
+      return data.profile;
+    } catch {
+      return null;
+    }
+  }, []);
+
   // Refs that mirror the reactive identity state so stable callbacks
   // (useCallback with []) can read the latest value without taking
   // `premium` / `sessionWallet` as deps — avoids re-creating the
@@ -203,51 +228,50 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       .catch(() => {/* best-effort */});
   }, []);
 
-  // Hydrate hasSessionProfile from /api/profile on mount. Required so the
-  // account state survives a page reload — including the post-magic-link
-  // redirect to /?auth=ok, which otherwise resets hasSessionProfile to
-  // false and leaves StatsModal showing the anonymous CTA.
-  useEffect(() => {
-    fetch('/api/profile')
-      .then((r) => r.ok ? r.json() : null)
-      .then((data: { profile: unknown | null } | null) => {
-        if (data?.profile) setHasSessionProfile(true);
-      })
-      .catch(() => {/* best-effort */});
-  }, []);
+  // Hydrate the profile snapshot from /api/profile on mount. Required so
+  // the account state survives a page reload — including the post-magic-
+  // link redirect to /?auth=ok, which otherwise resets profile state to
+  // null and leaves StatsModal showing the anonymous CTA. Depends on
+  // refetchProfile (stable callback) so ESLint can see the dep.
+  useEffect(() => { void refetchProfile(); }, [refetchProfile]);
 
   // Post-magic-link: /?auth=ok means the verify endpoint just bound a
-  // session profile. Open the stats modal so the user sees their new
-  // account state immediately, and strip the query param so a subsequent
-  // reload doesn't re-pop the modal. If CreateProfileModal stashed a
-  // pending display name before sending the link, apply it via PATCH
-  // now (same-browser case) so the user doesn't lose what they typed.
+  // session profile (and possibly merged it into a wallet profile, see
+  // /api/auth/verify). Open Settings so the user lands on the new
+  // identity state, strip the query param so a reload doesn't re-pop
+  // the modal, and apply any pending display name from localStorage.
+  // Also refetch the profile so the UI reflects the server state.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('auth') === 'ok') {
-      setHasSessionProfile(true);
-      setShowStats(true);
-      params.delete('auth');
-      const qs = params.toString();
-      window.history.replaceState(
-        null,
-        '',
-        window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
-      );
+    if (params.get('auth') !== 'ok') return;
 
-      let pending: string | null = null;
-      try { pending = localStorage.getItem('griddle:pending-display-name'); } catch {/* ignore */}
+    setShowSettings(true);
+    params.delete('auth');
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
+    );
+
+    let pending: string | null = null;
+    try { pending = localStorage.getItem('griddle:pending-display-name'); } catch {/* ignore */}
+
+    (async () => {
       if (pending) {
         try { localStorage.removeItem('griddle:pending-display-name'); } catch {/* ignore */}
-        fetch('/api/profile', {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ displayName: pending }),
-        }).catch(() => {/* best-effort */});
+        try {
+          await fetch('/api/profile', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ displayName: pending }),
+          });
+        } catch {/* best-effort */}
       }
-    }
-  }, []);
+      await refetchProfile();
+    })();
+  }, [refetchProfile]);
 
   const refreshPremium = useCallback(async (wallet: string) => {
     try {
@@ -308,14 +332,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
               wallet: normalized,
             }),
           });
-          // Mirror the handle-only and email-verify paths: once the
-          // server-side profile is bound to this session, flip the
-          // client flag so StatsModal stops showing the anonymous CTA
-          // immediately. Without this, Farcaster users stayed stuck
-          // on the anon state until the next reload rehydrated via
-          // /api/profile.
-          if (res.ok) setHasSessionProfile(true);
+          // Refetch the profile so SettingsModal + the gear avatar
+          // reflect the server-side binding without a reload.
+          if (res.ok) await refetchProfile();
         } catch {/* best-effort — non-fatal */}
+      } else {
+        // Non-Farcaster wallet connect: the /api/wallet/link call above
+        // may have merged an existing session-profile into the wallet
+        // row (or patched the wallet onto it). Refetch to pick up the
+        // merged state.
+        await refetchProfile();
       }
 
       setSessionWallet(normalized);
@@ -394,10 +420,8 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // time — the parent owns the premium-gate decision so the tiles stay
   // dumb (just emit click events).
   const [showStats, setShowStats] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showCreateProfile, setShowCreateProfile] = useState(false);
-  // True once a session-profile KV binding exists (email/handle-only profile).
-  // Passed to StatsModal so hasAccount reflects it immediately post-creation.
-  const [hasSessionProfile, setHasSessionProfile] = useState(false);
   const [premiumGate, setPremiumGate] =
     useState<null | 'leaderboard' | 'archive' | 'premium'>(null);
 
@@ -500,8 +524,6 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     }
   }, [premium, router]);
 
-  const monogram = sessionWallet ? sessionWallet.slice(2, 3).toUpperCase() : '?';
-
   return (
     <>
       {/* LazyConnectFlow stays mounted once enabled so wagmi can
@@ -522,6 +544,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           />
         </div>
       )}
+
+      <SettingsButton
+        onClick={() => setShowSettings(true)}
+        avatarUrl={profile?.avatarUrl ?? null}
+        pfpUrl={pfpUrl}
+      />
 
       <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
         <header className="text-center">
@@ -583,8 +611,6 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           onStatsClick={handleStatsClick}
           onLeaderboardClick={handleLeaderboardClick}
           onArchiveClick={handleArchiveClick}
-          pfpUrl={pfpUrl}
-          monogram={monogram}
           premium={premium}
         />
 
@@ -598,18 +624,32 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         premium={premium}
         hasSessionProfile={hasSessionProfile}
         onCreateProfile={() => { setShowStats(false); setShowCreateProfile(true); }}
-        dark={dark}
-        onToggleDark={toggleDark}
-        onClose={() => setShowStats(false)}
-        onConnect={() => { setShowStats(false); triggerConnect(); }}
         onUpgrade={() => {
           setShowStats(false);
           trackEvent({ name: 'premium_gate_shown', feature: 'premium' });
           setPremiumGate('premium');
         }}
+        onClose={() => setShowStats(false)}
+        pfpUrl={profile?.avatarUrl ?? pfpUrl}
+        displayName={profile?.displayName ?? displayName}
+      />
+
+      <SettingsModal
+        open={showSettings}
+        profile={profile}
+        premium={premium}
+        dark={dark}
+        onToggleDark={toggleDark}
+        onProfileChanged={() => { void refetchProfile(); }}
+        onClose={() => setShowSettings(false)}
+        onCreateProfile={() => { setShowSettings(false); setShowCreateProfile(true); }}
+        onConnect={() => { setShowSettings(false); triggerConnect(); }}
+        onUpgrade={() => {
+          setShowSettings(false);
+          trackEvent({ name: 'premium_gate_shown', feature: 'premium' });
+          setPremiumGate('premium');
+        }}
         onRefreshPremium={() => { if (sessionWallet) void refreshPremium(sessionWallet); }}
-        pfpUrl={pfpUrl}
-        displayName={displayName}
       />
 
       {/* CreateProfileModal rendered at top level — NOT inside StatsModal —
@@ -617,12 +657,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           that would create a containing block and clip fixed descendants. */}
       {showCreateProfile && (
         <CreateProfileModal
-          onClose={() => { setShowCreateProfile(false); setShowStats(true); }}
+          onClose={() => { setShowCreateProfile(false); setShowSettings(true); }}
           onConnectWallet={() => { setShowCreateProfile(false); triggerConnect(); }}
           onProfileCreated={() => {
-            setHasSessionProfile(true);
+            void refetchProfile();
             setShowCreateProfile(false);
-            setShowStats(true);
+            setShowSettings(true);
           }}
         />
       )}

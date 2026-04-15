@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { solves } from '@/lib/db/schema';
+import { solves, profiles } from '@/lib/db/schema';
 import { getSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
 import { setSessionWallet, clearSessionWallet } from '@/lib/wallet-session';
+import { getSessionProfile, setSessionProfileOrThrow } from '@/lib/session-profile';
+import { mergeProfiles } from '@/lib/db/queries';
 
 /**
  * POST /api/wallet/link
@@ -62,6 +64,64 @@ export async function POST(req: Request): Promise<NextResponse> {
       .returning({ id: solves.id }),
     setSessionWallet(sessionId, normalized),
   ]);
+
+  // Reconcile profile identity. Four cases based on whether the session
+  // has a pre-existing profile binding (from an earlier handle-only or
+  // magic-link flow) and whether this wallet already owns a profile
+  // row in the DB:
+  //
+  //   a) neither → nothing to do (premium unlock creates one later)
+  //   b) session only → UPDATE that profile to carry this wallet
+  //   c) wallet only → bind session to the existing wallet profile
+  //   d) both, same id → nothing to do (already reconciled)
+  //   e) both, different ids → mergeProfiles() atomic CTE; session
+  //      rebinds to the merged survivor
+  //
+  // Without this, a user who creates a handle profile, then connects a
+  // wallet, ends up with two separate profile rows — the session one
+  // has no wallet, the wallet one has no handle/email, and the premium
+  // ledger never links up with the user's solve history.
+  try {
+    const sessionProfileId = await getSessionProfile(sessionId);
+    const walletProfileRows = await db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.wallet, normalized))
+      .limit(1);
+    const walletProfileId = walletProfileRows[0]?.id ?? null;
+
+    if (sessionProfileId != null && walletProfileId == null) {
+      // Case (b): session profile exists but has no wallet yet.
+      // Attach it to this wallet with a direct UPDATE. Catch unique-
+      // constraint violations just in case (shouldn't fire since we
+      // just confirmed no wallet profile exists, but another request
+      // could race us between the SELECT and the UPDATE).
+      try {
+        await db
+          .update(profiles)
+          .set({ wallet: normalized, updatedAt: new Date() })
+          .where(eq(profiles.id, sessionProfileId));
+      } catch {/* racing wallet-profile; fall through — next connect resolves it */}
+    } else if (sessionProfileId == null && walletProfileId != null) {
+      // Case (c): wallet profile exists but the session isn't yet
+      // bound. Bind it so /api/profile reads return this row.
+      await setSessionProfileOrThrow(sessionId, walletProfileId);
+    } else if (
+      sessionProfileId != null &&
+      walletProfileId != null &&
+      sessionProfileId !== walletProfileId
+    ) {
+      // Case (e): two distinct profiles for the same user. Merge
+      // atomically and rebind the session to the survivor.
+      const merged = await mergeProfiles(sessionProfileId, walletProfileId);
+      await setSessionProfileOrThrow(sessionId, merged.id);
+    }
+  } catch (err) {
+    // Reconcile is best-effort — if it fails, the legacy path (read
+    // from session-wallet fallback in /api/profile) still serves the
+    // wallet profile. Log for observability.
+    console.warn('[wallet/link] profile reconcile failed', err);
+  }
 
   // Intentionally do NOT include sessionId in the response. The session
   // cookie is httpOnly precisely so client-side JS can't read it; echoing
