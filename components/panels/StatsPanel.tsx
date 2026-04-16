@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Diamond, Trophy } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
 import { Avatar } from '../Avatar';
 import { LexiconGrid } from './LexiconGrid';
@@ -135,21 +134,16 @@ export function StatsPanel({
       </div>
 
       {/* Premium stats: sparkline, 7-day bar chart, percentile, podium.
-          Rendered once `hasAccount` is true. Real data for premium,
-          placeholder-behind-blur for free users with an upgrade CTA. */}
+          Rendered once `hasAccount` is true. Real data for premium;
+          free users see the same widgets behind a blur with an
+          overlay upgrade CTA — the overlay IS the teaser, so no
+          separate "More stats with Premium" strip underneath. */}
       {hasAccount && !statsLoading && (
         <PremiumStatsSection
           wallet={wallet}
           premium={premium}
           onUpgrade={onUpgrade}
         />
-      )}
-
-      {/* Free-user micro-teaser stays visible below the blurred preview —
-          the PremiumStatsSection overlay explains the upgrade, this strip
-          reinforces the included feature list. */}
-      {!premium && hasAccount && !statsLoading && (
-        <PremiumTeaser onUpgrade={onUpgrade} />
       )}
 
       {/* Lexicon — full Wordmarks grid. Earned wordmarks in color,
@@ -169,34 +163,6 @@ function AnonymousCta({ onCreateProfile }: { onCreateProfile: () => void }) {
       </p>
       <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
         Create profile
-      </button>
-    </div>
-  );
-}
-
-function PremiumTeaser({ onUpgrade }: { onUpgrade: () => void }) {
-  return (
-    <div className="mt-4 border border-accent/30 rounded-md p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <Diamond className="w-4 h-4 text-accent flex-shrink-0" weight="fill" aria-hidden />
-        <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-          More stats with Premium
-        </p>
-      </div>
-      <ul className="text-[11px] text-gray-500 dark:text-gray-400 space-y-1 pl-6">
-        <li className="flex items-center gap-1.5">
-          <Trophy className="w-3 h-3 text-accent" weight="bold" aria-hidden />
-          Wordmarks — earn achievements for unassisted solves and streak milestones
-        </li>
-        <li>· Daily leaderboard rank &amp; archive access</li>
-        <li>· Streak protection (one miss forgiven per 7 days)</li>
-      </ul>
-      <button
-        type="button"
-        onClick={onUpgrade}
-        className="text-[11px] font-bold uppercase tracking-wider text-accent hover:text-accent/80 transition-colors"
-      >
-        See Premium options →
       </button>
     </div>
   );
