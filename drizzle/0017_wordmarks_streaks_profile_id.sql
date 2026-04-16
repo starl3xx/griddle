@@ -17,18 +17,16 @@
 -- since it's a generated column).
 
 -- ─── Wordmarks ───────────────────────────────────────────────────
-
--- Collision prevention: if a player earned the same wordmark both as
--- wallet-only AND as profile-keyed (possible pre-merge), drop the
--- older wallet-only duplicate before the backfill would otherwise
--- cause a unique-index collision on (player_key, wordmark_id).
-DELETE FROM "wordmarks" a
-USING "wordmarks" b, "profiles" p
-WHERE a."id" < b."id"
-  AND a."profile_id" IS NULL
-  AND a."wallet" = p."wallet"
-  AND b."profile_id" = p."id"
-  AND a."wordmark_id" = b."wordmark_id";
+--
+-- No collision-cleanup DELETE here: the existing unique index on
+-- (wallet, wordmark_id) already guarantees no two rows share a
+-- (wallet, wordmark) pair, and pre-this-PR the wallet write gate on
+-- /api/solve prevented handle-only users from earning wordmarks at
+-- all — so there are no profile-keyed duplicates to collide with
+-- wallet-keyed rows after backfill. A previous version of this
+-- migration had a defensive DELETE, but it (a) referenced profile_id
+-- before the ADD COLUMN ran and (b) defended against a state the
+-- application never produced. Dropping it.
 
 ALTER TABLE "wordmarks" ALTER COLUMN "wallet" DROP NOT NULL;
 
@@ -63,15 +61,12 @@ CREATE INDEX IF NOT EXISTS "wordmarks_player_key_idx"
   ON "wordmarks" ("player_key");
 
 -- ─── Streaks ─────────────────────────────────────────────────────
-
--- Same collision check. Unlikely for streaks (one row per player
--- max), but safe to run.
-DELETE FROM "streaks" a
-USING "streaks" b, "profiles" p
-WHERE a."wallet" < b."wallet"
-  AND a."profile_id" IS NULL
-  AND a."wallet" = p."wallet"
-  AND b."profile_id" = p."id";
+--
+-- No collision-cleanup DELETE here for the same reason as wordmarks:
+-- streaks.wallet was PK, so at most one row per wallet exists today,
+-- and pre-this-PR handle-only users never got a streak row written
+-- (the /api/solve write gate required wallet). So no profile-keyed
+-- rows exist to collide with wallet-keyed ones post-backfill.
 
 ALTER TABLE "streaks" DROP CONSTRAINT IF EXISTS "streaks_pkey";
 ALTER TABLE "streaks" ALTER COLUMN "wallet" DROP NOT NULL;
