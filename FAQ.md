@@ -113,7 +113,7 @@ Premium is a one-time unlock. **$5 in $WORD (burned permanently) or $6 via Apple
 - **Daily leaderboard** — ranked view of the fastest solves each day
 - **Stats dashboard** — full solve history, averages, fastest, unassisted count, current/longest streak
 - **Streak protection** — one free streak save with a 7-day cooldown if you miss a day
-- **Unassisted mode** — hide cell hints during play for the Ace Wordmark on solves
+- **Unassisted mode** — hide cell hints during play for the Blameless Wordmark on solves
 - **Dark mode** — universal toggle (free tier has it too, but the setting syncs across devices once you have an account)
 - **Wordmarks** — achievements for your best solves (coming soon)
 
@@ -145,7 +145,7 @@ Tap the **gear icon** in the top-right of any screen — it opens your Settings 
 Premium features (**Streak protection** and **Unassisted mode**) appear in the same panel for everyone — non-premium users see them dimmed with a "Premium" badge as a preview of what unlocking gets you:
 
 - **Streak protection** — arm a one-shot save that covers a missed day. 7-day cooldown after use.
-- **Unassisted mode** — hide the green/dimmed cell hints during play so the game is pure recall. Solves in unassisted mode earn the **Ace** Wordmark.
+- **Unassisted mode** — hide the green/dimmed cell hints during play so the game is pure recall. Solves in unassisted mode earn the **Blameless** Wordmark.
 
 Stats (the home-tile chart-bar icon) is now a pure read-only dashboard — your streaks, fastest/average solves, and Wordmarks. All editing and settings live in the gear panel above.
 

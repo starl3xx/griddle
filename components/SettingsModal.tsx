@@ -672,8 +672,8 @@ export function SettingsModal({
             premiumLocked={!premium}
             description={
               !premium
-                ? 'Hide cell hints for an Ace Wordmark on solves'
-                : 'Hides cell hints — earn 🎯 Ace for solving blind'
+                ? 'Hide cell hints for a Blameless Wordmark on solves'
+                : 'Hides cell hints — earn 🎯 Blameless for solving blind'
             }
             checked={premium ? (settings?.unassistedModeEnabled ?? false) : false}
             disabled={!premium || savingUnassisted}

@@ -28,7 +28,7 @@ export const FAQ_ITEMS: FaqItem[] = [
         When unassisted mode is on, the green and dimmed cell hints are hidden during play.
         You can still use Backspace and Reset, but you won’t see which cells are available
         for your next move. Solving without using Backspace or Reset earns you the
-        🎯 Ace Wordmark.
+        🎯 Blameless Wordmark.
       </>
     ),
   },
@@ -79,7 +79,7 @@ export const FAQ_ITEMS: FaqItem[] = [
     answer: (
       <>
         Wordmarks are achievements earned by specific types of solves — for example, solving
-        without Backspace or Reset earns the 🎯 Ace Wordmark. More Wordmarks are coming soon.
+        without Backspace or Reset earns the 🎯 Blameless Wordmark. More Wordmarks are coming soon.
       </>
     ),
   },

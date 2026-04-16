@@ -289,7 +289,7 @@ export const userSettings = pgTable('user_settings', {
    * Null = never used (protection is available from the start).
    */
   streakProtectionUsedAt: timestamp('streak_protection_used_at'),
-  /** Hide green/dim cell hints during play. Earns the Ace Wordmark instead. */
+  /** Hide green/dim cell hints during play. Earns the Blameless Wordmark instead. */
   unassistedModeEnabled: boolean('unassisted_mode_enabled').default(false).notNull(),
   /** Prefer dark color scheme across all devices where the wallet is connected. */
   darkModeEnabled: boolean('dark_mode_enabled').default(false).notNull(),
