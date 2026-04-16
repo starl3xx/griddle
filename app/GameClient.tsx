@@ -83,6 +83,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const [sessionWallet, setSessionWallet] = useState<string | null>(null);
   const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
 
+  /**
+   * Tracks the Farcaster pfp URL last successfully POSTed to
+   * /api/profile/farcaster. Shared between handleWalletConnect
+   * (initial connect path) and the pfp-listening useEffect further
+   * down (ongoing refresh path) so the two paths can deduplicate
+   * against each other. Declared up here — above handleWalletConnect
+   * — to stay out of the TDZ when the connect callback closes over it.
+   * See the big comment on the sync effect below for the dedup rules.
+   */
+  const lastSyncedPfpUrlRef = useRef<string | null>(null);
+
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
@@ -371,7 +382,16 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           });
           // Refetch the profile so SettingsModal + the gear avatar
           // reflect the server-side binding without a reload.
-          if (res.ok) await refetchProfile();
+          if (res.ok) {
+            // Mark this pfp URL as synced so the sibling
+            // `lastSyncedPfpUrlRef` effect below doesn't fire a
+            // duplicate POST to /api/profile/farcaster when
+            // `setSessionWallet(normalized)` runs moments later.
+            // Without this, every Farcaster wallet connect produces
+            // two identical POSTs back-to-back.
+            lastSyncedPfpUrlRef.current = pfpUrlRef.current ?? null;
+            await refetchProfile();
+          }
         } catch {/* best-effort — non-fatal */}
       } else {
         // Non-Farcaster wallet connect: the /api/wallet/link call above
@@ -434,8 +454,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * Dedup via `lastSyncedPfpUrlRef` so we don't spam the endpoint when
    * the effect re-runs on unrelated state changes; only fire when the
    * pfp URL actually differs from the last value we synced.
+   *
+   * The ref itself is declared further up (near the other cross-
+   * callback refs) so `handleWalletConnect` can also advance it after
+   * its own Farcaster POST — that prevents the connect path's POST
+   * from being immediately followed by a duplicate POST from this
+   * effect when `setSessionWallet` fires.
    */
-  const lastSyncedPfpUrlRef = useRef<string | null>(null);
   useEffect(() => {
     if (!inMiniApp) return;
     if (!fid) return;
