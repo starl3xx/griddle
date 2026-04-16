@@ -1860,7 +1860,12 @@ export async function updateStreakForSolve(
 
   const nextLongest = Math.max(row.longestStreak, nextCurrent);
 
-  await db
+  // Optimistic concurrency: include lastSolvedDayNumber in the WHERE
+  // so a concurrent request that updated between our SELECT and this
+  // UPDATE causes 0 affected rows instead of silently clobbering.
+  // The neon-http driver doesn't support interactive transactions, so
+  // this is the atomicity primitive we have.
+  const updated = await db
     .update(streaks)
     .set({
       currentStreak: nextCurrent,
@@ -1868,9 +1873,33 @@ export async function updateStreakForSolve(
       lastSolvedDayNumber: dayNumber,
       updatedAt: new Date(),
     })
-    .where(eq(streaks.wallet, normalized));
+    .where(
+      and(
+        eq(streaks.wallet, normalized),
+        last == null
+          ? isNull(streaks.lastSolvedDayNumber)
+          : eq(streaks.lastSolvedDayNumber, last),
+      ),
+    )
+    .returning({
+      currentStreak: streaks.currentStreak,
+      longestStreak: streaks.longestStreak,
+    });
 
-  return { currentStreak: nextCurrent, longestStreak: nextLongest };
+  if (updated.length > 0) {
+    return updated[0];
+  }
+
+  // Concurrent update won the race — re-read the winner's state.
+  const reread = await db
+    .select()
+    .from(streaks)
+    .where(eq(streaks.wallet, normalized))
+    .limit(1);
+  return {
+    currentStreak: reread[0]?.currentStreak ?? nextCurrent,
+    longestStreak: reread[0]?.longestStreak ?? nextLongest,
+  };
 }
 
 /**
