@@ -3,10 +3,14 @@
 import { useEffect, useState } from 'react';
 import { Diamond, CaretLeft, CaretRight, CircleNotch } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
+import { Avatar } from '../Avatar';
 
 interface LeaderboardEntry {
   rank: number;
-  wallet: string;
+  playerKey: string;
+  handle: string | null;
+  wallet: string | null;
+  avatarUrl: string | null;
   serverSolveMs: number;
   unassisted: boolean;
 }
@@ -152,18 +156,25 @@ export function LeaderboardPanel({
           <ol className="flex flex-col gap-1.5">
             {data.entries.map((e) => (
               <li
-                key={e.wallet}
-                className="flex items-center justify-between bg-white dark:bg-gray-700/40 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2"
+                key={e.playerKey}
+                className="flex items-center gap-2 bg-white dark:bg-gray-700/40 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2"
               >
                 <span className="text-xs font-bold text-gray-400 tabular-nums w-8">
                   #{e.rank}
                 </span>
-                <span className="flex-1 text-sm font-mono text-gray-700 dark:text-gray-300 truncate">
-                  {e.wallet.slice(0, 6)}…{e.wallet.slice(-4)}
+                <Avatar pfpUrl={e.avatarUrl} size="xs" />
+                <span
+                  className={`flex-1 text-sm truncate ${
+                    e.handle
+                      ? 'font-semibold text-gray-900 dark:text-gray-100'
+                      : 'font-mono text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {displayName(e)}
                 </span>
                 {e.unassisted && (
                   <span
-                    className="text-accent mr-2 inline-flex items-center"
+                    className="text-accent inline-flex items-center"
                     title="Unassisted solve"
                     aria-label="unassisted"
                   >
@@ -180,4 +191,15 @@ export function LeaderboardPanel({
       </div>
     </>
   );
+}
+
+/**
+ * Handle beats truncated wallet beats "Anonymous". The server filters
+ * anonymous rows out of the board, so the "Anonymous" branch is a
+ * defensive catch that should never render in practice.
+ */
+function displayName(e: LeaderboardEntry): string {
+  if (e.handle) return e.handle;
+  if (e.wallet) return `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`;
+  return 'Anonymous';
 }

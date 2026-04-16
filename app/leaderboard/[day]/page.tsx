@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Diamond } from '@phosphor-icons/react/dist/ssr';
-import { getDailyLeaderboard } from '@/lib/db/queries';
+import { getDailyLeaderboard, type LeaderboardEntry } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatMs } from '@/lib/format';
+import { Avatar } from '@/components/Avatar';
 
 /**
  * Daily leaderboard page. Server component — fetches directly via
@@ -48,18 +49,23 @@ export default async function LeaderboardPage({
           <ol className="flex flex-col gap-1.5">
             {entries.map((e) => (
               <li
-                key={e.wallet}
-                className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-btn"
+                key={e.playerKey}
+                className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-btn"
               >
                 <span className="text-xs font-bold text-gray-400 tabular-nums w-8">
                   #{e.rank}
                 </span>
-                <span className="flex-1 text-sm font-mono text-gray-700">
-                  {e.wallet.slice(0, 6)}…{e.wallet.slice(-4)}
+                <Avatar pfpUrl={e.avatarUrl} size="xs" />
+                <span
+                  className={`flex-1 text-sm truncate ${
+                    e.handle ? 'font-semibold text-gray-900' : 'font-mono text-gray-700'
+                  }`}
+                >
+                  {displayName(e)}
                 </span>
                 {e.unassisted && (
                   <span
-                    className="text-accent mr-2 inline-flex items-center"
+                    className="text-accent inline-flex items-center"
                     title="Unassisted solve"
                     aria-label="unassisted"
                   >
@@ -80,4 +86,15 @@ export default async function LeaderboardPage({
       </Link>
     </main>
   );
+}
+
+/**
+ * Handle beats truncated wallet beats "Anonymous". The server filters
+ * anonymous rows out of the board, so the "Anonymous" branch is a
+ * defensive catch that should never render in practice.
+ */
+function displayName(e: LeaderboardEntry): string {
+  if (e.handle) return e.handle;
+  if (e.wallet) return `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`;
+  return 'Anonymous';
 }
