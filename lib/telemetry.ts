@@ -38,6 +38,11 @@ export class SolveTelemetry {
   private firstKeystrokeAt: number | null = null;
   private lastKeystrokeAt: number | null = null;
   private intervals: number[] = [];
+  // Separate counter so the reported keystrokeCount stays accurate even
+  // after the intervals array is trimmed at MAX_CLIENT_INTERVALS.
+  // Previously we derived count from `intervals.length + 1`, which
+  // silently capped the reported count at 501 once trimming kicked in.
+  private keystrokeCount = 0;
 
   constructor() {
     this.puzzleLoadedAt = performance.now();
@@ -48,10 +53,12 @@ export class SolveTelemetry {
     this.firstKeystrokeAt = null;
     this.lastKeystrokeAt = null;
     this.intervals = [];
+    this.keystrokeCount = 0;
   }
 
   recordKeystroke(): void {
     const now = performance.now();
+    this.keystrokeCount++;
     if (this.firstKeystrokeAt === null) {
       this.firstKeystrokeAt = now;
     } else if (this.lastKeystrokeAt !== null) {
@@ -69,7 +76,7 @@ export class SolveTelemetry {
       clientSolveMs: Math.round(performance.now() - this.puzzleLoadedAt),
       keystrokeIntervalsMs: [...this.intervals],
       firstKeystrokeAt: this.firstKeystrokeAt,
-      keystrokeCount: this.firstKeystrokeAt === null ? 0 : this.intervals.length + 1,
+      keystrokeCount: this.keystrokeCount,
       // Wordmark counters are tracked in useGriddle (not this class)
       // because they correspond to player actions, not keystroke
       // telemetry. We return zeros here as defaults; useGriddle
