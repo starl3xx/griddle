@@ -3,6 +3,7 @@ import { getSessionId } from '@/lib/session';
 import { getSessionProfile, setSessionProfileOrThrow } from '@/lib/session-profile';
 import { getSessionWallet } from '@/lib/wallet-session';
 import { slugifyUsername, validateUsername } from '@/lib/username';
+import { isSessionPremium } from '@/lib/premium-check';
 import { db } from '@/lib/db/client';
 import { profiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -108,6 +109,27 @@ export async function POST(req: Request): Promise<NextResponse> {
     // Profile exists — update handle + avatar instead of rejecting.
     // Only update columns the user actually supplied so we don't
     // accidentally blank fields the Farcaster sync set earlier.
+    //
+    // Premium gate: if the profile already has a handle and the new
+    // handle differs, this is a rename → require Premium. Mirrors
+    // the PATCH /api/profile gate. Initial sets (null → value) are
+    // allowed for free users.
+    const currentRows = await db
+      .select({ handle: profiles.handle })
+      .from(profiles)
+      .where(eq(profiles.id, existingId))
+      .limit(1);
+    const currentHandle = currentRows[0]?.handle;
+    if (currentHandle && currentHandle !== handle) {
+      const premium = await isSessionPremium(sessionId);
+      if (!premium) {
+        return NextResponse.json(
+          { error: 'Changing your username is a Premium feature.' },
+          { status: 402 },
+        );
+      }
+    }
+
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     patch.handle = handle;
     if (avatarUrl !== null) {
