@@ -171,6 +171,19 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     earnedWordmarks: string[];
   } | null>(null);
 
+  // Solve reveal is a two-step handoff: /api/solve verdict lands first
+  // and populates `pendingSolveResultRef`, then Grid fires
+  // `handleReorderComplete` once the tile-shuffle settles and we promote
+  // the pending result into state to open SolveModal. Decoupled via ref
+  // so a stale SolveModal never opens if the user triggered a reset
+  // between verdict and settle.
+  const pendingSolveResultRef = useRef<{
+    solveMs: number;
+    unassisted: boolean;
+    word: string;
+    earnedWordmarks: string[];
+  } | null>(null);
+
   /**
    * Authoritative server-computed solve duration (ms) from the most
    * recent /api/solve response. `clientSolveMs` from the telemetry is
@@ -258,17 +271,26 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // a fallback for the no-puzzle-load edge case (direct POST), and
       // is wrong for any user who reloaded mid-attempt.
       const serverMs = serverSolveMsRef.current;
-      setSolveResult({
+      // Stash the result; Grid will fire onReorderComplete once the
+      // tile shuffle settles, and we'll promote the stash to state then.
+      pendingSolveResultRef.current = {
         solveMs: serverMs != null ? serverMs : payload.clientSolveMs,
         unassisted: payload.unassisted,
         word: payload.word,
         earnedWordmarks: earnedWordmarksRef.current,
-      });
+      };
       serverSolveMsRef.current = null;
       earnedWordmarksRef.current = [];
     },
     [],
   );
+
+  const handleReorderComplete = useCallback(() => {
+    const pending = pendingSolveResultRef.current;
+    if (pending === null) return;
+    pendingSolveResultRef.current = null;
+    setSolveResult(pending);
+  }, []);
 
   // Unassisted mode — read from /api/settings on wallet connect. When
   // true, useGriddle suppresses cell-state hints (available / blocked)
@@ -833,9 +855,11 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           grid={activePuzzle.grid}
           cellStates={state.cellStates}
           sequenceByCell={state.sequenceByCell}
+          path={state.path}
           shakeSignal={state.shakeSignal}
           solved={state.solved}
           onCellTap={actions.tapCell}
+          onReorderComplete={handleReorderComplete}
         />
 
         <WordSlots letters={state.letters} />
