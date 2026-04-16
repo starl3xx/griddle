@@ -33,8 +33,8 @@ import { awardWordmarks } from '@/lib/wordmarks/award';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const INELIGIBLE_MS = parseInt(process.env.BOT_THRESHOLD_INELIGIBLE_MS ?? '8000', 10);
-const SUSPICIOUS_MS = parseInt(process.env.BOT_THRESHOLD_SUSPICIOUS_MS ?? '15000', 10);
+const INELIGIBLE_MS = parseInt(process.env.BOT_THRESHOLD_INELIGIBLE_MS ?? '2000', 10);
+const SUSPICIOUS_MS = parseInt(process.env.BOT_THRESHOLD_SUSPICIOUS_MS ?? '6000', 10);
 const SUSPICIOUS_STDDEV_MS = parseInt(process.env.BOT_THRESHOLD_STDDEV_MS ?? '30', 10);
 
 // A real solve has 8 inter-keystroke intervals (9 letters → 8 gaps).

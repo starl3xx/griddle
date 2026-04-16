@@ -96,6 +96,18 @@ export async function getTodayPuzzle(): Promise<TodayPuzzlePayload | null> {
 }
 
 /**
+ * Fetch a puzzle by day number (any day, not just today). Used by the
+ * archive puzzle loader. Returns the public payload — never the word.
+ */
+export async function getPuzzleByDay(dayNumber: number): Promise<TodayPuzzlePayload | null> {
+  const cached = await safeKvGet<TodayPuzzlePayload>(PUBLIC_KEY(dayNumber));
+  if (cached) return cached;
+
+  const row = await refreshCacheForDay(dayNumber);
+  return row ? toPublicPayload(row) : null;
+}
+
+/**
  * Fetch the puzzle answer word by dayNumber. Only used from solve
  * verification  -  never call this from any code path that touches the
  * client response.
@@ -200,8 +212,10 @@ export interface LeaderboardEntry {
 /**
  * Top N solvers for a given day. Filters:
  *   - solved = true (no failed attempts)
- *   - flag IS NULL (no ineligible/suspicious  -  anti-bot drops them)
+ *   - flag is NULL or 'suspicious' (only 'ineligible' is excluded)
  *   - wallet IS NOT NULL (no anonymous solves on the leaderboard)
+ *   - same-day only: solve created_at matches the puzzle date (archive
+ *     solves don't qualify for leaderboard placement)
  *
  * Each wallet appears once with their fastest serverSolveMs. Drizzle
  * `selectDistinctOn` would be cleaner but isn't available across all
@@ -214,12 +228,13 @@ export async function getDailyLeaderboard(
   limit = 100,
 ): Promise<LeaderboardEntry[]> {
   const puzzleRows = await db
-    .select({ id: puzzles.id })
+    .select({ id: puzzles.id, date: puzzles.date })
     .from(puzzles)
     .where(eq(puzzles.dayNumber, dayNumber))
     .limit(1);
   if (puzzleRows.length === 0) return [];
   const puzzleId = puzzleRows[0].id;
+  const puzzleDate = puzzleRows[0].date;
 
   // Pull all eligible solves for the puzzle, sorted by speed. Walk the
   // result once and keep the first occurrence per wallet  -  that's their
@@ -236,9 +251,15 @@ export async function getDailyLeaderboard(
       and(
         eq(solves.puzzleId, puzzleId),
         eq(solves.solved, true),
-        isNull(solves.flag),
+        // Only 'ineligible' is excluded — 'suspicious' is an internal
+        // flag for admin review, not a leaderboard ban.
+        sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
         isNotNull(solves.wallet),
         isNotNull(solves.serverSolveMs),
+        // Same-day filter: only solves submitted on the puzzle's date
+        // qualify for leaderboard placement. Archive/late solves are
+        // excluded so retroactive play can't inflate past leaderboards.
+        sql`${solves.createdAt}::date = ${puzzleDate}::date`,
       ),
     )
     .orderBy(asc(solves.serverSolveMs));
@@ -278,6 +299,10 @@ export interface AnomalyRow {
   keystrokeCount: number | null;
   flag: 'ineligible' | 'suspicious';
   createdAt: Date;
+  /** Profile handle joined via wallet — null when anonymous or no profile. */
+  handle: string | null;
+  /** Profile avatar URL joined via wallet. */
+  avatarUrl: string | null;
 }
 
 export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
@@ -294,8 +319,11 @@ export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
       keystrokeCount: solves.keystrokeCount,
       flag: solves.flag,
       createdAt: solves.createdAt,
+      handle: profiles.handle,
+      avatarUrl: profiles.avatarUrl,
     })
     .from(solves)
+    .leftJoin(profiles, eq(solves.wallet, profiles.wallet))
     .where(isNotNull(solves.flag))
     .orderBy(sql`${solves.createdAt} DESC`)
     .limit(limit);
@@ -303,6 +331,20 @@ export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
     ...r,
     flag: r.flag as 'ineligible' | 'suspicious',
   }));
+}
+
+/**
+ * Admin moderation: update or clear the flag on a solve.
+ * Passing null clears the flag (marks the solve as legitimate).
+ */
+export async function updateSolveFlag(
+  solveId: number,
+  flag: 'ineligible' | 'suspicious' | null,
+): Promise<void> {
+  await db
+    .update(solves)
+    .set({ flag })
+    .where(eq(solves.id, solveId));
 }
 
 /**

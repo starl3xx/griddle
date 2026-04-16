@@ -66,7 +66,7 @@ export function ArchivePanel({ premium, onUpgrade, onDayPick, onClose }: Archive
             Archive
           </h2>
           <p className="text-xs font-medium text-gray-500">
-            Tap a day to see its leaderboard
+            Tap a day to play that puzzle
           </p>
         </div>
         <button
@@ -86,7 +86,7 @@ export function ArchivePanel({ premium, onUpgrade, onDayPick, onClose }: Archive
           <div className="py-8 text-center space-y-4">
             <Diamond className="w-8 h-8 text-accent mx-auto" weight="fill" aria-hidden />
             <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed max-w-xs mx-auto">
-              Upgrade to Premium to replay every past puzzle from the full archive.
+              Upgrade to Premium to play every past puzzle from the full archive.
             </p>
             <button type="button" onClick={onUpgrade} className="btn-primary">
               Upgrade to Premium
