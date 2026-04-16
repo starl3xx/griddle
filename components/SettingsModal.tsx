@@ -308,13 +308,12 @@ export function SettingsModal({
           return;
         }
       }
-      // Validate for both initial set and rename.
-      if (trimmedUsername) {
-        const validation = validateUsername(trimmedUsername);
-        if (!validation.valid) {
-          setProfileError(validation.error ?? 'Invalid username.');
-          return;
-        }
+      // Validate for both initial set and rename — including empty,
+      // which validateUsername rejects with a min-length error.
+      const validation = validateUsername(trimmedUsername);
+      if (!validation.valid) {
+        setProfileError(validation.error ?? 'Invalid username.');
+        return;
       }
       patch.handle = trimmedUsername;
     }
