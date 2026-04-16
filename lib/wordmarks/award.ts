@@ -7,7 +7,10 @@ import type { WordmarkId } from './catalog';
  * (aside from the final insert).
  */
 export interface AwardContext {
-  wallet: string;
+  /** Wallet that earned the solve. Null for handle-only / email-auth users. */
+  wallet: string | null;
+  /** Profile identity. Null when the caller has no profile yet. */
+  profileId: number | null;
   puzzleId: number;
   /** Lowercase solution word — for Labyrinth's prefix check. */
   puzzleWord: string;
@@ -125,7 +128,7 @@ export async function awardWordmarks(ctx: AwardContext): Promise<string[]> {
   else if (ctx.currentStreak >= 7) toAward.push('fireproof');
 
   const newlyEarned = await insertWordmarksIfNew(
-    ctx.wallet,
+    { profileId: ctx.profileId, wallet: ctx.wallet },
     toAward,
     ctx.puzzleId,
   );

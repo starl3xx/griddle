@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
-import { getWordmarksForWallet } from '@/lib/db/queries';
+import { getWordmarksForPlayer } from '@/lib/db/queries';
 
 /**
  * GET /api/wordmarks/[wallet]
  *
- * Returns the wordmarks earned by a wallet, newest first. Used by
- * the Lexicon grid on the Stats panel to paint earned vs locked.
+ * Returns the wordmarks earned under a given wallet address, newest
+ * first. Public endpoint — anyone can look up anyone's wordmarks by
+ * their wallet. This mirrors the leaderboard pattern and supports
+ * future "share my Lexicon" URLs without auth gymnastics.
  *
- * Public endpoint — anyone can look up anyone's wordmarks. This
- * mirrors the leaderboard pattern (public data, wallet-keyed) and
- * supports future "share my Lexicon" surfaces without auth gymnastics.
+ * Wallet-only lookup; handle-only users aren't reachable by this
+ * route (there's no wallet to reference them). Client-side Lexicon
+ * rendering for the signed-in user goes through `/api/wordmarks/me`
+ * which resolves the session's profile identity server-side.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +26,7 @@ export async function GET(
     return NextResponse.json({ error: 'invalid wallet' }, { status: 400 });
   }
 
-  const entries = await getWordmarksForWallet(wallet);
+  const entries = await getWordmarksForPlayer({ wallet });
   return NextResponse.json({
     wallet: wallet.toLowerCase(),
     entries: entries.map((e) => ({
