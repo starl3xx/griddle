@@ -761,7 +761,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         premium={premium}
         hasSessionProfile={hasSessionProfile}
         pfpUrl={profile?.avatarUrl ?? pfpUrl}
-        displayName={profile?.displayName ?? displayName}
+        displayName={profile?.handle ?? displayName}
         onCreateProfile={() => { setBrowseTab(null); setShowCreateProfile(true); }}
         onUpgrade={() => {
           setBrowseTab(null);

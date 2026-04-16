@@ -14,6 +14,7 @@ import {
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
+import { slugifyUsername } from '@/lib/username';
 
 /**
  * Server-side puzzle/solve queries shared between the server component
@@ -474,8 +475,6 @@ export interface ProfileRow {
   email: string | null;
   /** Set when the user clicks the magic link. Null until verified. */
   emailVerifiedAt: Date | null;
-  /** User-chosen display name (distinct from handle slug). */
-  displayName: string | null;
   /** URL to the user's avatar image. */
   avatarUrl: string | null;
   /**
@@ -511,7 +510,6 @@ function toProfileRow(r: RawProfileRow): ProfileRow {
     stripeSessionId: r.stripeSessionId,
     email: r.email ?? null,
     emailVerifiedAt: r.emailVerifiedAt ?? null,
-    displayName: r.displayName ?? null,
     avatarUrl: r.avatarUrl ?? null,
     avatarSource: (r.avatarSource ?? null) as ProfileRow['avatarSource'],
     farcasterFid: r.farcasterFid ?? null,
@@ -1266,7 +1264,6 @@ export async function mergeProfiles(
         COALESCE(older.handle,             newer.handle)             AS handle,
         COALESCE(older.email,              newer.email)              AS email,
         COALESCE(older.email_verified_at,  newer.email_verified_at)  AS email_verified_at,
-        COALESCE(older.display_name,       newer.display_name)       AS display_name,
         -- Avatar priority: a 'custom' avatar on EITHER side wins over
         -- a 'farcaster'/null avatar on the other side, regardless of
         -- row age. Plain COALESCE would pick the older row first —
@@ -1309,7 +1306,6 @@ export async function mergeProfiles(
         handle             = pair.handle,
         email              = pair.email,
         email_verified_at  = pair.email_verified_at,
-        display_name       = pair.display_name,
         avatar_url         = pair.avatar_url,
         avatar_source      = pair.avatar_source,
         farcaster_fid      = pair.farcaster_fid,
@@ -1356,7 +1352,14 @@ export async function mergeProfiles(
 export async function upsertProfileForFarcaster(input: {
   fid: number;
   username: string | null;
-  displayName: string | null;
+  /**
+   * Farcaster's human-readable display_name (e.g. "Big Jake"). No
+   * longer stored on profiles — we only keep the lowercase
+   * `farcaster_username` alongside our own `handle`. Still accepted
+   * here as an input so the caller doesn't have to know, but it's
+   * effectively ignored.
+   */
+  displayName?: string | null;
   avatarUrl: string | null;
   wallet: string | null;
 }): Promise<ProfileRow> {
@@ -1400,7 +1403,6 @@ export async function upsertProfileForFarcaster(input: {
       updatedAt: new Date(),
     };
     if (input.username) freshPatch.farcasterUsername = input.username;
-    if (input.displayName && !merged.displayName) freshPatch.displayName = input.displayName;
     // Avatar policy on the merged survivor: protect 'custom' uploads
     // (merged inherits avatarSource via mergeProfiles COALESCE); for
     // anything else, apply the incoming Farcaster pfp if provided.
@@ -1446,7 +1448,6 @@ export async function upsertProfileForFarcaster(input: {
   const patch = {
     farcasterFid:      input.fid,
     farcasterUsername: input.username ?? existing?.farcasterUsername ?? null,
-    displayName:       existing?.displayName ?? input.displayName ?? null,
     avatarUrl:         nextAvatarUrl,
     avatarSource:      nextAvatarSource,
     wallet:            wallet ?? existing?.wallet ?? null,
@@ -1466,10 +1467,14 @@ export async function upsertProfileForFarcaster(input: {
   // a concurrent request creates a row with the same farcaster_fid or
   // wallet between the SELECT lookups above and this INSERT. On conflict
   // we re-query to return whichever row won the race.
+  // First-connect Farcaster profile. If the user has no handle, seed
+  // one from their Farcaster @username (or a fallback) so they have a
+  // public identity on the leaderboard without having to pick one.
+  const seedHandle = input.username ? slugifyUsername(input.username) : null;
   const inserted = await db.insert(profiles).values({
     farcasterFid: input.fid,
     farcasterUsername: input.username ?? null,
-    displayName: input.displayName ?? null,
+    handle: seedHandle,
     avatarUrl: input.avatarUrl ?? null,
     // New Farcaster row: if we seeded an avatar, tag it so future
     // syncs know it's safe to refresh.

@@ -184,8 +184,6 @@ export const profiles = pgTable(
     email: varchar('email', { length: 254 }),
     /** Set when the user clicks the magic link. Null until then. */
     emailVerifiedAt: timestamp('email_verified_at'),
-    /** Display name chosen by the user. Distinct from handle (slug). */
-    displayName: varchar('display_name', { length: 50 }),
     /** URL to the user's avatar image (Farcaster pfp, uploaded, etc.). */
     avatarUrl: varchar('avatar_url', { length: 500 }),
     /**
