@@ -66,8 +66,9 @@ export interface AwardContext {
 export async function awardWordmarks(ctx: AwardContext): Promise<string[]> {
   const toAward: WordmarkId[] = [];
 
-  // Milestone
-  if (ctx.lifetimeSolves === 1) toAward.push('fledgling');
+  // Milestone — both use >= so they self-heal if a prior award
+  // pipeline attempt failed (insertWordmarksIfNew is idempotent).
+  if (ctx.lifetimeSolves >= 1) toAward.push('fledgling');
   if (ctx.lifetimeSolves >= 100) toAward.push('goldfinch');
 
   // Skill — Blameless requires BOTH counts to be explicitly reported
