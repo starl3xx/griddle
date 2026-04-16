@@ -202,11 +202,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     [],
   );
 
+  // Unassisted mode — read from /api/settings on wallet connect. When
+  // true, useGriddle suppresses cell-state hints (available / blocked)
+  // so the solver gets no adjacency feedback.
+  const [unassistedMode, setUnassistedMode] = useState(false);
+
   const [state, actions] = useGriddle({
     grid: initialPuzzle.grid,
     onSolveAttempt: handleSolveAttempt,
     onSolved: handleSolved,
     disabled: showTutorial,
+    unassisted: unassistedMode,
   });
 
   const handlePlayAgain = useCallback(() => {
@@ -230,17 +236,20 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * needs to be observed.
    */
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const hasSessionProfile = profile !== null;
 
   /** Fetches /api/profile and updates local state. Returns the snapshot. */
   const refetchProfile = useCallback(async (): Promise<ProfileSnapshot | null> => {
     try {
       const res = await fetch('/api/profile');
-      if (!res.ok) return null;
+      if (!res.ok) { setProfileLoaded(true); return null; }
       const data = (await res.json()) as { profile: ProfileSnapshot | null };
       setProfile(data.profile);
+      setProfileLoaded(true);
       return data.profile;
     } catch {
+      setProfileLoaded(true);
       return null;
     }
   }, []);
@@ -265,6 +274,20 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       })
       .catch(() => {/* best-effort */});
   }, []);
+
+  // Sync unassisted mode from user_settings when a wallet connects.
+  // The useDarkMode hook already fetches /api/settings for dark mode;
+  // this effect reads the same endpoint for unassistedModeEnabled so
+  // useGriddle can suppress cell hints. Runs on sessionWallet change.
+  useEffect(() => {
+    if (!sessionWallet) { setUnassistedMode(false); return; }
+    fetch('/api/settings')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { unassistedModeEnabled?: boolean } | null) => {
+        if (data?.unassistedModeEnabled) setUnassistedMode(true);
+      })
+      .catch(() => {/* best-effort */});
+  }, [sessionWallet]);
 
   // Hydrate the profile snapshot from /api/profile on mount. Required so
   // the account state survives a page reload. Skip when the URL is
@@ -742,6 +765,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         onClose={() => setBrowseTab(null)}
         premium={premium}
         hasSessionProfile={hasSessionProfile}
+        profileLoaded={profileLoaded}
         pfpUrl={profile?.avatarUrl ?? pfpUrl}
         username={profile?.handle ?? username}
         onCreateProfile={() => { setBrowseTab(null); setShowCreateProfile(true); }}
@@ -761,6 +785,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         dark={dark}
         onToggleDark={toggleDark}
         onProfileChanged={() => { void refetchProfile(); }}
+        onUnassistedChanged={setUnassistedMode}
         onClose={() => setShowSettings(false)}
         onCreateProfile={() => { setShowSettings(false); setShowCreateProfile(true); }}
         onConnect={() => { setShowSettings(false); triggerConnect(); }}

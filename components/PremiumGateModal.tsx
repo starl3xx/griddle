@@ -104,7 +104,7 @@ export function PremiumGateModal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors duration-fast"
+            className="ml-auto w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast"
           >
             <svg
               viewBox="0 0 24 24"
@@ -120,9 +120,9 @@ export function PremiumGateModal({
           </button>
         </div>
 
-        <p className="text-sm text-gray-700 leading-relaxed mt-4">{blurbText}</p>
+        <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed mt-4">{blurbText}</p>
 
-        <ul className="text-sm text-gray-800 leading-relaxed mt-4 space-y-1.5">
+        <ul className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed mt-4 space-y-1.5">
           <Benefit>Every day's ranked leaderboard</Benefit>
           <Benefit>Full puzzle archive</Benefit>
           <Benefit>Personal stats dashboard</Benefit>
@@ -134,14 +134,14 @@ export function PremiumGateModal({
             type="button"
             onClick={onUnlockCrypto}
             disabled={!sessionWallet}
-            className="rounded-md border-2 border-brand bg-brand-50 px-3 py-3 text-left hover:bg-brand-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="rounded-md border-2 border-brand bg-brand-50 dark:bg-brand-900/30 px-3 py-3 text-left hover:bg-brand-100 dark:hover:bg-brand-900/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title={sessionWallet ? undefined : 'Connect a wallet first'}
           >
-            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
               Pay with crypto ($WORD)
             </div>
-            <div className="text-xl font-black text-gray-900 tabular-nums mt-0.5">$5</div>
-            <div className="text-[11px] font-medium text-gray-500 mt-0.5">
+            <div className="text-xl font-black text-gray-900 dark:text-gray-100 tabular-nums mt-0.5">$5</div>
+            <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">
               {sessionWallet ? 'One tap, onchain' : 'Connect wallet first'}
             </div>
           </button>
@@ -150,13 +150,13 @@ export function PremiumGateModal({
             type="button"
             onClick={handleFiatClick}
             disabled={fiatSubmitting}
-            className="rounded-md border-2 border-gray-200 bg-white px-3 py-3 text-left hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="rounded-md border-2 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-3 text-left hover:border-gray-300 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
               Pay with cash (Stripe)
             </div>
-            <div className="text-xl font-black text-gray-900 tabular-nums mt-0.5">$6</div>
-            <div className="text-[11px] font-medium text-gray-500 mt-0.5">
+            <div className="text-xl font-black text-gray-900 dark:text-gray-100 tabular-nums mt-0.5">$6</div>
+            <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">
               {fiatSubmitting ? 'Opening checkout…' : 'Card & Apple Pay'}
             </div>
           </button>

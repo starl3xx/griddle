@@ -63,6 +63,8 @@ interface SettingsModalProps {
   onToggleDark: () => void;
   /** Called when profile state mutates so the parent can re-fetch. */
   onProfileChanged: () => void;
+  /** Called when unassisted mode is toggled so the game grid updates. */
+  onUnassistedChanged: (enabled: boolean) => void;
   onClose: () => void;
   /** Opens CreateProfileModal in the parent. */
   onCreateProfile: () => void;
@@ -105,6 +107,7 @@ export function SettingsModal({
   dark,
   onToggleDark,
   onProfileChanged,
+  onUnassistedChanged,
   onClose,
   onCreateProfile,
   onConnect,
@@ -224,6 +227,9 @@ export function SettingsModal({
       if (res.ok) {
         const updated = (await res.json()) as SettingsResponse;
         setSettings(updated);
+        if (field === 'unassistedModeEnabled') {
+          onUnassistedChanged(updated.unassistedModeEnabled);
+        }
       }
     } catch {/* best-effort */} finally {
       setSaving(false);
@@ -368,12 +374,16 @@ export function SettingsModal({
   if (!open) return null;
 
   // Identity resolution for the header — prefer username (handle),
-  // then a truncated wallet, then "Anonymous."
+  // then a truncated wallet, then a contextual prompt.
+  const hasIdentity = !!profile;
+  const hasCompleteProfile = hasIdentity && !!profile.handle;
   const headerLabel =
     profile?.handle?.trim()
-    || (profile?.wallet ? `${profile.wallet.slice(0, 6)}…${profile.wallet.slice(-4)}` : null)
-    || 'Anonymous';
-  const hasIdentity = !!profile;
+    || (hasIdentity
+      ? 'Complete your profile'
+      : sessionWallet
+        ? `${sessionWallet.slice(0, 6)}…${sessionWallet.slice(-4)}`
+        : 'Anonymous');
 
   // Streak protection cooldown (mirrors StatsModal logic)
   const protectionUsedAt = settings?.streakProtectionUsedAt
@@ -467,10 +477,12 @@ export function SettingsModal({
             rather than "edit." For existing profiles, the username
             field is read-only unless Premium. */}
         {(hasIdentity || sessionWallet) && (
-          <Section title={hasIdentity ? 'Profile' : 'Complete your profile'}>
-            {!hasIdentity && (
+          <Section title={hasCompleteProfile ? 'Profile' : 'Complete your profile'}>
+            {!hasCompleteProfile && (
               <p className="text-[12px] text-gray-500 dark:text-gray-400 leading-relaxed">
-                Your wallet is connected. Choose a username so your solves appear under a real identity on the leaderboard.
+                {hasIdentity
+                  ? 'Choose a username so your solves appear under a real identity on the leaderboard.'
+                  : 'Your wallet is connected. Choose a username so your solves appear under a real identity on the leaderboard.'}
               </p>
             )}
             <LabeledInput
@@ -500,8 +512,8 @@ export function SettingsModal({
               }}
               hint={
                 !premium
-                  ? 'Upload a custom photo with Premium'
-                  : hasIdentity
+                  ? 'Custom photos are a Premium feature'
+                  : hasCompleteProfile
                     ? 'Tap to upload a new photo'
                     : 'Optional — we’ll use a silhouette if you skip'
               }
@@ -528,7 +540,7 @@ export function SettingsModal({
               ) : (
                 <Check className="w-4 h-4" weight="bold" aria-hidden />
               )}
-              {hasIdentity ? 'Save profile' : 'Complete profile'}
+              {hasCompleteProfile ? 'Save profile' : 'Complete profile'}
             </button>
           </Section>
         )}

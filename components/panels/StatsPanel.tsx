@@ -19,6 +19,8 @@ interface StatsPanelProps {
    * anonymous CTA and the account stats view.
    */
   hasSessionProfile: boolean;
+  /** True once the initial profile fetch has resolved (even if null). */
+  profileLoaded: boolean;
   pfpUrl: string | null;
   /** User's display name from the bound profile (or Farcaster fallback). */
   username: string | null;
@@ -54,6 +56,7 @@ interface StatsPanelProps {
 export function StatsPanel({
   premium,
   hasSessionProfile,
+  profileLoaded,
   pfpUrl,
   username,
   onCreateProfile,
@@ -116,7 +119,7 @@ export function StatsPanel({
 
       {/* Stats body */}
       <div className="mt-5">
-        {statsLoading ? (
+        {statsLoading || !profileLoaded ? (
           <StatsSkeleton />
         ) : !hasAccount ? (
           <AnonymousCta onCreateProfile={onCreateProfile} />

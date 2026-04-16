@@ -18,6 +18,7 @@ interface BrowseModalProps {
   /** Passed through to StatsPanel — see its props for details. */
   premium: boolean;
   hasSessionProfile: boolean;
+  profileLoaded: boolean;
   pfpUrl: string | null;
   username: string | null;
   onCreateProfile: () => void;
@@ -49,6 +50,7 @@ export function BrowseModal({
   onClose,
   premium,
   hasSessionProfile,
+  profileLoaded,
   pfpUrl,
   username,
   onCreateProfile,
@@ -95,6 +97,7 @@ export function BrowseModal({
             <StatsPanel
               premium={premium}
               hasSessionProfile={hasSessionProfile}
+              profileLoaded={profileLoaded}
               pfpUrl={pfpUrl}
               username={username}
               onCreateProfile={onCreateProfile}

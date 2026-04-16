@@ -126,9 +126,17 @@ export function UsersTab() {
                 <tr key={u.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-gray-500 text-xs font-bold">
-                        {label(u)[0].toUpperCase()}
-                      </div>
+                      {u.avatarUrl ? (
+                        <img
+                          src={u.avatarUrl}
+                          alt=""
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-gray-500 text-xs font-bold">
+                          {label(u)[0].toUpperCase()}
+                        </div>
+                      )}
                       <div>
                         <p className="font-semibold text-gray-900">{label(u)}</p>
                         {/* Only show handle sub-line when it isn't already the primary label */}

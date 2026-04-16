@@ -11,10 +11,10 @@ export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="modal-sheet animate-slide-up">
-        <h2 className="text-2xl font-bold tracking-tight text-gray-900">
+        <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
           Welcome to Griddle
         </h2>
-        <p className="text-sm font-medium text-gray-500 mt-1">
+        <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1">
           A daily 3×3 word puzzle
         </p>
 
@@ -22,7 +22,7 @@ export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
           <TinyGridIllustration />
         </div>
 
-        <ul className="space-y-2 text-sm text-gray-800 leading-relaxed">
+        <ul className="space-y-2 text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
           <li className="flex gap-2">
             <span className="text-brand font-bold">1.</span>
             <span>Find the hidden 9-letter word using every cell exactly once.</span>
@@ -69,8 +69,8 @@ function TinyGridIllustration() {
   ] as const;
 
   const cls: Record<(typeof state)[number], string> = {
-    available: 'bg-success-50 border-success-200',
-    blocked: 'bg-gray-100 border-gray-200',
+    available: 'bg-success-50 dark:bg-success-900/30 border-success-200 dark:border-success-700',
+    blocked: 'bg-gray-100 dark:bg-gray-700 border-gray-200 dark:border-gray-600',
     current: 'bg-brand border-brand',
   };
 
