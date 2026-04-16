@@ -155,7 +155,7 @@ export async function POST(
   // neither can match an empty list.
   const backspaceCount: number | null = body.backspaceCount ?? null;
   const resetCount: number | null = body.resetCount ?? null;
-  const foundWords = body.foundWords ?? [];
+  const foundWords = [...new Set(body.foundWords ?? [])];
 
   // Clamp dayNumber to today’s puzzle. M4b only allows submitting solves
   // for the current day — past puzzles bypass anti-bot timing checks
