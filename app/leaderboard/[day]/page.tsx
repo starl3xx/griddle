@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Diamond } from '@phosphor-icons/react/dist/ssr';
+import { Crown } from '@phosphor-icons/react/dist/ssr';
 import { getDailyLeaderboard } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatMs, formatPlayerName } from '@/lib/format';
@@ -69,7 +69,7 @@ export default async function LeaderboardPage({
                     title="Unassisted solve"
                     aria-label="unassisted"
                   >
-                    <Diamond className="w-3.5 h-3.5" weight="fill" aria-hidden />
+                    <Crown className="w-3.5 h-3.5" weight="fill" aria-hidden />
                   </span>
                 )}
                 <span className="text-sm font-bold text-gray-900 tabular-nums">

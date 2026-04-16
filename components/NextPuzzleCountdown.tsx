@@ -50,7 +50,7 @@ export function NextPuzzleCountdown() {
   return (
     <footer className="mt-auto pt-8 pb-4 text-center">
       <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-        Next puzzle in{' '}
+        Next grid drops in{' '}
         <span className="tabular-nums text-gray-600 dark:text-gray-400">{formatCountdown(seconds)}</span>
       </p>
     </footer>

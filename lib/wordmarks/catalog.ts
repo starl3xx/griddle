@@ -102,6 +102,45 @@ export const WORDMARK_ZINDEX: Record<WordmarkId, number> = Object.fromEntries(
 ) as Record<WordmarkId, number>;
 
 /**
+ * Per-wordmark theme colors for the Lexicon badge (earned state). Each
+ * entry maps to a distinct Tailwind tonal pair (light fill + ring
+ * accent) thematically tied to the achievement — so the Lexicon grid
+ * reads as a varied collection of collectibles rather than a uniform
+ * pile of purple circles. Locked badges ignore this and fall back to
+ * neutral gray in `LexiconGrid`.
+ *
+ * Literal class strings (not string-interpolated) so Tailwind's JIT
+ * picks them up at build time. Purple is intentionally avoided
+ * because it is reserved for Premium-indicator UI project-wide.
+ */
+export interface WordmarkTheme {
+  /** Background tint behind the emoji. */
+  bg: string;
+  /** Ring accent — stronger hue of the same family for definition. */
+  ring: string;
+}
+
+export const WORDMARK_THEMES: Record<WordmarkId, WordmarkTheme> = {
+  unrivaled: { bg: 'bg-yellow-100 dark:bg-yellow-900/30',   ring: 'ring-yellow-500' },
+  dauntless: { bg: 'bg-cyan-100 dark:bg-cyan-900/30',       ring: 'ring-cyan-500' },
+  lightning: { bg: 'bg-amber-100 dark:bg-amber-900/30',     ring: 'ring-amber-400' },
+  blameless: { bg: 'bg-emerald-100 dark:bg-emerald-900/30', ring: 'ring-emerald-500' },
+  nightclub: { bg: 'bg-slate-200 dark:bg-slate-800',        ring: 'ring-slate-700' },
+  quicksand: { bg: 'bg-orange-100 dark:bg-orange-900/30',   ring: 'ring-orange-400' },
+  centurion: { bg: 'bg-stone-200 dark:bg-stone-800',        ring: 'ring-stone-600' },
+  labyrinth: { bg: 'bg-teal-100 dark:bg-teal-900/30',       ring: 'ring-teal-500' },
+  wordsmith: { bg: 'bg-sky-100 dark:bg-sky-900/30',         ring: 'ring-sky-500' },
+  clockwork: { bg: 'bg-zinc-100 dark:bg-zinc-800',          ring: 'ring-zinc-500' },
+  steadfast: { bg: 'bg-neutral-200 dark:bg-neutral-800',    ring: 'ring-neutral-500' },
+  goldfinch: { bg: 'bg-amber-100 dark:bg-amber-900/30',     ring: 'ring-amber-600' },
+  frontline: { bg: 'bg-rose-100 dark:bg-rose-900/30',       ring: 'ring-rose-500' },
+  fireproof: { bg: 'bg-red-100 dark:bg-red-900/30',         ring: 'ring-red-500' },
+  throwback: { bg: 'bg-stone-100 dark:bg-stone-800',        ring: 'ring-stone-400' },
+  megaphone: { bg: 'bg-pink-100 dark:bg-pink-900/30',       ring: 'ring-pink-500' },
+  fledgling: { bg: 'bg-lime-100 dark:bg-lime-900/30',       ring: 'ring-lime-500' },
+};
+
+/**
  * Group suppression + leaderboard row selection (`getLeaderboardWordmarks`,
  * `SPEED_GROUP`, `STREAK_GROUP`) land in the follow-up PR that wires
  * up-to-3 wordmark emojis into leaderboard rows. Keeping them out of

@@ -4,6 +4,10 @@ const config: Config = {
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
+    // Per-wordmark theme classes (WORDMARK_THEMES) live in catalog.ts
+    // and must be discovered by Tailwind's JIT. Scanning lib/ as a
+    // whole is cheap and avoids hand-maintaining a safelist.
+    './lib/**/*.{ts,tsx}',
   ],
   darkMode: 'class',
   theme: {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { WORDMARK_CATALOG } from '@/lib/wordmarks/catalog';
+import { WORDMARK_CATALOG, WORDMARK_THEMES } from '@/lib/wordmarks/catalog';
 
 interface LexiconGridProps {
   /**
@@ -59,7 +59,10 @@ export function LexiconGrid({ enabled }: LexiconGridProps) {
   const total = WORDMARK_CATALOG.length;
 
   return (
-    <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
+    // Contained card treatment — soft accent-tinted fill with padding so
+    // the whole Lexicon reads as a single collectible-gallery unit, the
+    // way LHAW renders its Wordmarks panel.
+    <div className="mt-4 rounded-card bg-accent-50 dark:bg-accent-900/15 border border-accent-100 dark:border-accent-900/30 p-4 sm:p-5">
       <div className="mb-3">
         <h3 className="text-base font-bold tracking-tight text-gray-900 dark:text-gray-100">
           Lexicon
@@ -72,6 +75,7 @@ export function LexiconGrid({ enabled }: LexiconGridProps) {
       <ul className="grid grid-cols-3 gap-y-4 gap-x-2" role="list">
         {WORDMARK_CATALOG.map((w) => {
           const isEarned = earned.has(w.id);
+          const theme = WORDMARK_THEMES[w.id];
           return (
             <li
               key={w.id}
@@ -79,10 +83,10 @@ export function LexiconGrid({ enabled }: LexiconGridProps) {
               title={w.description}
             >
               <div
-                className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-colors duration-fast ${
+                className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-colors duration-fast ring-2 ${
                   isEarned
-                    ? 'bg-accent/15 ring-2 ring-accent/40'
-                    : 'bg-gray-100 dark:bg-gray-700/60 opacity-50'
+                    ? `${theme.bg} ${theme.ring}`
+                    : 'bg-gray-100 dark:bg-gray-700/60 ring-transparent opacity-50'
                 }`}
                 aria-hidden
               >

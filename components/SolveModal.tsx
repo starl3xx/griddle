@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Diamond, Medal, ShareNetwork, ArrowCounterClockwise } from '@phosphor-icons/react';
+import { Crown, Medal, ShareNetwork, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
@@ -125,7 +125,7 @@ export function SolveModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="modal-sheet animate-slide-up text-center">
         <div className="flex justify-center mb-2" aria-hidden>
-          <Medal className="w-12 h-12 text-accent" weight="fill" />
+          <Medal className="w-12 h-12 text-brand" weight="fill" />
         </div>
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900">
           Solved!
@@ -151,7 +151,7 @@ export function SolveModal({
               title="Unassisted solve"
               aria-label="unassisted"
             >
-              <Diamond className="w-4 h-4" weight="fill" aria-hidden />
+              <Crown className="w-4 h-4" weight="fill" aria-hidden />
             </span>
           )}
         </div>

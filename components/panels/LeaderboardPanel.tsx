@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Diamond, CaretLeft, CaretRight, CircleNotch } from '@phosphor-icons/react';
+import { Crown, CaretLeft, CaretRight, CircleNotch } from '@phosphor-icons/react';
 import { formatMs, formatPlayerName } from '@/lib/format';
 import { Avatar } from '../Avatar';
+import { PremiumBenefitsList } from '../PremiumBenefitsList';
 
 interface LeaderboardEntry {
   rank: number;
@@ -131,15 +132,10 @@ export function LeaderboardPanel({
       {/* Body */}
       <div className="mt-5">
         {!premium ? (
-          <div className="py-8 text-center space-y-4">
-            <Diamond className="w-8 h-8 text-accent mx-auto" weight="fill" aria-hidden />
-            <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed max-w-xs mx-auto">
-              Upgrade to Premium to see each day's ranked leaderboard and how you stack up.
-            </p>
-            <button type="button" onClick={onUpgrade} className="btn-primary">
-              Upgrade to Premium
-            </button>
-          </div>
+          <PremiumBenefitsList
+            hook="Premium unlocks each day’s ranked leaderboard so you can see exactly how you stack up."
+            onUpgrade={onUpgrade}
+          />
         ) : loading ? (
           <div className="flex justify-center py-10">
             <CircleNotch className="w-6 h-6 text-gray-400 animate-spin" weight="bold" aria-hidden />
@@ -178,7 +174,7 @@ export function LeaderboardPanel({
                     title="Unassisted solve"
                     aria-label="unassisted"
                   >
-                    <Diamond className="w-3.5 h-3.5" weight="fill" aria-hidden />
+                    <Crown className="w-3.5 h-3.5" weight="fill" aria-hidden />
                   </span>
                 )}
                 <span className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">

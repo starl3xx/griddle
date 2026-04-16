@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { MagnifyingGlass, CircleNotch, Diamond } from '@phosphor-icons/react';
+import { MagnifyingGlass, CircleNotch, Crown } from '@phosphor-icons/react';
 
 interface UserRow {
   id: number;
@@ -158,7 +158,7 @@ export function UsersTab() {
                   <td className="px-4 py-3">
                     {u.premium ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent">
-                        <Diamond className="w-3 h-3" weight="fill" /> {u.premiumSource ?? 'premium'}
+                        <Crown className="w-3 h-3" weight="fill" /> {u.premiumSource ?? 'premium'}
                       </span>
                     ) : <span className="text-gray-300 text-[11px]">—</span>}
                   </td>

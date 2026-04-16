@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CircleNotch, Diamond } from '@phosphor-icons/react';
+import { CircleNotch } from '@phosphor-icons/react';
+import { PremiumBenefitsList } from '../PremiumBenefitsList';
 
 interface ArchiveEntry {
   dayNumber: number;
@@ -83,15 +84,10 @@ export function ArchivePanel({ premium, onUpgrade, onDayPick, onClose }: Archive
 
       <div className="mt-5">
         {!premium ? (
-          <div className="py-8 text-center space-y-4">
-            <Diamond className="w-8 h-8 text-accent mx-auto" weight="fill" aria-hidden />
-            <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed max-w-xs mx-auto">
-              Upgrade to Premium to play every past puzzle from the full archive.
-            </p>
-            <button type="button" onClick={onUpgrade} className="btn-primary">
-              Upgrade to Premium
-            </button>
-          </div>
+          <PremiumBenefitsList
+            hook="Premium unlocks every past puzzle from the full archive."
+            onUpgrade={onUpgrade}
+          />
         ) : loading ? (
           <div className="flex justify-center py-10">
             <CircleNotch className="w-6 h-6 text-gray-400 animate-spin" weight="bold" aria-hidden />

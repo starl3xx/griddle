@@ -6,7 +6,7 @@ import {
   Sun,
   Envelope,
   Wallet,
-  Diamond,
+  Crown,
   ShieldCheck,
   Eye,
   EyeSlash,
@@ -448,7 +448,7 @@ export function SettingsModal({
               Connect wallet
             </button>
             <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">
-              <Diamond className="w-4 h-4 text-accent" weight="fill" aria-hidden />
+              <Crown className="w-4 h-4 text-accent" weight="fill" aria-hidden />
               Upgrade to Premium <span className="font-medium text-gray-500">(card or crypto)</span>
             </button>
           </div>
@@ -699,7 +699,7 @@ export function SettingsModal({
           <Section title="Premium">
             {premium ? (
               <div className="flex items-center gap-3 bg-accent/10 border border-accent/20 rounded-md p-3">
-                <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
+                <Crown className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
                     Premium unlocked
@@ -714,7 +714,7 @@ export function SettingsModal({
               </div>
             ) : (
               <div className="border border-accent/30 rounded-md p-3 flex items-center gap-3">
-                <Diamond className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
+                <Crown className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock Premium</p>
                   <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
@@ -800,7 +800,7 @@ function AvatarUploadRow({
         </label>
         {premiumLocked && (
           <span className="text-[9px] font-bold uppercase tracking-wider text-accent bg-accent/10 rounded px-1.5 py-0.5 inline-flex items-center gap-0.5">
-            <Diamond className="w-2.5 h-2.5" weight="fill" aria-hidden />
+            <Crown className="w-2.5 h-2.5" weight="fill" aria-hidden />
             Premium
           </span>
         )}
@@ -962,7 +962,7 @@ function ToggleRow({
           <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{label}</p>
           {premiumLocked && (
             <span className="text-[9px] font-bold uppercase tracking-wider text-accent bg-accent/10 rounded px-1.5 py-0.5 inline-flex items-center gap-0.5">
-              <Diamond className="w-2.5 h-2.5" weight="fill" aria-hidden />
+              <Crown className="w-2.5 h-2.5" weight="fill" aria-hidden />
               Premium
             </span>
           )}
