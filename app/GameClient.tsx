@@ -335,7 +335,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     fetch('/api/settings')
       .then((r) => r.ok ? r.json() : null)
       .then((data: { unassistedModeEnabled?: boolean } | null) => {
-        if (data?.unassistedModeEnabled) setUnassistedMode(true);
+        setUnassistedMode(!!data?.unassistedModeEnabled);
       })
       .catch(() => {/* best-effort */});
   }, [sessionWallet]);
