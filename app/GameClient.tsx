@@ -300,17 +300,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
     );
 
-    let pending: string | null = null;
-    try { pending = localStorage.getItem('griddle:pending-display-name'); } catch {/* ignore */}
+    let pendingUsername: string | null = null;
+    try { pendingUsername = localStorage.getItem('griddle:pending-username'); } catch {/* ignore */}
 
     (async () => {
-      if (pending) {
-        try { localStorage.removeItem('griddle:pending-display-name'); } catch {/* ignore */}
+      if (pendingUsername) {
+        try { localStorage.removeItem('griddle:pending-username'); } catch {/* ignore */}
         try {
           await fetch('/api/profile', {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ displayName: pending }),
+            body: JSON.stringify({ handle: pendingUsername }),
           });
         } catch {/* best-effort */}
       }
@@ -761,7 +761,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         premium={premium}
         hasSessionProfile={hasSessionProfile}
         pfpUrl={profile?.avatarUrl ?? pfpUrl}
-        displayName={profile?.handle ?? displayName}
+        username={profile?.handle ?? username}
         onCreateProfile={() => { setBrowseTab(null); setShowCreateProfile(true); }}
         onUpgrade={() => {
           setBrowseTab(null);

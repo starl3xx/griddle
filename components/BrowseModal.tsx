@@ -19,7 +19,7 @@ interface BrowseModalProps {
   premium: boolean;
   hasSessionProfile: boolean;
   pfpUrl: string | null;
-  displayName: string | null;
+  username: string | null;
   onCreateProfile: () => void;
   onUpgrade: () => void;
 
@@ -50,7 +50,7 @@ export function BrowseModal({
   premium,
   hasSessionProfile,
   pfpUrl,
-  displayName,
+  username,
   onCreateProfile,
   onUpgrade,
   todayDayNumber,
@@ -96,7 +96,7 @@ export function BrowseModal({
               premium={premium}
               hasSessionProfile={hasSessionProfile}
               pfpUrl={pfpUrl}
-              displayName={displayName}
+              username={username}
               onCreateProfile={onCreateProfile}
               onUpgrade={onUpgrade}
               onClose={onClose}

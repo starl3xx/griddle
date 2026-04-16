@@ -30,17 +30,17 @@ export function CreateProfileModal({
 }: CreateProfileModalProps) {
   const [step, setStep] = useState<Step>('form');
   const [email, setEmail] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     setError(null);
     const trimmedEmail = email.trim();
-    const trimmedName = displayName.trim();
+    const trimmedName = username.trim();
 
     if (!trimmedEmail && !trimmedName) {
-      setError('Enter an email or a display name to get started.');
+      setError('Enter an email or a username to get started.');
       return;
     }
 
@@ -66,9 +66,9 @@ export function CreateProfileModal({
         // first attempt.
         try {
           if (trimmedName) {
-            localStorage.setItem('griddle:pending-display-name', trimmedName);
+            localStorage.setItem('griddle:pending-username', trimmedName);
           } else {
-            localStorage.removeItem('griddle:pending-display-name');
+            localStorage.removeItem('griddle:pending-username');
           }
         } catch { /* private mode / quota — silently drop */ }
         const res = await fetch('/api/auth/request', {
@@ -86,7 +86,7 @@ export function CreateProfileModal({
         const res = await fetch('/api/profile/create', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ displayName: trimmedName }),
+          body: JSON.stringify({ username: trimmedName }),
         });
         if (!res.ok) {
           const d = (await res.json()) as { error?: string };
@@ -156,14 +156,14 @@ export function CreateProfileModal({
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  Display name <span className="text-gray-400 font-medium normal-case tracking-normal">(optional)</span>
+                  Username <span className="text-gray-400 font-medium normal-case tracking-normal">(optional)</span>
                 </label>
                 <input
                   type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="alice"
-                  maxLength={50}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                  placeholder="starl3xx"
+                  maxLength={32}
                   className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
                 />
               </div>

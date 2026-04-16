@@ -21,7 +21,7 @@ interface StatsPanelProps {
   hasSessionProfile: boolean;
   pfpUrl: string | null;
   /** User's display name from the bound profile (or Farcaster fallback). */
-  displayName: string | null;
+  username: string | null;
   /** Fires when an anonymous user clicks "Create profile". */
   onCreateProfile: () => void;
   /** Opens the premium gate modal. */
@@ -55,7 +55,7 @@ export function StatsPanel({
   premium,
   hasSessionProfile,
   pfpUrl,
-  displayName,
+  username,
   onCreateProfile,
   onUpgrade,
   onClose,
@@ -89,7 +89,7 @@ export function StatsPanel({
   // because wallet is still null and premium is still false.
   const hasAccount = !!wallet || premium || hasSessionProfile;
   const label =
-    displayName ?? (wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Anonymous');
+    username ?? (wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Anonymous');
 
   return (
     <>
