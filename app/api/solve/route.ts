@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { getSessionWallet } from '@/lib/wallet-session';
+import { getSessionProfile } from '@/lib/session-profile';
 import { awardWordmarks } from '@/lib/wordmarks/award';
 
 /**
@@ -169,16 +170,17 @@ export async function POST(
 
   const sessionId = await getSessionId();
 
-  // Look up the puzzle, the session’s load time, and the session’s
-  // bound wallet (if any) in parallel. The wallet binding is set by
-  // POST /api/wallet/link when the user connects, so any solve made
-  // AFTER connecting gets attributed automatically without the client
-  // having to pass the wallet (and without the server trusting client
-  // claims about wallet ownership).
-  const [puzzle, loadedAt, wallet] = await Promise.all([
+  // Look up the puzzle, the session's load time, and both session
+  // bindings in parallel. `wallet` attributes the solve to the unlock
+  // ledger / leaderboard the way it always has; `profileId` is the
+  // canonical identity for stats (new in this PR) so handle-only and
+  // email-auth users — who may never bind a wallet — still see their
+  // own solves. A solve can carry both, one, or neither.
+  const [puzzle, loadedAt, wallet, profileId] = await Promise.all([
     getPuzzleWordByDayNumber(body.dayNumber),
     getPuzzleLoadedAt(sessionId, body.dayNumber),
     getSessionWallet(sessionId),
+    getSessionProfile(sessionId),
   ]);
 
   if (!puzzle) {
@@ -210,6 +212,7 @@ export async function POST(
     puzzleId: puzzle.id,
     sessionId,
     wallet,
+    profileId,
     solved,
     bestWord: solved ? claimed : null,
     clientSolveMs: body.clientSolveMs,

@@ -343,11 +343,11 @@ export async function updateSolveFlag(
 }
 
 /**
- * Per-wallet aggregate stats for the Stats modal. All derived from
- * `solves` + `streaks`, filtered to eligible rows (solved=true, no
- * ineligible/suspicious flag). A wallet with zero qualifying rows
+ * Aggregate stats for the Stats modal. All derived from `solves` +
+ * `streaks`, filtered to eligible rows (solved=true, no
+ * ineligible/suspicious flag). A player with zero qualifying rows
  * returns zero-valued fields rather than null so the UI can render
- * the modal without branching on undefined fields.
+ * without branching on undefined.
  */
 export interface WalletStats {
   totalSolves: number;
@@ -358,8 +358,55 @@ export interface WalletStats {
   longestStreak: number;
 }
 
-export async function getWalletStats(wallet: string): Promise<WalletStats> {
-  const normalized = wallet.toLowerCase();
+/**
+ * Canonical identity used by stats queries. A single player can be
+ * identified by any combination of these — the match logic is OR, so
+ * a solve row attributed by any of them contributes to the caller's
+ * stats:
+ *
+ *   - `profileId` — canonical identity going forward. Written at
+ *     insert time by `/api/solve` from the session→profile KV binding.
+ *   - `wallet`    — preserved for crypto/fiat-wallet users whose
+ *     solves have always carried a wallet. Also lights up the streaks
+ *     table (which is wallet-keyed; handle-only users get zeroes).
+ *   - `sessionId` — fallback for rows that have neither profile_id
+ *     nor wallet. Catches a handle-only user's pre-backfill solves
+ *     (and pre-migration rows in general) so their stats aren't
+ *     blank while waiting for a fresh solve to write profile_id.
+ *
+ * Pass whichever subset the caller knows; missing fields are ignored.
+ */
+export interface StatsIdentity {
+  profileId?: number | null;
+  wallet?: string | null;
+  sessionId?: string | null;
+}
+
+/**
+ * SQL fragment matching a solve row to the caller's identity. See
+ * StatsIdentity docs for the resolution order; this is the shared
+ * predicate used by getWalletStats, getPremiumStats, and any future
+ * profile-keyed query that needs the same matching semantics.
+ */
+function solveBelongsTo(identity: StatsIdentity) {
+  const clauses = [] as ReturnType<typeof sql>[];
+  if (identity.profileId != null) {
+    clauses.push(sql`${solves.profileId} = ${identity.profileId}`);
+  }
+  if (identity.wallet) {
+    clauses.push(sql`${solves.wallet} = ${identity.wallet.toLowerCase()}`);
+  }
+  if (identity.sessionId) {
+    clauses.push(
+      sql`(${solves.sessionId} = ${identity.sessionId} AND ${solves.profileId} IS NULL AND ${solves.wallet} IS NULL)`,
+    );
+  }
+  if (clauses.length === 0) return sql`false`;
+  return sql`(${sql.join(clauses, sql` OR `)})`;
+}
+
+export async function getWalletStats(identity: StatsIdentity): Promise<WalletStats> {
+  const normalizedWallet = identity.wallet?.toLowerCase() ?? null;
 
   const [agg] = await db
     .select({
@@ -371,7 +418,7 @@ export async function getWalletStats(wallet: string): Promise<WalletStats> {
     .from(solves)
     .where(
       and(
-        eq(solves.wallet, normalized),
+        solveBelongsTo(identity),
         eq(solves.solved, true),
         // Match leaderboard policy: only 'ineligible' is excluded.
         sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
@@ -379,22 +426,31 @@ export async function getWalletStats(wallet: string): Promise<WalletStats> {
       ),
     );
 
-  const [streakRow] = await db
-    .select({
-      currentStreak: streaks.currentStreak,
-      longestStreak: streaks.longestStreak,
-    })
-    .from(streaks)
-    .where(eq(streaks.wallet, normalized))
-    .limit(1);
+  // Streaks are still wallet-keyed — handle-only users will land on
+  // zero until the follow-up PR that migrates streaks to profile_id.
+  // Not a regression; they were already zero under the old code.
+  let currentStreak = 0;
+  let longestStreak = 0;
+  if (normalizedWallet) {
+    const [streakRow] = await db
+      .select({
+        currentStreak: streaks.currentStreak,
+        longestStreak: streaks.longestStreak,
+      })
+      .from(streaks)
+      .where(eq(streaks.wallet, normalizedWallet))
+      .limit(1);
+    currentStreak = streakRow?.currentStreak ?? 0;
+    longestStreak = streakRow?.longestStreak ?? 0;
+  }
 
   return {
     totalSolves: agg?.totalSolves ?? 0,
     unassistedSolves: agg?.unassistedSolves ?? 0,
     fastestMs: agg?.fastestMs ?? null,
     averageMs: agg?.averageMs ?? null,
-    currentStreak: streakRow?.currentStreak ?? 0,
-    longestStreak: streakRow?.longestStreak ?? 0,
+    currentStreak,
+    longestStreak,
   };
 }
 
@@ -2120,12 +2176,26 @@ export interface PremiumStats {
  * would let the stats dashboard diverge from the leaderboard, which
  * is exactly the kind of drift users notice and distrust.
  */
-export async function getPremiumStats(wallet: string): Promise<PremiumStats> {
-  const normalized = wallet.toLowerCase();
+export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumStats> {
   const today = getCurrentDayNumber();
 
+  // Synthetic "player key" used to group today's/all-time solves when
+  // computing percentile + placements. A wallet solve is keyed on its
+  // lowercase address; a profile-only (handle-only / email-auth)
+  // solve is keyed on `p:<profile_id>`. This lets the same SQL grouping
+  // identify both wallet and handle-only players uniquely, without
+  // forcing handle-only users off the ranked queries entirely.
+  //
+  // Anonymous session-only rows (no wallet, no profile_id) are excluded
+  // from ranked queries — they belong to no identifiable player.
+  const callerKey =
+    identity.wallet?.toLowerCase() ??
+    (identity.profileId != null ? `p:${identity.profileId}` : null);
+
+  const identityMatches = solveBelongsTo(identity);
+
   const [trendRows, weekRows, percentileRows, placementRows] = await Promise.all([
-    // 1. solveTrend — last 30 puzzles the wallet has solved, fastest
+    // 1. solveTrend — last 30 puzzles this player has solved, fastest
     //    per puzzle, oldest first. DISTINCT ON + matching ORDER BY
     //    lets PG use an index walk to pick the fastest per puzzle.
     db.execute<{ day_number: number; server_solve_ms: number }>(sql`
@@ -2134,7 +2204,7 @@ export async function getPremiumStats(wallet: string): Promise<PremiumStats> {
           p.day_number, s.server_solve_ms
         FROM solves s
         JOIN puzzles p ON p.id = s.puzzle_id
-        WHERE s.wallet = ${normalized}
+        WHERE ${identityMatches}
           AND s.solved = true
           AND (s.flag IS NULL OR s.flag = 'suspicious')
           AND s.server_solve_ms IS NOT NULL
@@ -2165,71 +2235,76 @@ export async function getPremiumStats(wallet: string): Promise<PremiumStats> {
       FROM puzzles p
       LEFT JOIN solves s
         ON s.puzzle_id = p.id
-        AND s.wallet = ${normalized}
+        AND ${identityMatches}
       WHERE p.day_number > ${today - 7} AND p.day_number <= ${today}
       GROUP BY p.day_number, p.date
       ORDER BY p.day_number ASC
     `),
 
-    // 3. percentileRank — caller's best vs total field. Guarded with
-    //    EXISTS so a non-solver gets rank = NULL (not rank = 1):
-    //    without the guard, the inner `best_ms < NULL` comparison is
-    //    NULL for every row, count(*) returns 0, and rank becomes
-    //    `0 + 1 = 1` — a bogus "best on the board" for users who
-    //    haven't even solved today. Returning total alongside lets
-    //    application code distinguish "alone on the board" from
-    //    "hasn't solved today".
-    db.execute<{ rank: number | null; total: number }>(sql`
-      WITH today_eligible AS (
-        SELECT s.wallet, MIN(s.server_solve_ms) AS best_ms
-        FROM solves s
-        JOIN puzzles p ON p.id = s.puzzle_id
-        WHERE p.day_number = ${today}
-          AND s.solved = true
-          AND (s.flag IS NULL OR s.flag = 'suspicious')
-          AND s.wallet IS NOT NULL
-          AND s.server_solve_ms IS NOT NULL
-          AND s.created_at::date = p.date::date
-        GROUP BY s.wallet
-      )
-      SELECT
-        CASE
-          WHEN EXISTS (SELECT 1 FROM today_eligible WHERE wallet = ${normalized}) THEN
-            (SELECT count(*) + 1 FROM today_eligible
-              WHERE best_ms < (SELECT best_ms FROM today_eligible WHERE wallet = ${normalized}))::int
-          ELSE NULL
-        END AS rank,
-        (SELECT count(*) FROM today_eligible)::int AS total
-    `),
+    // 3. percentileRank — caller's best vs total field, grouped by
+    //    the synthetic player_key so wallet + profile-only players are
+    //    ranked side by side. EXISTS guard avoids the `best_ms < NULL`
+    //    false-rank-1 trap for non-solvers (see PR #54's Bugbot fix).
+    callerKey == null
+      ? Promise.resolve([{ rank: null, total: 0 }])
+      : db.execute<{ rank: number | null; total: number }>(sql`
+        WITH today_eligible AS (
+          SELECT
+            COALESCE(s.wallet, 'p:' || s.profile_id::text) AS player_key,
+            MIN(s.server_solve_ms) AS best_ms
+          FROM solves s
+          JOIN puzzles p ON p.id = s.puzzle_id
+          WHERE p.day_number = ${today}
+            AND s.solved = true
+            AND (s.flag IS NULL OR s.flag = 'suspicious')
+            AND (s.wallet IS NOT NULL OR s.profile_id IS NOT NULL)
+            AND s.server_solve_ms IS NOT NULL
+            AND s.created_at::date = p.date::date
+          GROUP BY player_key
+        )
+        SELECT
+          CASE
+            WHEN EXISTS (SELECT 1 FROM today_eligible WHERE player_key = ${callerKey}) THEN
+              (SELECT count(*) + 1 FROM today_eligible
+                WHERE best_ms < (SELECT best_ms FROM today_eligible WHERE player_key = ${callerKey}))::int
+            ELSE NULL
+          END AS rank,
+          (SELECT count(*) FROM today_eligible)::int AS total
+      `),
 
     // 4. placements — window-function RANK over all eligible solves
-    //    gives every wallet a rank per puzzle in a single scan.
+    //    gives every player_key a rank per puzzle in a single scan.
     //    FILTER counts collapse to the four numbers we need.
-    db.execute<{ first: number; second: number; third: number; top_ten: number }>(sql`
-      WITH eligible AS (
-        SELECT s.puzzle_id, s.wallet, MIN(s.server_solve_ms) AS best_ms
-        FROM solves s
-        JOIN puzzles p ON p.id = s.puzzle_id
-        WHERE s.solved = true
-          AND (s.flag IS NULL OR s.flag = 'suspicious')
-          AND s.wallet IS NOT NULL
-          AND s.server_solve_ms IS NOT NULL
-          AND s.created_at::date = p.date::date
-        GROUP BY s.puzzle_id, s.wallet
-      ),
-      ranked AS (
-        SELECT puzzle_id, wallet,
-               RANK() OVER (PARTITION BY puzzle_id ORDER BY best_ms ASC) AS rnk
-        FROM eligible
-      )
-      SELECT
-        COUNT(*) FILTER (WHERE rnk = 1)::int  AS first,
-        COUNT(*) FILTER (WHERE rnk = 2)::int  AS second,
-        COUNT(*) FILTER (WHERE rnk = 3)::int  AS third,
-        COUNT(*) FILTER (WHERE rnk <= 10)::int AS top_ten
-      FROM ranked
-      WHERE wallet = ${normalized}
-    `),
+    callerKey == null
+      ? Promise.resolve([{ first: 0, second: 0, third: 0, top_ten: 0 }])
+      : db.execute<{ first: number; second: number; third: number; top_ten: number }>(sql`
+        WITH eligible AS (
+          SELECT
+            s.puzzle_id,
+            COALESCE(s.wallet, 'p:' || s.profile_id::text) AS player_key,
+            MIN(s.server_solve_ms) AS best_ms
+          FROM solves s
+          JOIN puzzles p ON p.id = s.puzzle_id
+          WHERE s.solved = true
+            AND (s.flag IS NULL OR s.flag = 'suspicious')
+            AND (s.wallet IS NOT NULL OR s.profile_id IS NOT NULL)
+            AND s.server_solve_ms IS NOT NULL
+            AND s.created_at::date = p.date::date
+          GROUP BY s.puzzle_id, player_key
+        ),
+        ranked AS (
+          SELECT puzzle_id, player_key,
+                 RANK() OVER (PARTITION BY puzzle_id ORDER BY best_ms ASC) AS rnk
+          FROM eligible
+        )
+        SELECT
+          COUNT(*) FILTER (WHERE rnk = 1)::int  AS first,
+          COUNT(*) FILTER (WHERE rnk = 2)::int  AS second,
+          COUNT(*) FILTER (WHERE rnk = 3)::int  AS third,
+          COUNT(*) FILTER (WHERE rnk <= 10)::int AS top_ten
+        FROM ranked
+        WHERE player_key = ${callerKey}
+      `),
   ]);
 
   const trend = (Array.isArray(trendRows) ? trendRows : trendRows.rows) ?? [];
