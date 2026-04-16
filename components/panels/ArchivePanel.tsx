@@ -38,6 +38,7 @@ export function ArchivePanel({ premium, onUpgrade, onDayPick, onClose }: Archive
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!premium) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -55,7 +56,7 @@ export function ArchivePanel({ premium, onUpgrade, onDayPick, onClose }: Archive
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [premium]);
 
   return (
     <>

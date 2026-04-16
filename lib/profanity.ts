@@ -48,7 +48,7 @@ const BANNED_SUBSTRINGS: readonly string[] = [
   // Common bad words — keep short, high-signal
   'fuck', 'fucker', 'motherfucker', 'shit', 'bullshit', 'asshole',
   'bitch', 'bastard', 'cunt', 'pussy', 'dick', 'cock', 'penis', 'vagina',
-  'boob', 'tits', 'whore', 'slut', 'hoe',
+  'boob', 'tits', 'whore', 'slut',
   // Nazi / hate
   'hitler', 'nazi', 'kkk',
   // Self-harm / suicide (for safety)

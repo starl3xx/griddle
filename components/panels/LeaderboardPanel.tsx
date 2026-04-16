@@ -57,6 +57,7 @@ export function LeaderboardPanel({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!premium) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -74,7 +75,7 @@ export function LeaderboardPanel({
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [dayNumber]);
+  }, [dayNumber, premium]);
 
   const canGoPrev = dayNumber > 1;
   const canGoNext = dayNumber < todayDayNumber;
