@@ -154,14 +154,19 @@ export function useGriddle({
     // on any Play Again session (the next attempt would start with
     // resetCountRef=1). Skip the increment when `solved` is true.
     //
-    // Reset the counters BEFORE the state mutations so the new
-    // attempt always starts with zeros, whether we arrived here
-    // from a Play Again (solved=true → skip increment, counters
-    // already zeroed by triggerSolve anyway) or a mid-attempt
-    // Reset press (solved=false → count this press).
-    if (!solved) {
+    // Additionally, only count a Reset that actually clears letters —
+    // pressing Reset on an empty board (accidentally, or right after
+    // Play Again) shouldn't disqualify Blameless. Same flag pattern
+    // as backspace: the updater receives the latest state, so rapid
+    // or stale-closure calls are safe.
+    let hadContent = false;
+    setPath((p) => {
+      if (p.length > 0) hadContent = true;
+      return [];
+    });
+    if (!solved && hadContent) {
       resetCountRef.current += 1;
-    } else {
+    } else if (solved) {
       // Play Again path — make sure counters are zero for the next
       // attempt. triggerSolve also zeros them on the success branch,
       // but doing it here too means a reset-after-solve is idempotent
@@ -169,7 +174,6 @@ export function useGriddle({
       backspaceCountRef.current = 0;
       resetCountRef.current = 0;
     }
-    setPath([]);
     inFlightAttemptRef.current = null;
     setSolved(false);
     setPendingSolve(false);
