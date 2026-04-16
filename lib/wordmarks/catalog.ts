@@ -108,7 +108,17 @@ export const WORDMARK_ZINDEX: Record<WordmarkId, number> = Object.fromEntries(
  * this PR since they'd ship as dead code — no caller yet.
  */
 
-/** Type guard — is this arbitrary string a known wordmark id? */
+/**
+ * Type guard — is this arbitrary string a known wordmark id?
+ *
+ * Uses `Object.hasOwn` rather than `in` because `in` traverses the
+ * prototype chain: on a plain object created via `Object.fromEntries`,
+ * `in` returns true for 'toString', 'constructor', 'valueOf', etc.
+ * That would cause `SolveModal` (which filters earned ids through
+ * this guard and then indexes into `WORDMARK_BY_ID`) to pull out
+ * inherited prototype methods instead of catalog entries and render
+ * undefined badges.
+ */
 export function isWordmarkId(s: string): s is WordmarkId {
-  return s in WORDMARK_ZINDEX;
+  return Object.hasOwn(WORDMARK_ZINDEX, s);
 }
