@@ -85,29 +85,56 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
   }
 
-  // Guard: if the session already has a profile bound, refuse to
-  // create a second one. Mirrors PATCH: check BOTH the session-profile
-  // KV and the session-wallet KV + wallet-linked profile row.
+  // Upsert: if the session (or wallet) already owns a profile, update
+  // it instead of returning 409. This covers the common case where the
+  // client's `profile` state is stale (e.g. user opened Settings before
+  // the mount refetch resolved) and the "Complete profile" form sends a
+  // POST even though the profile already exists server-side.
   const sessionId = await getSessionId();
   const existingFromProfile = await getSessionProfile(sessionId);
-  if (existingFromProfile !== null) {
-    return NextResponse.json(
-      { error: 'profile already exists for this session; use PATCH /api/profile to update' },
-      { status: 409 },
-    );
-  }
   const sessionWallet = await getSessionWallet(sessionId);
-  if (sessionWallet) {
+
+  let existingId: number | null = existingFromProfile;
+  if (existingId === null && sessionWallet) {
     const walletRows = await db
       .select({ id: profiles.id })
       .from(profiles)
       .where(eq(profiles.wallet, sessionWallet))
       .limit(1);
-    if (walletRows.length > 0) {
-      return NextResponse.json(
-        { error: 'profile already exists for this wallet; use PATCH /api/profile to update' },
-        { status: 409 },
-      );
+    if (walletRows.length > 0) existingId = walletRows[0].id;
+  }
+
+  if (existingId !== null) {
+    // Profile exists — update handle + avatar instead of rejecting.
+    // Only update columns the user actually supplied so we don't
+    // accidentally blank fields the Farcaster sync set earlier.
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    patch.handle = handle;
+    if (avatarUrl !== null) {
+      patch.avatarUrl = avatarUrl;
+      patch.avatarSource = 'custom';
+    }
+    try {
+      const rows = await db
+        .update(profiles)
+        .set(patch)
+        .where(eq(profiles.id, existingId))
+        .returning({ id: profiles.id, handle: profiles.handle });
+      // Ensure session-profile binding exists (it may be missing if the
+      // profile was found via wallet fallback).
+      if (existingFromProfile === null) {
+        await setSessionProfileOrThrow(sessionId, existingId);
+      }
+      return NextResponse.json({
+        profileId: rows[0]?.id ?? existingId,
+        handle: rows[0]?.handle ?? handle,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('profiles_handle_lower_idx') || msg.includes('23505')) {
+        return NextResponse.json({ error: 'That username is taken.' }, { status: 409 });
+      }
+      throw err;
     }
   }
 

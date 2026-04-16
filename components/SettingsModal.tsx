@@ -260,7 +260,22 @@ export function SettingsModal({
             ...(trimmedAvatar ? { avatarUrl: trimmedAvatar } : {}),
           }),
         });
-        if (!res.ok) {
+        if (res.status === 409) {
+          // Profile already exists server-side but client state was
+          // stale. Fall back to PATCH so the user isn't stuck.
+          const patchRes = await fetch('/api/profile', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              handle: trimmedUsername,
+              ...(trimmedAvatar ? { avatarUrl: trimmedAvatar } : {}),
+            }),
+          });
+          if (!patchRes.ok) {
+            const d = (await patchRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(d.error ?? `Save failed (${patchRes.status})`);
+          }
+        } else if (!res.ok) {
           const d = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(d.error ?? `Save failed (${res.status})`);
         }
@@ -279,7 +294,10 @@ export function SettingsModal({
     const currentHandle = profile.handle ?? '';
     const currentAvatar = profile.avatarUrl ?? '';
 
-    if (trimmedUsername !== currentHandle) {
+    if (currentHandle && trimmedUsername !== currentHandle) {
+      // Only gate on Premium for RENAMES — initial handle set (when
+      // currentHandle is null/empty) is free, matching the server-side
+      // check in PATCH /api/profile.
       if (!premium) {
         setProfileError('Changing your username is a Premium feature.');
         return;
