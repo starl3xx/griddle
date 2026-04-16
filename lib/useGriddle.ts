@@ -120,6 +120,12 @@ export function useGriddle({
    */
   const inFlightAttemptRef = useRef<string | null>(null);
 
+  // Generation counter — incremented by fullReset (puzzle switch).
+  // triggerSolve captures the current value before the async call and
+  // bails in .then() if the generation changed, preventing a stale
+  // solve verdict from mutating the state of a different puzzle.
+  const generationRef = useRef(0);
+
   const letters = useMemo(() => path.map((i) => grid[i]), [path, grid]);
 
   const cellStates = useMemo<CellState[]>(() => {
@@ -197,6 +203,7 @@ export function useGriddle({
   // foundWords and wordmark counters. Unlike `reset` (which preserves
   // foundWords across mid-puzzle retries), this is a clean slate.
   const fullReset = useCallback(() => {
+    generationRef.current += 1;
     setPath([]);
     inFlightAttemptRef.current = null;
     setSolved(false);
@@ -280,9 +287,12 @@ export function useGriddle({
         foundWords: [...foundWordsRef.current],
       };
       setPendingSolve(true);
+      const gen = generationRef.current;
 
       onSolveAttempt({ ...payload, unassisted })
         .then((verdict) => {
+          // Bail if the puzzle changed while the solve was in flight.
+          if (generationRef.current !== gen) return;
           // Treat "solved without word" as a server contract violation
           // (the API guarantees `word` is present when solved=true).
           // If we ever receive solved=true with no word, fall through
