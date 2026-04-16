@@ -157,14 +157,12 @@ export async function POST(
   const resetCount: number | null = body.resetCount ?? null;
   const foundWords = [...new Set(body.foundWords ?? [])];
 
-  // Clamp dayNumber to today’s puzzle. M4b only allows submitting solves
-  // for the current day — past puzzles bypass anti-bot timing checks
-  // (no puzzle_loads → null serverSolveMs → no flag). M5 will relax
-  // this when the premium archive feature ships, gated by wallet auth.
+  // Allow solves for today’s puzzle and past (archive) puzzles, but
+  // reject future days — same guard as /api/puzzle/[day].
   const todayDayNumber = getCurrentDayNumber();
-  if (body.dayNumber !== todayDayNumber) {
+  if (body.dayNumber > todayDayNumber) {
     return NextResponse.json(
-      { error: 'solve only accepted for today’s puzzle' },
+      { error: 'solve not accepted for future puzzles' },
       { status: 403 },
     );
   }
