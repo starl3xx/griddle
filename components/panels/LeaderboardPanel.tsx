@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Diamond, CaretLeft, CaretRight, CircleNotch } from '@phosphor-icons/react';
-import { formatMs } from '@/lib/format';
+import { formatMs, formatPlayerName } from '@/lib/format';
 import { Avatar } from '../Avatar';
 
 interface LeaderboardEntry {
@@ -170,7 +170,7 @@ export function LeaderboardPanel({
                       : 'font-mono text-gray-700 dark:text-gray-300'
                   }`}
                 >
-                  {displayName(e)}
+                  {formatPlayerName(e)}
                 </span>
                 {e.unassisted && (
                   <span
@@ -193,13 +193,3 @@ export function LeaderboardPanel({
   );
 }
 
-/**
- * Handle beats truncated wallet beats "Anonymous". The server filters
- * anonymous rows out of the board, so the "Anonymous" branch is a
- * defensive catch that should never render in practice.
- */
-function displayName(e: LeaderboardEntry): string {
-  if (e.handle) return e.handle;
-  if (e.wallet) return `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`;
-  return 'Anonymous';
-}

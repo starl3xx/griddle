@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Diamond } from '@phosphor-icons/react/dist/ssr';
-import { getDailyLeaderboard, type LeaderboardEntry } from '@/lib/db/queries';
+import { getDailyLeaderboard } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
-import { formatMs } from '@/lib/format';
+import { formatMs, formatPlayerName } from '@/lib/format';
 import { Avatar } from '@/components/Avatar';
 
 /**
@@ -61,7 +61,7 @@ export default async function LeaderboardPage({
                     e.handle ? 'font-semibold text-gray-900' : 'font-mono text-gray-700'
                   }`}
                 >
-                  {displayName(e)}
+                  {formatPlayerName(e)}
                 </span>
                 {e.unassisted && (
                   <span
@@ -88,13 +88,3 @@ export default async function LeaderboardPage({
   );
 }
 
-/**
- * Handle beats truncated wallet beats "Anonymous". The server filters
- * anonymous rows out of the board, so the "Anonymous" branch is a
- * defensive catch that should never render in practice.
- */
-function displayName(e: LeaderboardEntry): string {
-  if (e.handle) return e.handle;
-  if (e.wallet) return `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`;
-  return 'Anonymous';
-}

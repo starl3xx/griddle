@@ -40,3 +40,21 @@ export function secondsUntilUtcMidnight(now: Date = new Date()): number {
   next.setUTCHours(24, 0, 0, 0);
   return Math.max(0, Math.floor((next.getTime() - now.getTime()) / 1000));
 }
+
+/**
+ * Display name for a player on the leaderboard / stats surfaces.
+ * Preference order: handle → truncated wallet → "Anonymous". The
+ * last branch is defensive; server filters exclude rows with neither
+ * handle nor wallet from public views.
+ */
+export function formatPlayerName({
+  handle,
+  wallet,
+}: {
+  handle: string | null;
+  wallet: string | null;
+}): string {
+  if (handle) return handle;
+  if (wallet) return `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
+  return 'Anonymous';
+}
