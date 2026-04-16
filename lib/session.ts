@@ -1,5 +1,11 @@
 import { headers } from 'next/headers';
 
+// Re-exported from `lib/session-id` so existing callers keep their
+// import path. The constants live in a standalone module because
+// middleware.ts also needs them and can't transitively pull in
+// `next/headers` via this file.
+export { SESSION_ID_REGEX, isValidSessionId } from '@/lib/session-id';
+
 /**
  * Session id reader.
  *

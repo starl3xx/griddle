@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { isValidAddress } from '@/lib/address';
+import { getSessionId } from '@/lib/session';
+import { checkRateLimit, rateLimitResponseInit } from '@/lib/rate-limit';
 
 /**
  * GET /api/premium/[wallet]
@@ -41,6 +43,21 @@ export async function GET(
 
   if (!isValidAddress(wallet)) {
     return NextResponse.json({ error: 'invalid wallet address' }, { status: 400 });
+  }
+
+  // Per-session rate limit. This endpoint is public by design — the
+  // client hits it the moment a wallet connects, before any session↔
+  // wallet binding exists, so we can't gate on ownership. A limiter
+  // keyed on the session id blocks a single attacker from enumerating
+  // the premium_users table while leaving the legitimate self-check
+  // path (one call per connect) unaffected.
+  const sessionId = await getSessionId();
+  const rl = await checkRateLimit(`premium-lookup:${sessionId}`, 30, 60);
+  if (!rl.allowed) {
+    return new NextResponse(
+      JSON.stringify({ error: 'too many premium lookups' }),
+      rateLimitResponseInit(rl),
+    );
   }
 
   const normalized = wallet.toLowerCase();

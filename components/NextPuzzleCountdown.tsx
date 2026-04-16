@@ -9,8 +9,38 @@ export function NextPuzzleCountdown() {
   useEffect(() => {
     const update = () => setSeconds(secondsUntilUtcMidnight());
     update();
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
+
+    let id: ReturnType<typeof setInterval> | null = null;
+
+    // Pause the 1s tick when the tab is hidden — there's no observer
+    // watching the footer in a background tab, and browsers throttle
+    // setInterval in hidden tabs anyway. Resume on visibility change,
+    // refreshing immediately so the first visible frame isn't stale.
+    const start = () => {
+      if (id != null) return;
+      id = setInterval(update, 1000);
+    };
+    const stop = () => {
+      if (id == null) return;
+      clearInterval(id);
+      id = null;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        update();
+        start();
+      } else {
+        stop();
+      }
+    };
+
+    if (document.visibilityState === 'visible') start();
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   // Avoid SSR/client hydration mismatch — render nothing until the client

@@ -25,11 +25,24 @@ export interface SolvePayload {
   foundWords: string[];
 }
 
+// Mirror the server cap (MAX_KEYSTROKE_INTERVALS in /api/solve) with
+// enough headroom that the client truncates long-idle sessions before
+// they bloat memory. A real attempt has ~8 intervals; 500 covers
+// extreme backspace/retype cycles. Over the limit we drop the oldest
+// entries so the most recent (and most relevant for anti-bot stats)
+// survive.
+const MAX_CLIENT_INTERVALS = 500;
+
 export class SolveTelemetry {
   private puzzleLoadedAt: number;
   private firstKeystrokeAt: number | null = null;
   private lastKeystrokeAt: number | null = null;
   private intervals: number[] = [];
+  // Separate counter so the reported keystrokeCount stays accurate even
+  // after the intervals array is trimmed at MAX_CLIENT_INTERVALS.
+  // Previously we derived count from `intervals.length + 1`, which
+  // silently capped the reported count at 501 once trimming kicked in.
+  private keystrokeCount = 0;
 
   constructor() {
     this.puzzleLoadedAt = performance.now();
@@ -40,14 +53,19 @@ export class SolveTelemetry {
     this.firstKeystrokeAt = null;
     this.lastKeystrokeAt = null;
     this.intervals = [];
+    this.keystrokeCount = 0;
   }
 
   recordKeystroke(): void {
     const now = performance.now();
+    this.keystrokeCount++;
     if (this.firstKeystrokeAt === null) {
       this.firstKeystrokeAt = now;
     } else if (this.lastKeystrokeAt !== null) {
       this.intervals.push(Math.round(now - this.lastKeystrokeAt));
+      if (this.intervals.length > MAX_CLIENT_INTERVALS) {
+        this.intervals.splice(0, this.intervals.length - MAX_CLIENT_INTERVALS);
+      }
     }
     this.lastKeystrokeAt = now;
   }
@@ -58,7 +76,7 @@ export class SolveTelemetry {
       clientSolveMs: Math.round(performance.now() - this.puzzleLoadedAt),
       keystrokeIntervalsMs: [...this.intervals],
       firstKeystrokeAt: this.firstKeystrokeAt,
-      keystrokeCount: this.firstKeystrokeAt === null ? 0 : this.intervals.length + 1,
+      keystrokeCount: this.keystrokeCount,
       // Wordmark counters are tracked in useGriddle (not this class)
       // because they correspond to player actions, not keystroke
       // telemetry. We return zeros here as defaults; useGriddle

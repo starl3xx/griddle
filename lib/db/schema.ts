@@ -68,6 +68,16 @@ export const solves = pgTable(
     // boundary without one. Low-cardinality-safe since timestamps are
     // ~unique per row.
     createdAtIdx: index('solves_created_at_idx').on(t.createdAt),
+    // Backs getDailyLeaderboard: `WHERE puzzle_id = ? AND solved AND
+    // wallet IS NOT NULL ORDER BY server_solve_ms ASC`. Without this,
+    // the query sequentially scans the solves table and sorts the
+    // puzzle's solves in memory on every leaderboard fetch. The
+    // composite ordering is puzzle-first so the ORDER BY can walk the
+    // index in insertion order with no separate sort step.
+    puzzleSolveMsIdx: index('solves_puzzle_solve_ms_idx').on(
+      t.puzzleId,
+      t.serverSolveMs,
+    ),
   }),
 );
 

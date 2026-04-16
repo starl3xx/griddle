@@ -3,6 +3,7 @@ import { getSessionId } from '@/lib/session';
 import { claimAndClearSessionPremium, setSessionPremium } from '@/lib/session-premium';
 import { recordFiatUnlock } from '@/lib/db/queries';
 import { isValidAddress } from '@/lib/address';
+import { checkRateLimit, rateLimitResponseInit } from '@/lib/rate-limit';
 
 /**
  * POST /api/premium/migrate
@@ -40,6 +41,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const sessionId = await getSessionId();
+
+  // A legitimate migration runs exactly once per session (the GETDEL
+  // claim is already atomic). Anything past 5/min is either a client
+  // bug in a retry loop or someone probing — cap it.
+  const rl = await checkRateLimit(`premium-migrate:${sessionId}`, 5, 60);
+  if (!rl.allowed) {
+    return new NextResponse(
+      JSON.stringify({ error: 'too many migration attempts' }),
+      rateLimitResponseInit(rl),
+    );
+  }
 
   // Atomically claim the migration slot: GETDEL returns the stored value
   // and deletes the key in one Redis operation. If two concurrent requests
