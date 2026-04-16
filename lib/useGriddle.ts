@@ -91,6 +91,18 @@ export function useGriddle({
   const backspaceCountRef = useRef(0);
   const resetCountRef = useRef(0);
 
+  /**
+   * Ref mirror of `foundWords` state. `triggerSolve` reads this
+   * instead of the closure-captured `foundWords` because the 8-letter
+   * dictionary check is async — it runs in a useEffect that may
+   * resolve AFTER the user types the 9th letter but BEFORE React
+   * re-renders with the updated state. Reading from the ref ensures
+   * the payload always captures the latest set of Crumbs, including
+   * any that resolved between the last render and the solve trigger.
+   */
+  const foundWordsRef = useRef<string[]>([]);
+  useEffect(() => { foundWordsRef.current = foundWords; }, [foundWords]);
+
   // Dedup ref for the real-time dictionary check — prevents re-
   // enqueueing the same candidate when the effect re-fires on an
   // identical letters state (which shouldn't happen normally but
@@ -231,15 +243,16 @@ export function useGriddle({
       inFlightAttemptRef.current = finalLetters;
 
       // Build the SolvePayload from the telemetry class + the wordmark
-      // action counters (tracked here, not in telemetry). foundWords is
-      // snapshot as a copy so a later setFoundWords doesn't mutate the
-      // in-flight payload.
+      // action counters (tracked here, not in telemetry). Read
+      // foundWords from the ref mirror (not the closure) so a
+      // dictionary check that resolved between the last render and
+      // this invocation is captured in the payload.
       const tele = telemetryRef.current!.build(finalLetters);
       const payload: SolvePayload = {
         ...tele,
         backspaceCount: backspaceCountRef.current,
         resetCount: resetCountRef.current,
-        foundWords: [...foundWords],
+        foundWords: [...foundWordsRef.current],
       };
       setPendingSolve(true);
 
@@ -276,7 +289,7 @@ export function useGriddle({
           inFlightAttemptRef.current = null;
         });
     },
-    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake, foundWords],
+    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake],
   );
 
   const typeLetter = useCallback(
