@@ -1,6 +1,6 @@
 /**
  * Drizzle schema. Migration history in drizzle/, applied live on Neon
- * as of M4a. Each schema change goes through `db:generate` to emit a
+ * as of M4-db. Each schema change goes through `db:generate` to emit a
  * new migration SQL file in drizzle/, then `db:migrate` to apply it.
  */
 import {
@@ -45,8 +45,8 @@ export const solves = pgTable(
     keystrokeCount: integer('keystroke_count'),
     keystrokeStddevMs: integer('keystroke_stddev_ms'),
     keystrokeMinMs: integer('keystroke_min_ms'),
-    // Wordmark-driving telemetry added in M5j. All nullable for
-    // backwards-compatibility with rows written before the migration.
+    // Wordmark-driving telemetry. All nullable for backwards-compatibility
+    // with rows written before the migration that added these columns.
     //   - backspaceCount  — times the player hit Backspace during the attempt
     //   - resetCount      — times the player hit Reset during the attempt
     //   - foundWords      — distinct 4–8 letter dictionary hits (Crumbs)
@@ -179,11 +179,11 @@ export const leaderboard = pgTable(
  * Player profile — the identity carrier for the leaderboard. A profile
  * may be keyed on a `wallet`, a `handle`, or (eventually) both:
  *
- *   - Crypto premium path (M4f): the unlock tx binds the wallet, and
+ *   - Crypto premium path (M5-premium-checkout): the unlock tx binds the wallet, and
  *     the profile is created with `wallet` set, `handle` null,
  *     `premium_source='crypto'`. The wallet address is the identity.
  *
- *   - Fiat premium path (M4f): Apple Pay / card checkout collects a
+ *   - Fiat premium path (M5-premium-checkout): Apple Pay / card checkout collects a
  *     required unique handle up front. A profile is created with
  *     `handle` set, `wallet` null, `premium_source='fiat'`. The
  *     handle is the identity until the player later connects a

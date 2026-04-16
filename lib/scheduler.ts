@@ -3,7 +3,7 @@ import { PUZZLE_BANK, type PuzzleWord } from './puzzles';
 /**
  * Deterministic puzzle selection — given a day number, always return the same
  * puzzle. Currently a simple indexed pick ordered by tier (A > B > C > P) so
- * that early puzzles feel accessible. A future iteration (M4) will add the
+ * that early puzzles feel accessible. A future iteration will add the
  * 180-day no-repeat rule and swap in fresh grid arrangements from the
  * ~12,072 alternatives per word.
  */

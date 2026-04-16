@@ -13,7 +13,7 @@ export interface AwardContext {
   puzzleWord: string;
   /**
    * Server-computed solve duration in ms. Null when the session
-   * submitted without a puzzle_loads row (direct POST, pre-M4b
+   * submitted without a puzzle_loads row (direct POST, pre-M4-server
    * archive replays, etc.); in that case speed wordmarks are
    * suppressed because we have no trusted timing.
    */

@@ -8,9 +8,9 @@ interface PremiumGateModalProps {
   feature: 'leaderboard' | 'archive' | 'premium';
   /**
    * Wallet address currently bound to this session, or null. Both
-   * paths require a wallet in M4f: crypto for permit signing, fiat
+   * paths require a wallet in M5-premium-checkout: crypto for permit signing, fiat
    * because the premium-read path keys on wallet. Handle-only fiat
-   * lands in M4g alongside the profile/identity rework.
+   * lands in M5-session-premium alongside the profile/identity rework.
    */
   sessionWallet: string | null;
   onClose: () => void;
@@ -28,14 +28,14 @@ interface PremiumGateModalProps {
 
 /**
  * Premium-gate modal. Two unlock paths, both require a connected wallet
- * in M4f:
+ * in M5-premium-checkout:
  *
  *  - **Crypto ($5)**  -  Lazy-loaded PremiumCryptoFlow signs an ERC-2612
  *    permit, calls `unlockWithPermit`, server verifies the burn.
  *  - **Cash ($6)**  -  Stripe Checkout. Premium binds to the connected
  *    wallet so the game's `refreshPremium` read sees it post-redirect.
  *
- * Handle-only fiat (pay without a wallet) lands in M4g alongside the
+ * Handle-only fiat (pay without a wallet) lands in M5-session-premium alongside the
  * profile/identity rework  -  until then, both tiles need a wallet and
  * the modal prompts to connect if there isn't one.
  *
