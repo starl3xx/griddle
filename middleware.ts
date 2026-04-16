@@ -21,7 +21,11 @@ import type { NextRequest } from 'next/server';
 
 const SESSION_COOKIE_NAME = 'griddle_sid';
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
-const VALID_SESSION_ID = /^[0-9a-f]{16,64}$/i;
+// Matches the canonical UUID-stripped format minted below. Previously
+// accepted 16–64 hex chars for tolerance, but every id the middleware
+// has ever minted is exactly 32, so the wider range only made session-
+// id spoofing / brute force cheaper.
+const VALID_SESSION_ID = /^[0-9a-f]{32}$/i;
 
 export function middleware(req: NextRequest) {
   const existing = req.cookies.get(SESSION_COOKIE_NAME)?.value;

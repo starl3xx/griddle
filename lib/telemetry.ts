@@ -25,6 +25,14 @@ export interface SolvePayload {
   foundWords: string[];
 }
 
+// Mirror the server cap (MAX_KEYSTROKE_INTERVALS in /api/solve) with
+// enough headroom that the client truncates long-idle sessions before
+// they bloat memory. A real attempt has ~8 intervals; 500 covers
+// extreme backspace/retype cycles. Over the limit we drop the oldest
+// entries so the most recent (and most relevant for anti-bot stats)
+// survive.
+const MAX_CLIENT_INTERVALS = 500;
+
 export class SolveTelemetry {
   private puzzleLoadedAt: number;
   private firstKeystrokeAt: number | null = null;
@@ -48,6 +56,9 @@ export class SolveTelemetry {
       this.firstKeystrokeAt = now;
     } else if (this.lastKeystrokeAt !== null) {
       this.intervals.push(Math.round(now - this.lastKeystrokeAt));
+      if (this.intervals.length > MAX_CLIENT_INTERVALS) {
+        this.intervals.splice(0, this.intervals.length - MAX_CLIENT_INTERVALS);
+      }
     }
     this.lastKeystrokeAt = now;
   }

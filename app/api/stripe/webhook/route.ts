@@ -3,6 +3,8 @@ import { getStripe, STRIPE_WEBHOOK_SECRET } from '@/lib/stripe';
 import { recordFiatUnlock } from '@/lib/db/queries';
 import { setSessionPremium } from '@/lib/session-premium';
 import { recordFunnelEvent } from '@/lib/funnel/record';
+import { isValidSessionId } from '@/lib/session';
+import { isValidAddress } from '@/lib/address';
 import type Stripe from 'stripe';
 
 /**
@@ -45,8 +47,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   try {
     event = getStripe().webhooks.constructEvent(rawBody, signature, STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'signature verification failed';
-    return NextResponse.json({ error: message }, { status: 400 });
+    // Don't echo the Stripe SDK error message back — it can surface
+    // internals that help an attacker iterate on forged signatures.
+    // Log server-side, return a generic response.
+    console.warn('[stripe/webhook] signature verification failed', err);
+    return NextResponse.json({ error: 'signature verification failed' }, { status: 400 });
   }
 
   if (event.type !== 'checkout.session.completed') {
@@ -60,17 +65,21 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const metadata = session.metadata ?? {};
-  const sessionId = typeof metadata.sessionId === 'string' && metadata.sessionId !== ''
-    ? metadata.sessionId
-    : null;
-  const wallet = typeof metadata.wallet === 'string' && metadata.wallet !== ''
-    ? metadata.wallet
-    : null;
+  // Validate the shape of both identity fields before we use them. The
+  // webhook itself is already signature-verified, so these values came
+  // from Stripe — but they ultimately originated in our checkout route,
+  // and we'd rather a forgotten metadata field or a dashboard-edited
+  // session fail the intake than silently write a malformed row.
+  const sessionId = isValidSessionId(metadata.sessionId) ? metadata.sessionId : null;
+  const wallet =
+    typeof metadata.wallet === 'string' && isValidAddress(metadata.wallet)
+      ? metadata.wallet.toLowerCase()
+      : null;
 
   if (!sessionId) {
-    // sessionId should always be present — checkout route always sets it.
-    // If missing, log loudly and return 500 so Stripe retries.
-    console.error('[stripe/webhook] missing sessionId in metadata', { stripeSessionId: session.id });
+    console.error('[stripe/webhook] missing or malformed sessionId in metadata', {
+      stripeSessionId: session.id,
+    });
     return NextResponse.json({ error: 'missing sessionId in metadata' }, { status: 500 });
   }
 

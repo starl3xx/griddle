@@ -39,6 +39,10 @@ export function SettingsButton({ onClick, avatarUrl, pfpUrl }: SettingsButtonPro
         <img
           src={imgSrc}
           alt=""
+          width={40}
+          height={40}
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover"
         />
       ) : (

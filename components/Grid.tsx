@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { CellState } from '@/lib/useGriddle';
 
 interface GridProps {
@@ -33,10 +33,11 @@ export function Grid({ grid, cellStates, sequenceByCell, shakeSignal, solved, on
       {Array.from({ length: 9 }, (_, i) => (
         <Cell
           key={i}
+          index={i}
           letter={grid[i]}
           state={cellStates[i]}
           sequence={sequenceByCell[i]}
-          onClick={() => onCellTap(i)}
+          onTap={onCellTap}
         />
       ))}
     </div>
@@ -44,13 +45,18 @@ export function Grid({ grid, cellStates, sequenceByCell, shakeSignal, solved, on
 }
 
 interface CellProps {
+  index: number;
   letter: string;
   state: CellState;
   sequence: number | null;
-  onClick: () => void;
+  onTap: (idx: number) => void;
 }
 
-function Cell({ letter, state, sequence, onClick }: CellProps) {
+// Memoized so a state change on one cell doesn't re-render all nine.
+// Passes `index` + the parent's stable `onTap` callback instead of an
+// inline `() => onCellTap(i)` closure — the closure would have been a
+// fresh function every render and would have defeated React.memo.
+const Cell = memo(function Cell({ index, letter, state, sequence, onTap }: CellProps) {
   const base =
     'relative w-20 h-20 sm:w-24 sm:h-24 rounded-lg border-4 flex items-center justify-center text-3xl sm:text-4xl font-black uppercase transition-all duration-fast select-none';
   /**
@@ -80,7 +86,7 @@ function Cell({ letter, state, sequence, onClick }: CellProps) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => onTap(index)}
       disabled={disabled}
       className={`${base} ${stateClasses[state]}`}
       aria-label={`Letter ${letter}, ${state}`}
@@ -93,4 +99,4 @@ function Cell({ letter, state, sequence, onClick }: CellProps) {
       )}
     </button>
   );
-}
+});

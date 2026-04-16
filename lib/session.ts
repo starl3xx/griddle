@@ -12,6 +12,18 @@ import { headers } from 'next/headers';
  * surfaces immediately rather than silently corrupting data.
  */
 
+/**
+ * Canonical session id format. Middleware mints `crypto.randomUUID()`
+ * with dashes stripped = exactly 32 lowercase hex chars. Shared between
+ * the middleware cookie check and any other validation surface (e.g.
+ * Stripe webhook metadata) so there's one source of truth.
+ */
+export const SESSION_ID_REGEX = /^[0-9a-f]{32}$/i;
+
+export function isValidSessionId(value: unknown): value is string {
+  return typeof value === 'string' && SESSION_ID_REGEX.test(value);
+}
+
 export async function getSessionId(): Promise<string> {
   const h = await headers();
   const sid = h.get('x-session-id');

@@ -7,6 +7,7 @@ import { recordCryptoUnlock } from '@/lib/db/queries';
 import { recordFunnelEvent } from '@/lib/funnel/record';
 import { getSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
+import { checkRateLimit, rateLimitResponseInit } from '@/lib/rate-limit';
 
 /**
  * POST /api/premium/verify
@@ -64,6 +65,19 @@ export async function POST(req: Request): Promise<NextResponse> {
   const txHash = body.txHash;
   if (typeof txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
     return NextResponse.json({ error: 'txHash must be 0x + 64 hex' }, { status: 400 });
+  }
+
+  // Per-session limiter. A legit user verifies once per unlock, with
+  // at most a handful of client retries while the tx is being indexed.
+  // Ten attempts a minute leaves headroom for the retry loop without
+  // letting an attacker fire arbitrary tx hashes at our Base RPC.
+  const sessionId = await getSessionId();
+  const rl = await checkRateLimit(`premium-verify:${sessionId}`, 10, 60);
+  if (!rl.allowed) {
+    return new NextResponse(
+      JSON.stringify({ error: 'too many verify attempts, slow down' }),
+      rateLimitResponseInit(rl),
+    );
   }
 
   // Wait for the receipt. If the tx doesn't exist yet (eager call from
@@ -137,12 +151,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   // checkout_completed — idempotency key = tx hash, so client retries
   // (which are common while waiting for RPC indexing) can't double-
   // count the unlock in the funnel. Wrap the whole telemetry hop in
-  // try/catch so a missing x-session-id header (or any other failure)
-  // never turns a successful premium unlock into a 500 — recordFunnel
-  // itself is already safe, but getSessionId throws if middleware
-  // didn't run on this route.
+  // try/catch so any funnel failure never turns a successful premium
+  // unlock into a 500. `sessionId` is already bound above for rate
+  // limiting, reuse it here.
   try {
-    const sessionId = await getSessionId();
     await recordFunnelEvent(
       { name: 'checkout_completed', method: 'crypto' },
       { sessionId, wallet, idempotencyKey: `crypto:${txHash}` },
