@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAccount, usePublicClient, useSignTypedData, useWriteContract } from 'wagmi';
-import { Diamond, CircleNotch } from '@phosphor-icons/react';
+import { Crown, CircleNotch } from '@phosphor-icons/react';
 import { griddlePremiumAbi, wordOracleAbi } from '@/lib/contracts/griddlePremiumAbi';
 import { wordTokenAbi } from '@/lib/contracts/wordTokenAbi';
 import {
@@ -293,7 +293,7 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         {inProgress ? (
           <CircleNotch className="w-6 h-6 animate-spin" weight="bold" aria-hidden />
         ) : (
-          <Diamond className="w-6 h-6" weight="fill" aria-hidden />
+          <Crown className="w-6 h-6" weight="fill" aria-hidden />
         )}
       </div>
       <p className="text-sm font-medium text-gray-700 text-center">{statusText}</p>

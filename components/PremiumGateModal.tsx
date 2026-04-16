@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Diamond } from '@phosphor-icons/react';
+import { Crown } from '@phosphor-icons/react';
 
 interface PremiumGateModalProps {
   /** What the user tried to open  -  shapes the modal headline. */
@@ -90,7 +90,7 @@ export function PremiumGateModal({
       >
         <div className="flex items-start gap-3">
           <div className="w-11 h-11 rounded-full bg-accent/10 text-accent flex items-center justify-center flex-shrink-0">
-            <Diamond className="w-5 h-5" weight="fill" aria-hidden />
+            <Crown className="w-5 h-5" weight="fill" aria-hidden />
           </div>
           <div className="min-w-0">
             <h2 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">

@@ -22,15 +22,15 @@ interface HomeTilesProps {
  */
 export function HomeTiles({ onTileClick }: HomeTilesProps) {
   return (
-    <div className="w-full max-w-[420px] grid grid-cols-3 gap-3">
+    <div className="w-full max-w-[360px] grid grid-cols-3 gap-2">
       <Tile label="Stats" onClick={() => onTileClick('stats')}>
-        <ChartBar className="w-5 h-5 text-accent" weight="bold" aria-hidden />
+        <ChartBar className="w-4 h-4 text-brand" weight="bold" aria-hidden />
       </Tile>
       <Tile label="Leaderboard" onClick={() => onTileClick('leaderboard')}>
-        <Trophy className="w-5 h-5 text-accent" weight="bold" aria-hidden />
+        <Trophy className="w-4 h-4 text-brand" weight="bold" aria-hidden />
       </Tile>
       <Tile label="Archive" onClick={() => onTileClick('archive')}>
-        <Archive className="w-5 h-5 text-accent" weight="bold" aria-hidden />
+        <Archive className="w-4 h-4 text-brand" weight="bold" aria-hidden />
       </Tile>
     </div>
   );
@@ -47,10 +47,10 @@ function Tile({ label, onClick, children }: TileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="bg-white dark:bg-gray-800 hover:bg-brand-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 hover:border-brand-200 dark:hover:border-brand-600 rounded-card px-3 py-3 flex flex-col items-center justify-center gap-1.5 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      className="bg-white dark:bg-gray-800 hover:bg-brand-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 hover:border-brand-200 dark:hover:border-brand-600 rounded-btn px-2 py-2 flex flex-row items-center justify-center gap-1.5 shadow-btn transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
     >
       {children}
-      <span className="text-[11px] font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
         {label}
       </span>
     </button>

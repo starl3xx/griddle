@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Diamond } from '@phosphor-icons/react';
+import { Crown } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
 import type { PremiumStats } from '@/lib/db/queries';
 
@@ -106,7 +106,7 @@ export function PremiumStatsSection({
       {isPreview && (
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <div className="bg-white dark:bg-gray-800 border border-accent/30 rounded-md px-4 py-3 shadow-card text-center space-y-2 max-w-[240px]">
-            <Diamond className="w-5 h-5 text-accent mx-auto" weight="fill" aria-hidden />
+            <Crown className="w-5 h-5 text-accent mx-auto" weight="fill" aria-hidden />
             <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
               Unlock with Premium
             </p>

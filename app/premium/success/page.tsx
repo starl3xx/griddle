@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Diamond, CircleNotch } from '@phosphor-icons/react';
+import { Crown, CircleNotch } from '@phosphor-icons/react';
 import { isValidAddress } from '@/lib/address';
 
 export const dynamic = 'force-dynamic';
@@ -62,7 +62,7 @@ function SuccessInner() {
     <main className="flex-1 flex flex-col items-center justify-center px-4 py-12 gap-4 text-center">
       <div className="w-16 h-16 rounded-full bg-accent/15 text-accent flex items-center justify-center">
         {confirmed ? (
-          <Diamond className="w-8 h-8" weight="fill" aria-hidden />
+          <Crown className="w-8 h-8" weight="fill" aria-hidden />
         ) : (
           <CircleNotch className="w-8 h-8 animate-spin" weight="bold" aria-hidden />
         )}
