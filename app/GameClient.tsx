@@ -839,18 +839,21 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
                   is the Premium indicator — replaces the diamond that
                   used to live in the subtitle.
 
-                  Positioning note: `bottom-full` anchors the crown's
-                  bottom edge to the top of the 'e' span, then
-                  `translate-y-[35%]` pulls it down by 35% of its own
-                  height so the crown's lower tines overlap the top of
-                  the letter (the "perched on" look). `translate-x-1/4`
-                  gives a small right overhang for the jaunty feel.
-                  Pixel-sized w-5/w-6 is a simpler, more predictable
-                  alternative to em-scaled values, which didn't resolve
-                  as expected on Phosphor's SVG viewbox. */}
+                  Transform lives in an inline `style` so the translate
+                  and rotate definitely compose into one `transform`
+                  value — mixing arbitrary + preset Tailwind transform
+                  utilities with `bottom-full` left the crown stuck at
+                  the top of the line-box in the Vercel preview,
+                  visibly floating above the ascender of "Griddle"
+                  rather than perched on the visible top of the 'e'.
+                  The translate-y value has to cross both the ascender
+                  space (line-height - x-height) AND Phosphor's
+                  internal SVG padding, which is why it's larger than
+                  a naive "just clear the letter top" would suggest. */}
               {premium && (
                 <Crown
-                  className="absolute bottom-full right-0 translate-x-1/4 translate-y-[35%] w-5 h-5 sm:w-6 sm:h-6 rotate-[18deg] text-accent pointer-events-none"
+                  className="absolute bottom-full right-0 w-5 h-5 sm:w-6 sm:h-6 text-accent pointer-events-none"
+                  style={{ transform: 'translate(25%, 85%) rotate(18deg)' }}
                   weight="fill"
                   aria-hidden
                 />
