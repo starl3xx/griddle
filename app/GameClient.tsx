@@ -50,6 +50,22 @@ interface InitialPuzzle {
 
 interface GameClientProps {
   initialPuzzle: InitialPuzzle;
+  /**
+   * Session wallet resolved server-side from KV. Seeds the client's
+   * `sessionWallet` state so effects keyed on it fire on mount with
+   * the correct value — avoiding the "brief null → async populate"
+   * race that caused settings / profile / premium reads to fire a
+   * beat after the user started playing.
+   */
+  initialSessionWallet: string | null;
+  /**
+   * `user_settings.unassistedModeEnabled` resolved server-side from
+   * the wallet bound to this session. Seeds `unassistedMode` so the
+   * grid's `cellStates` render with hints suppressed from tick zero
+   * — no longer possible for a user with Unassisted ON to play a
+   * whole attempt with the assisted UI before the async fetch lands.
+   */
+  initialUnassistedMode: boolean;
 }
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
@@ -61,7 +77,7 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
  * keyboard input, telemetry, and the /api/solve round-trip all live
  * on this side of the server/client boundary.
  */
-export default function GameClient({ initialPuzzle }: GameClientProps) {
+export default function GameClient({ initialPuzzle, initialSessionWallet, initialUnassistedMode }: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
 
   // Refs so handleWalletConnect (empty deps array) always reads the
@@ -78,7 +94,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   useEffect(() => { pfpUrlRef.current = pfpUrl; }, [pfpUrl]);
 
   /** The wallet currently bound to this session, or null if none. */
-  const [sessionWallet, setSessionWallet] = useState<string | null>(null);
+  const [sessionWallet, setSessionWallet] = useState<string | null>(initialSessionWallet);
   const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
 
   // Active puzzle — defaults to today's. Archive navigation swaps it.
@@ -295,7 +311,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // Unassisted mode — read from /api/settings on wallet connect. When
   // true, useGriddle suppresses cell-state hints (available / blocked)
   // so the solver gets no adjacency feedback.
-  const [unassistedMode, setUnassistedMode] = useState(false);
+  const [unassistedMode, setUnassistedMode] = useState(initialUnassistedMode);
 
   const [state, actions] = useGriddle({
     grid: activePuzzle.grid,
