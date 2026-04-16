@@ -368,6 +368,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // isn't. Awaiting serializes the two so downstream reads see a
       // fully-formed session.
       if (inMiniAppRef.current && fidRef.current) {
+        // Capture the pfp URL BEFORE the await so we can mark exactly
+        // that value as synced after the request resolves. If we read
+        // pfpUrlRef.current a second time post-await, a racing SDK
+        // update could change it — we'd then mark a URL as "synced"
+        // that was never actually POSTed, and the pfp-listening
+        // effect would skip the real new URL on its next run.
+        const sentPfpUrl = pfpUrlRef.current ?? null;
         try {
           const res = await fetch('/api/profile/farcaster', {
             method: 'POST',
@@ -376,20 +383,19 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
               fid: fidRef.current,
               username: usernameRef.current ?? null,
               displayName: displayNameRef.current ?? null,
-              avatarUrl: pfpUrlRef.current ?? null,
+              avatarUrl: sentPfpUrl,
               wallet: normalized,
             }),
           });
           // Refetch the profile so SettingsModal + the gear avatar
           // reflect the server-side binding without a reload.
           if (res.ok) {
-            // Mark this pfp URL as synced so the sibling
-            // `lastSyncedPfpUrlRef` effect below doesn't fire a
-            // duplicate POST to /api/profile/farcaster when
-            // `setSessionWallet(normalized)` runs moments later.
-            // Without this, every Farcaster wallet connect produces
-            // two identical POSTs back-to-back.
-            lastSyncedPfpUrlRef.current = pfpUrlRef.current ?? null;
+            // Mark the CAPTURED (not re-read) pfp URL as synced so
+            // the sibling `lastSyncedPfpUrlRef` effect below doesn't
+            // fire a duplicate POST when `setSessionWallet(normalized)`
+            // runs moments later. Without this, every Farcaster wallet
+            // connect would produce two identical POSTs back-to-back.
+            lastSyncedPfpUrlRef.current = sentPfpUrl;
             await refetchProfile();
           }
         } catch {/* best-effort — non-fatal */}

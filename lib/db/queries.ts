@@ -1267,8 +1267,24 @@ export async function mergeProfiles(
         COALESCE(older.email,              newer.email)              AS email,
         COALESCE(older.email_verified_at,  newer.email_verified_at)  AS email_verified_at,
         COALESCE(older.display_name,       newer.display_name)       AS display_name,
-        COALESCE(older.avatar_url,         newer.avatar_url)         AS avatar_url,
-        COALESCE(older.avatar_source,      newer.avatar_source)      AS avatar_source,
+        -- Avatar priority: a 'custom' avatar on EITHER side wins over
+        -- a 'farcaster'/null avatar on the other side, regardless of
+        -- row age. Plain COALESCE would pick the older row first —
+        -- which loses the user's uploaded photo if they had an older
+        -- Farcaster row that gets merged with a newer custom row.
+        -- The avatar_url and avatar_source CASEs mirror each other so
+        -- the merged row's (url, source) pair is always from the same
+        -- source row (never a Frankenstein of one url + the other source).
+        CASE
+          WHEN older.avatar_source = 'custom' THEN older.avatar_url
+          WHEN newer.avatar_source = 'custom' THEN newer.avatar_url
+          ELSE COALESCE(older.avatar_url, newer.avatar_url)
+        END                                                            AS avatar_url,
+        CASE
+          WHEN older.avatar_source = 'custom' THEN older.avatar_source
+          WHEN newer.avatar_source = 'custom' THEN newer.avatar_source
+          ELSE COALESCE(older.avatar_source, newer.avatar_source)
+        END                                                            AS avatar_source,
         COALESCE(older.farcaster_fid,      newer.farcaster_fid)      AS farcaster_fid,
         COALESCE(older.farcaster_username, newer.farcaster_username) AS farcaster_username,
         COALESCE(older.premium_source,     newer.premium_source)     AS premium_source,
