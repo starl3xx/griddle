@@ -261,13 +261,15 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     actions.reset();
   }, [actions]);
 
-  // Reset the grid when the active puzzle changes (archive navigation).
+  // Hard-reset the grid when the active puzzle changes (archive
+  // navigation). Uses fullReset instead of reset so foundWords and
+  // wordmark counters from the previous puzzle don't leak across.
   const prevDayRef = useRef(activePuzzle.dayNumber);
   useEffect(() => {
     if (prevDayRef.current !== activePuzzle.dayNumber) {
       prevDayRef.current = activePuzzle.dayNumber;
       setSolveResult(null);
-      actions.reset();
+      actions.fullReset();
     }
   }, [activePuzzle.dayNumber, actions]);
 

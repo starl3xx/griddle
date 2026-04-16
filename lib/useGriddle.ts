@@ -32,6 +32,8 @@ export interface GriddleActions {
   tapCell: (cellIdx: number) => void;
   backspace: () => void;
   reset: () => void;
+  /** Hard reset for puzzle switches — clears foundWords and counters too. */
+  fullReset: () => void;
 }
 
 /**
@@ -190,6 +192,21 @@ export function useGriddle({
     // previously-found word after Reset doesn't re-enqueue it.
     telemetryRef.current?.reset();
   }, [solved]);
+
+  // Hard reset for puzzle switches — clears everything including
+  // foundWords and wordmark counters. Unlike `reset` (which preserves
+  // foundWords across mid-puzzle retries), this is a clean slate.
+  const fullReset = useCallback(() => {
+    setPath([]);
+    inFlightAttemptRef.current = null;
+    setSolved(false);
+    setPendingSolve(false);
+    setFoundWords([]);
+    lastFoundWordRef.current = null;
+    backspaceCountRef.current = 0;
+    resetCountRef.current = 0;
+    telemetryRef.current?.reset();
+  }, []);
 
   // Real-time shorter-word detection (4-8 letters). The dictionary is
   // lazy-loaded via dynamic import — the first check after page load
@@ -423,6 +440,6 @@ export function useGriddle({
       pendingSolve,
       foundWords,
     },
-    { typeLetter, tapCell, backspace, reset },
+    { typeLetter, tapCell, backspace, reset, fullReset },
   ];
 }

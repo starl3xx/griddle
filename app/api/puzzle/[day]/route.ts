@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getPuzzleByDay, recordPuzzleLoad } from '@/lib/db/queries';
+import { getCurrentDayNumber } from '@/lib/scheduler';
 
 /**
  * GET /api/puzzle/[day]
@@ -24,6 +25,13 @@ export async function GET(
   const dayNumber = parseInt(day, 10);
   if (!Number.isInteger(dayNumber) || dayNumber < 1) {
     return NextResponse.json({ error: 'invalid day number' }, { status: 400 });
+  }
+
+  // Prevent fetching future puzzles — the grid contains all 9 letters
+  // of the target word, so leaking it early would let solvers pre-compute
+  // the answer via an anagram solver.
+  if (dayNumber > getCurrentDayNumber()) {
+    return NextResponse.json({ error: 'that puzzle is not available yet' }, { status: 403 });
   }
 
   const sessionId = await getSessionId();
