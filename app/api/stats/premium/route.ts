@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
+import { getSessionProfile } from '@/lib/session-profile';
 import { getPremiumStats, type PremiumStats } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { kv } from '@/lib/kv';
@@ -10,21 +11,21 @@ import { kv } from '@/lib/kv';
  *
  * Returns the richer stat bundle used by `PremiumStatsSection` — solve
  * trend sparkline, last-7-days bar chart, today's percentile, and
- * career placements. Mirrors `/api/stats` on auth (session wallet; no
- * wallet → `{ stats: null }`).
+ * career placements. Resolves the caller's identity the same way
+ * `/api/stats` does: profile id + wallet + session id, so handle-only
+ * users see their own numbers instead of the blurred-placeholder void.
  *
- * Gated server-side on premium status? No — the free-user blurred
- * preview uses *placeholder* data, not real stats. The route still
- * only answers for the caller's own wallet, so a non-premium user
- * can't bypass the gate by scraping another wallet's numbers.
+ * Returns `{ stats: null }` when fully anonymous. The free-user blurred
+ * preview uses *placeholder* data, not real stats, so a non-premium
+ * user can't bypass the gate by scraping another wallet's numbers.
  *
- * Caching: short-TTL KV read-through keyed on wallet + day. The
- * percentile and placements queries scan the full eligible solve
- * history; at zero traffic the raw latency is fine, but the stats
- * panel opens on every modal toggle and the numbers only turn over
- * when new solves land. 60 seconds is long enough to amortize a
- * stats-heavy navigation session and short enough that a user's own
- * just-solved puzzle shows up promptly.
+ * Caching: short-TTL KV read-through keyed on the caller's canonical
+ * player key + day. The percentile and placements queries scan the
+ * full eligible solve history; at zero traffic the raw latency is
+ * fine, but the stats panel opens on every modal toggle and the
+ * numbers only turn over when new solves land. 60 seconds amortizes
+ * a stats-heavy navigation session and remains fresh enough that a
+ * user's own just-solved puzzle shows up promptly.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,31 +34,33 @@ const CACHE_TTL_SECONDS = 60;
 
 export async function GET(): Promise<NextResponse> {
   const sessionId = await getSessionId();
-  const wallet = await getSessionWallet(sessionId);
+  const [wallet, profileId] = await Promise.all([
+    getSessionWallet(sessionId),
+    getSessionProfile(sessionId),
+  ]);
 
-  if (!wallet) {
+  if (!wallet && profileId == null) {
     return NextResponse.json({ wallet: null, stats: null });
   }
 
-  // Key includes the day number so a puzzle rollover at UTC midnight
-  // invalidates yesterday's percentile/last7Days automatically without
-  // a TTL waterfall on the boundary.
+  // Cache key matches the synthetic player_key used inside
+  // getPremiumStats — profile_id preferred, wallet fallback — so a
+  // user whose identity picks up a wallet mid-day doesn't suddenly
+  // see a cache miss AND lose continuity with earlier solves.
+  const playerKey = profileId != null ? `p:${profileId}` : wallet?.toLowerCase();
   const day = getCurrentDayNumber();
-  const cacheKey = `griddle:premium-stats:${wallet}:${day}`;
+  const cacheKey = `griddle:premium-stats:${playerKey}:${day}`;
 
   let stats: PremiumStats | null = null;
   try {
     const cached = await kv.get<PremiumStats>(cacheKey);
     if (cached) stats = cached;
   } catch (err) {
-    // KV down is tolerable — we'll fall through to Postgres and serve
-    // fresh stats, just without the cache cushion. Log so sustained
-    // outages are visible.
     console.warn('[stats/premium] kv read failed, bypassing cache', err);
   }
 
   if (!stats) {
-    stats = await getPremiumStats(wallet);
+    stats = await getPremiumStats({ profileId, wallet, sessionId });
     try {
       await kv.set(cacheKey, stats, { ex: CACHE_TTL_SECONDS });
     } catch (err) {

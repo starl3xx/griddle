@@ -37,6 +37,20 @@ export const solves = pgTable(
     puzzleId: integer('puzzle_id').references(() => puzzles.id).notNull(),
     wallet: varchar('wallet', { length: 42 }),
     sessionId: varchar('session_id', { length: 64 }).notNull(),
+    /**
+     * Canonical profile identity for this solve. Populated at insert
+     * time by `/api/solve` from the session→profile KV binding, so
+     * handle-only and email-auth users — who may never bind a wallet —
+     * still have their solves counted toward their own stats. A later
+     * wallet link is optional; wallet rows also carry `profile_id`
+     * when the wallet's profile row is known at solve time.
+     *
+     * Nullable: anonymous solves (no profile) and legacy rows written
+     * before this column existed stay null. Stats queries combine
+     * profile_id matches with a session_id fallback so pre-backfill
+     * rows still show up for the owning user.
+     */
+    profileId: integer('profile_id').references(() => profiles.id),
     solved: boolean('solved').default(false).notNull(),
     bestWord: varchar('best_word', { length: 9 }),
     clientSolveMs: integer('client_solve_ms'),
@@ -76,6 +90,14 @@ export const solves = pgTable(
     // index in insertion order with no separate sort step.
     puzzleSolveMsIdx: index('solves_puzzle_solve_ms_idx').on(
       t.puzzleId,
+      t.serverSolveMs,
+    ),
+    // Backs profile-keyed stats (getProfileStats, and the upcoming
+    // leaderboard/wordmarks switch to profile_id). Partial would be
+    // nice but PG 14+ would need it spelled out in SQL; the full
+    // composite is cheap enough at current scale.
+    profileSolveMsIdx: index('solves_profile_solve_ms_idx').on(
+      t.profileId,
       t.serverSolveMs,
     ),
   }),
