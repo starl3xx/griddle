@@ -136,18 +136,23 @@ export async function POST(
   }
 
   // Preserve `undefined` for missing counts via `?? null`. Defaulting
-  // to 0 here would incorrectly award Blameless to every solve from
-  // an old client bundle mid-deploy: the award check
+  // to 0 would incorrectly award Blameless to every solve from an
+  // old client bundle mid-deploy: the award check
   // `backspaceCount === 0 && resetCount === 0` would trivially pass.
   // Null is the "unknown — don't evaluate rules that need this" sentinel
   // and awardWordmarks skips Blameless when either count is null.
+  //
+  // We persist the same null values to the DB (not a coerced 0). The
+  // `backspace_count` / `reset_count` columns are nullable, and null
+  // here honestly represents "old client didn't tell us". Admin
+  // aggregations that SUM/AVG these columns need to COALESCE to 0 or
+  // filter WHERE NOT NULL — writing a 0 here would silently mix
+  // "didn't hit backspace" with "didn't tell us whether they did",
+  // which would be strictly worse for analytics correctness.
+  //
   // `foundWords ?? []` stays — an empty array correctly suppresses
   // both Wordsmith (>= 9) and Labyrinth (any 8-letter crumb) since
   // neither can match an empty list.
-  //
-  // Still persisted to solves as 0 because the column is a count, and
-  // writing a real 0 keeps admin aggregates clean; the wordmark logic
-  // uses the separate null-aware values below.
   const backspaceCount: number | null = body.backspaceCount ?? null;
   const resetCount: number | null = body.resetCount ?? null;
   const foundWords = body.foundWords ?? [];
