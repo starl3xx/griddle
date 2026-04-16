@@ -211,7 +211,7 @@ components/
 lib/
 ├── adjacency.ts                # 3×3 rook-graph adjacency, Hamiltonian-path validation
 ├── dictionary.ts               # Lazy-loaded 4–8 letter Set lookup (dynamic import)
-├── scheduler.ts                # Deterministic getPuzzleForDay()
+├── scheduler.ts                # Day-number math (LAUNCH_DATE / getCurrentDayNumber); puzzles live in the DB
 ├── telemetry.ts                # Client-side keystroke + timing capture (anti-bot)
 ├── useGriddle.ts               # Game state hook (keyboard + tap, solve detection)
 ├── useDarkMode.ts              # Dark-mode hook with session-wallet DB sync
@@ -253,8 +253,10 @@ contracts/                      # Foundry project
 └── script/Deploy.s.sol         # Base mainnet deploy + canonical-$WORD safety check
 
 data/
-├── puzzles.json                # 279 curated words with pre-validated grids
 └── dictionary.json             # 4–8 letter English words (74,947 entries)
+# The puzzle word list + day schedule are NOT committed. The live
+# schedule lives in Neon (`puzzles` table); local seeding reads from
+# `data/puzzles.local.json` (gitignored) against the unpooled URL.
 
 drizzle/                        # Generated migrations (0000 – 0010)
 ├── 0000_lethal_swordsman.sql   # Initial schema
@@ -284,7 +286,8 @@ bun run typecheck                # TypeScript check
 bun run db:generate              # Generate Drizzle migrations
 bun run db:migrate               # Apply migrations
 bun run db:studio                # Open Drizzle Studio GUI
-bun run db:seed                  # Seed 279 puzzles (idempotent)
+# Puzzle seeding: deliberately not a package script. Load your
+# private puzzle list into Neon via a local script kept out of git.
 ```
 
 ---

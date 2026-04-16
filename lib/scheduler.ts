@@ -1,38 +1,21 @@
-import { PUZZLE_BANK, type PuzzleWord } from './puzzles';
-
 /**
- * Deterministic puzzle selection — given a day number, always return the same
- * puzzle. Currently a simple indexed pick ordered by tier (A > B > C > P) so
- * that early puzzles feel accessible. A future iteration will add the
- * 180-day no-repeat rule and swap in fresh grid arrangements from the
- * ~12,072 alternatives per word.
+ * Day-number math shared between the runtime (which puzzle is live
+ * right now) and any admin tool that needs to compute a day from a
+ * date. The day → puzzle mapping itself is **not** here — it lives in
+ * the private Neon `puzzles` table and is read via
+ * `getPuzzleByDay` / `getPuzzleWordByDayNumber` in `lib/db/queries.ts`.
+ *
+ * Previously this file also exported a deterministic `getPuzzleForDay`
+ * that indexed into a public `PUZZLE_BANK` JSON bundle, meaning anyone
+ * with the repo could compute any future puzzle. That bank has been
+ * removed; the only way to resolve a day number to a word/grid now is
+ * a DB lookup against the live schedule.
  */
 
-const ORDERED_BANK: readonly PuzzleWord[] = [...PUZZLE_BANK].sort((a, b) => {
-  const tierOrder: Record<string, number> = { A: 0, B: 1, C: 2, P: 3 };
-  return tierOrder[a.tier] - tierOrder[b.tier];
-});
-
-export interface DailyPuzzle {
-  dayNumber: number;
-  word: string;
-  grid: string;
-  tier: string;
-}
-
-export function getPuzzleForDay(dayNumber: number): DailyPuzzle {
-  const idx = ((dayNumber - 1) % ORDERED_BANK.length + ORDERED_BANK.length) % ORDERED_BANK.length;
-  const p = ORDERED_BANK[idx];
-  return { dayNumber, word: p.word, grid: p.grid, tier: p.tier };
-}
-
 /**
- * Canonical launch date for Griddle. Used by both `getCurrentDayNumber`
- * (runtime, to figure out which puzzle is live right now) and the seed
- * script `scripts/seed-puzzles.ts` (build-time, to assign dates to each
- * pre-seeded row). These two readers MUST agree on the value or the
- * database dates will drift from the live scheduler — hence exported
- * from a single location.
+ * Canonical launch date for Griddle. Used at runtime by
+ * `getCurrentDayNumber` and once at seed time (from a private source
+ * outside this repo) to stamp each row's `date` column.
  */
 export const LAUNCH_DATE = new Date('2026-04-13T00:00:00Z');
 

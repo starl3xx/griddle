@@ -1,5 +1,7 @@
 import { ImageResponse } from 'next/og';
-import { getCurrentDayNumber, getPuzzleForDay } from '@/lib/scheduler';
+import { sql } from 'drizzle-orm';
+import { db } from '@/lib/db/client';
+import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatSeconds } from '@/lib/format';
 import { SITE_HOST } from '@/lib/site';
 
@@ -33,8 +35,14 @@ export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url);
 
   const dayNumber = clampDayNumber(searchParams.get('puzzle'));
-  const puzzle = getPuzzleForDay(dayNumber);
-  const grid = normalizeGrid(searchParams.get('grid'), puzzle.grid);
+  const rawGrid = searchParams.get('grid');
+  // Grid fallback: if the caller didn't pass `?grid=`, look it up in
+  // the DB. The grid for a given day is public (it's what every player
+  // sees), but it's only known at runtime — the in-repo PUZZLE_BANK
+  // was removed so future puzzles can't be derived from the codebase.
+  // On any failure (DB down, row missing) we degrade to an empty grid
+  // and render 9 blank cells rather than 500 the share image.
+  const grid = normalizeGrid(rawGrid) ?? (await fetchGridForDay(dayNumber)) ?? '';
   const solved = searchParams.get('solved') === 'true';
   const time = parseTime(searchParams.get('time'));
 
@@ -208,11 +216,25 @@ function clampDayNumber(raw: string | null): number {
   return Math.min(n, today);
 }
 
-function normalizeGrid(raw: string | null, fallback: string): string {
-  if (!raw) return fallback;
+function normalizeGrid(raw: string | null): string | null {
+  if (!raw) return null;
   const cleaned = raw.toLowerCase().replace(/[^a-z]/g, '');
-  if (cleaned.length !== 9) return fallback;
+  if (cleaned.length !== 9) return null;
   return cleaned;
+}
+
+async function fetchGridForDay(dayNumber: number): Promise<string | null> {
+  try {
+    const rows = await db.execute<{ grid: string }>(sql`
+      SELECT grid FROM puzzles WHERE day_number = ${dayNumber} LIMIT 1
+    `);
+    const resolved = Array.isArray(rows) ? rows : (rows.rows ?? []);
+    const grid = resolved[0]?.grid;
+    return typeof grid === 'string' && grid.length === 9 ? grid.toLowerCase() : null;
+  } catch (err) {
+    console.warn('[og] grid lookup failed, falling back to blank cells', err);
+    return null;
+  }
 }
 
 function parseTime(raw: string | null): number | null {
