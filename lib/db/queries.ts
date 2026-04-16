@@ -372,7 +372,8 @@ export async function getWalletStats(wallet: string): Promise<WalletStats> {
       and(
         eq(solves.wallet, normalized),
         eq(solves.solved, true),
-        isNull(solves.flag),
+        // Match leaderboard policy: only 'ineligible' is excluded.
+        sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
         isNotNull(solves.serverSolveMs),
       ),
     );
@@ -2045,7 +2046,7 @@ export async function getLifetimeSolveCount(wallet: string): Promise<number> {
       and(
         eq(solves.wallet, normalized),
         eq(solves.solved, true),
-        isNull(solves.flag),
+        sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
       ),
     );
   return rows[0]?.count ?? 0;
