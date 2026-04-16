@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
-import { insertWordmarksIfNew } from '@/lib/db/queries';
+import { getSessionProfile } from '@/lib/session-profile';
+import { insertWordmarksIfNew, solveBelongsTo } from '@/lib/db/queries';
 import { db } from '@/lib/db/client';
 import { solves } from '@/lib/db/schema';
 import { and, eq } from 'drizzle-orm';
@@ -15,30 +16,35 @@ import { and, eq } from 'drizzle-orm';
  * resolved, or clipboard writeText resolved). Cancels + errors do
  * NOT call this endpoint.
  *
- * Requires a wallet bound to the session — anonymous users can
- * still share, but the wordmark only lands on a wallet-keyed
- * profile. No premium gate: sharing is a free action regardless
- * of upgrade state.
+ * Requires SOME identity bound to the session — wallet or profile.
+ * Anonymous session-only users can still share but can't durably
+ * earn Megaphone (no place to pin the badge). No premium gate:
+ * sharing is a free action regardless of upgrade state.
  *
- * Idempotent via the `(wallet, wordmark_id)` unique index on the
- * wordmarks table, so a user spamming the share button doesn't
- * create extra rows or inflate the earn count. The response
- * distinguishes "earned just now" from "already earned previously"
- * via the `firstTime` boolean so the client can conditionally show
- * the earn toast.
+ * Idempotent via the `(player_key, wordmark_id)` unique index on the
+ * wordmarks table (player_key is profile_id-preferred, wallet
+ * fallback) so a user spamming the share button doesn't create extra
+ * rows or inflate the earn count. The response distinguishes "earned
+ * just now" from "already earned previously" via the `firstTime`
+ * boolean so the client can conditionally show the earn toast.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(): Promise<NextResponse> {
   const sessionId = await getSessionId();
-  const wallet = await getSessionWallet(sessionId);
-  if (!wallet) {
+  const [wallet, profileId] = await Promise.all([
+    getSessionWallet(sessionId),
+    getSessionProfile(sessionId),
+  ]);
+  if (!wallet && profileId == null) {
     return NextResponse.json(
-      { error: 'wallet required to earn wordmarks' },
+      { error: 'identity required to earn wordmarks' },
       { status: 401 },
     );
   }
+
+  const identity = { profileId, wallet, sessionId };
 
   // Guard: the user must have at least one successful solve to earn
   // Megaphone. Without this, a direct POST (curl) could mint the badge
@@ -49,7 +55,7 @@ export async function POST(): Promise<NextResponse> {
   const hasSolve = await db
     .select({ id: solves.id })
     .from(solves)
-    .where(and(eq(solves.wallet, wallet.toLowerCase()), eq(solves.solved, true)))
+    .where(and(solveBelongsTo(identity), eq(solves.solved, true)))
     .limit(1);
   if (hasSolve.length === 0) {
     return NextResponse.json(
@@ -58,7 +64,7 @@ export async function POST(): Promise<NextResponse> {
     );
   }
 
-  const inserted = await insertWordmarksIfNew(wallet, ['megaphone'], null);
+  const inserted = await insertWordmarksIfNew(identity, ['megaphone'], null);
   return NextResponse.json({
     wordmarkId: 'megaphone',
     firstTime: inserted.length > 0,

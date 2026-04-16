@@ -5,12 +5,13 @@ import { WORDMARK_CATALOG, WORDMARK_THEMES } from '@/lib/wordmarks/catalog';
 
 interface LexiconGridProps {
   /**
-   * Wallet to fetch wordmarks for. When null, the grid renders all
-   * 17 wordmarks in the locked state with no fetch — consistent
-   * with the rest of the stats panel's behavior for anonymous /
-   * no-wallet users.
+   * True when the caller has an account identity (wallet OR profile).
+   * Drives the fetch — anonymous sessions skip the network call and
+   * render everything locked. The server resolves the caller's actual
+   * identity from the session, so this prop is just a local optimization
+   * to avoid the no-op round trip.
    */
-  wallet: string | null;
+  enabled: boolean;
 }
 
 /**
@@ -20,27 +21,30 @@ interface LexiconGridProps {
  * `FAQSheet`-style Lexicon panel: bold header with "Your Wordmarks
  * · N/M", three-column rounded circle grid, name under each badge.
  *
- * Data flow: fetches /api/wordmarks/[wallet] on mount when a wallet
- * is available. The earned set is a Set<WordmarkId> for O(1) membership
- * checks. Empty wallet → no fetch → everything locked.
+ * Data flow: fetches /api/wordmarks/me on mount when the caller has
+ * an account. The server resolves the session's profile + wallet
+ * bindings, so handle-only and email-auth users see their own
+ * earned wordmarks here — the earlier `/api/wordmarks/[wallet]`
+ * path was wallet-only. The earned set is a Set<WordmarkId> for
+ * O(1) membership checks.
  *
  * Order comes from WORDMARK_CATALOG (already sorted by Z-index), so
  * earned wordmarks interleave with locked ones and the most
  * prestigious appear top-left.
  */
-export function LexiconGrid({ wallet }: LexiconGridProps) {
+export function LexiconGrid({ enabled }: LexiconGridProps) {
   const [earned, setEarned] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!wallet) {
+    if (!enabled) {
       setEarned(new Set());
       return;
     }
     let cancelled = false;
     setLoading(true);
     setEarned(new Set());
-    fetch(`/api/wordmarks/${wallet}`, { cache: 'no-store' })
+    fetch('/api/wordmarks/me', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { entries?: Array<{ wordmarkId: string }> } | null) => {
         if (cancelled) return;
@@ -49,7 +53,7 @@ export function LexiconGrid({ wallet }: LexiconGridProps) {
       })
       .catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [wallet]);
+  }, [enabled]);
 
   const earnedCount = earned.size;
   const total = WORDMARK_CATALOG.length;
