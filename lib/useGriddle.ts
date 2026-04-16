@@ -81,6 +81,28 @@ export function useGriddle({
   const telemetryRef = useRef<SolveTelemetry | null>(null);
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();
 
+  /**
+   * Wordmark action counters — live in refs (not state) because
+   * nothing in the UI reads them mid-attempt; they're only snapshot
+   * at solve time to build the /api/solve payload. Refs avoid pointless
+   * re-renders every time the player backspaces. Reset-on-solve is
+   * handled in triggerSolve's success branch alongside foundWords.
+   */
+  const backspaceCountRef = useRef(0);
+  const resetCountRef = useRef(0);
+
+  /**
+   * Ref mirror of `foundWords` state. `triggerSolve` reads this
+   * instead of the closure-captured `foundWords` because the 8-letter
+   * dictionary check is async — it runs in a useEffect that may
+   * resolve AFTER the user types the 9th letter but BEFORE React
+   * re-renders with the updated state. Reading from the ref ensures
+   * the payload always captures the latest set of Crumbs, including
+   * any that resolved between the last render and the solve trigger.
+   */
+  const foundWordsRef = useRef<string[]>([]);
+  useEffect(() => { foundWordsRef.current = foundWords; }, [foundWords]);
+
   // Dedup ref for the real-time dictionary check — prevents re-
   // enqueueing the same candidate when the effect re-fires on an
   // identical letters state (which shouldn't happen normally but
@@ -124,7 +146,34 @@ export function useGriddle({
   }, []);
 
   const reset = useCallback(() => {
-    setPath([]);
+    // Wordmark counter: only a MID-ATTEMPT Reset press disqualifies
+    // Blameless. A reset that happens after a confirmed solve is the
+    // "Play Again" transition — handlePlayAgain calls this same
+    // function to clear the board for the next attempt, and counting
+    // that as a user Reset would make Blameless impossible to earn
+    // on any Play Again session (the next attempt would start with
+    // resetCountRef=1). Skip the increment when `solved` is true.
+    //
+    // Additionally, only count a Reset that actually clears letters —
+    // pressing Reset on an empty board (accidentally, or right after
+    // Play Again) shouldn't disqualify Blameless. Same flag pattern
+    // as backspace: the updater receives the latest state, so rapid
+    // or stale-closure calls are safe.
+    let hadContent = false;
+    setPath((p) => {
+      if (p.length > 0) hadContent = true;
+      return [];
+    });
+    if (!solved && hadContent) {
+      resetCountRef.current += 1;
+    } else if (solved) {
+      // Play Again path — make sure counters are zero for the next
+      // attempt. triggerSolve also zeros them on the success branch,
+      // but doing it here too means a reset-after-solve is idempotent
+      // even if the solve flow was interrupted.
+      backspaceCountRef.current = 0;
+      resetCountRef.current = 0;
+    }
     inFlightAttemptRef.current = null;
     setSolved(false);
     setPendingSolve(false);
@@ -136,7 +185,7 @@ export function useGriddle({
     // `lastFoundWordRef` also intentionally persists so retyping a
     // previously-found word after Reset doesn't re-enqueue it.
     telemetryRef.current?.reset();
-  }, []);
+  }, [solved]);
 
   // Real-time shorter-word detection (4-8 letters). The dictionary is
   // lazy-loaded via dynamic import — the first check after page load
@@ -197,7 +246,18 @@ export function useGriddle({
       if (inFlightAttemptRef.current === finalLetters) return;
       inFlightAttemptRef.current = finalLetters;
 
-      const payload = telemetryRef.current!.build(finalLetters);
+      // Build the SolvePayload from the telemetry class + the wordmark
+      // action counters (tracked here, not in telemetry). Read
+      // foundWords from the ref mirror (not the closure) so a
+      // dictionary check that resolved between the last render and
+      // this invocation is captured in the payload.
+      const tele = telemetryRef.current!.build(finalLetters);
+      const payload: SolvePayload = {
+        ...tele,
+        backspaceCount: backspaceCountRef.current,
+        resetCount: resetCountRef.current,
+        foundWords: [...foundWordsRef.current],
+      };
       setPendingSolve(true);
 
       onSolveAttempt({ ...payload, unassisted })
@@ -216,6 +276,10 @@ export function useGriddle({
             // leftover shorter-word pills.
             setFoundWords([]);
             lastFoundWordRef.current = null;
+            // Wordmark counters reset on confirmed solve so the next
+            // puzzle starts fresh (Blameless is earnable again).
+            backspaceCountRef.current = 0;
+            resetCountRef.current = 0;
             onSolved?.({ ...payload, unassisted, word: verdict.word });
           } else {
             triggerShake();
@@ -284,7 +348,20 @@ export function useGriddle({
 
   const backspace = useCallback(() => {
     if (solved || disabled || pendingSolve) return;
-    setPath((p) => (p.length === 0 ? p : p.slice(0, -1)));
+    // Wordmark counter: only count a Backspace that actually shortens
+    // the path. We read a flag set inside setPath's updater — the
+    // updater receives the LATEST state (even before re-render), so
+    // rapid key-repeat past an empty path won't over-count. The flag
+    // lives outside the updater so the updater stays pure (safe under
+    // React StrictMode double-invocation — setting the flag to true
+    // twice is harmless since we only read it once afterward).
+    let didShorten = false;
+    setPath((p) => {
+      if (p.length === 0) return p;
+      didShorten = true;
+      return p.slice(0, -1);
+    });
+    if (didShorten) backspaceCountRef.current += 1;
     // Reset the found-word dedup so typing back up to the same
     // word after a backspace re-animates the pill via the useEffect.
     lastFoundWordRef.current = null;

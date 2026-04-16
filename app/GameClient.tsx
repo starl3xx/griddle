@@ -120,6 +120,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     solveMs: number;
     unassisted: boolean;
     word: string;
+    earnedWordmarks: string[];
   } | null>(null);
 
   /**
@@ -135,6 +136,15 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
    * the server value when displaying the solve time.
    */
   const serverSolveMsRef = useRef<number | null>(null);
+  /**
+   * Wordmarks newly earned on the latest solve — captured from the
+   * /api/solve response and handed off to handleSolved (which fires
+   * from useGriddle after a successful verdict). Lives in a ref for
+   * the same reason serverSolveMsRef does: onSolved only carries the
+   * telemetry payload, not the verdict body, so we stash verdict-
+   * adjacent data here to preserve it across the async boundary.
+   */
+  const earnedWordmarksRef = useRef<string[]>([]);
 
   /**
    * POST the claimed word to the server. The server compares it against
@@ -157,6 +167,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
             keystrokeIntervalsMs: payload.keystrokeIntervalsMs,
             keystrokeCount: payload.keystrokeCount,
             unassisted: payload.unassisted,
+            backspaceCount: payload.backspaceCount,
+            resetCount: payload.resetCount,
+            foundWords: payload.foundWords,
           }),
         });
         if (!res.ok) return { solved: false };
@@ -164,6 +177,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           solved: boolean;
           word?: string;
           serverSolveMs?: number | null;
+          earnedWordmarks?: string[];
         };
         // Capture the server-computed duration for the SolveModal
         // display. Null if the session submitted without loading first
@@ -171,6 +185,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         // inside handleSolved.
         serverSolveMsRef.current =
           typeof data.serverSolveMs === 'number' ? data.serverSolveMs : null;
+        // Capture newly-earned wordmarks for the SolveModal earn toast.
+        earnedWordmarksRef.current = Array.isArray(data.earnedWordmarks)
+          ? data.earnedWordmarks
+          : [];
         // Strict contract: only return solved=true if the server also
         // returned a string `word`. Anything else is a verification
         // failure from the client’s perspective, which causes a shake
@@ -196,8 +214,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         solveMs: serverMs != null ? serverMs : payload.clientSolveMs,
         unassisted: payload.unassisted,
         word: payload.word,
+        earnedWordmarks: earnedWordmarksRef.current,
       });
       serverSolveMsRef.current = null;
+      earnedWordmarksRef.current = [];
     },
     [],
   );
@@ -826,6 +846,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           grid={initialPuzzle.grid}
           solveMs={solveResult.solveMs}
           unassisted={solveResult.unassisted}
+          earnedWordmarks={solveResult.earnedWordmarks}
           inMiniApp={inMiniApp}
           onPlayAgain={handlePlayAgain}
           onClose={() => setSolveResult(null)}

@@ -10,6 +10,7 @@ import {
   userSettings,
   magicLinks,
   funnelEvents,
+  wordmarks,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
@@ -1794,4 +1795,222 @@ export async function getFunnelStats(window: FunnelWindow = '7d'): Promise<Funne
     breakdown: breakdownRows,
     medianTimeToConvertMs,
   };
+}
+
+// ─── Wordmarks ──────────────────────────────────────────────────────
+
+export interface EarnedWordmarkRow {
+  wordmarkId: string;
+  earnedAt: Date;
+  puzzleId: number | null;
+}
+
+/**
+ * Insert a batch of wordmark awards for a wallet, skipping any that
+ * already exist (via the `(wallet, wordmark_id)` unique index).
+ * Returns the ids that were actually inserted — callers use this
+ * return value to decide which ones to surface in the earn toast
+ * post-solve.
+ *
+ * Empty input is a no-op and returns an empty list (don't hit the DB
+ * for a zero-row insert, which drizzle handles gracefully but still
+ * costs a round trip).
+ */
+export async function insertWordmarksIfNew(
+  wallet: string,
+  wordmarkIds: readonly string[],
+  puzzleId: number | null,
+): Promise<string[]> {
+  if (wordmarkIds.length === 0) return [];
+  const normalized = wallet.toLowerCase();
+  const rows = wordmarkIds.map((id) => ({
+    wallet: normalized,
+    wordmarkId: id,
+    puzzleId,
+  }));
+  const inserted = await db
+    .insert(wordmarks)
+    .values(rows)
+    .onConflictDoNothing({
+      target: [wordmarks.wallet, wordmarks.wordmarkId],
+    })
+    .returning({ wordmarkId: wordmarks.wordmarkId });
+  return inserted.map((r) => r.wordmarkId);
+}
+
+/**
+ * Fetch all wordmarks earned by a wallet, newest first. Used by the
+ * Lexicon grid on the Stats panel.
+ */
+export async function getWordmarksForWallet(
+  wallet: string,
+): Promise<EarnedWordmarkRow[]> {
+  const normalized = wallet.toLowerCase();
+  const rows = await db
+    .select({
+      wordmarkId: wordmarks.wordmarkId,
+      earnedAt: wordmarks.earnedAt,
+      puzzleId: wordmarks.puzzleId,
+    })
+    .from(wordmarks)
+    .where(eq(wordmarks.wallet, normalized))
+    .orderBy(sql`${wordmarks.earnedAt} DESC`);
+  return rows.map((r) => ({
+    wordmarkId: r.wordmarkId,
+    earnedAt: r.earnedAt,
+    puzzleId: r.puzzleId,
+  }));
+}
+
+/**
+ * Update the streak row for a wallet after a successful solve.
+ *
+ * Rules (matching the spec):
+ *   - First solve ever           → currentStreak = 1, longest = 1
+ *   - Same dayNumber as last     → no change (player already solved today)
+ *   - dayNumber === last + 1     → currentStreak += 1, bump longest if needed
+ *   - Any larger gap             → currentStreak = 1 (streak broken + restart)
+ *
+ * Premium streak-protection is NOT integrated here — that's a follow-up.
+ * For now, missing a day always resets the streak regardless of the
+ * user_settings.streak_protection_enabled flag.
+ *
+ * This is the first write path for the `streaks` table — prior to M5j
+ * the table was read-only from the admin-seeded side, which meant
+ * Fireproof / Steadfast / Centurion never had a chance to fire. Now
+ * that solves drive streak state, those three wordmarks become
+ * earnable.
+ *
+ * Returns the post-update `currentStreak` so the caller can feed it
+ * into awardWordmarks without a follow-up SELECT.
+ */
+export async function updateStreakForSolve(
+  wallet: string,
+  dayNumber: number,
+): Promise<{ currentStreak: number; longestStreak: number }> {
+  const normalized = wallet.toLowerCase();
+
+  const existing = await db
+    .select()
+    .from(streaks)
+    .where(eq(streaks.wallet, normalized))
+    .limit(1);
+
+  if (existing.length === 0) {
+    await db
+      .insert(streaks)
+      .values({
+        wallet: normalized,
+        currentStreak: 1,
+        longestStreak: 1,
+        lastSolvedDayNumber: dayNumber,
+        updatedAt: new Date(),
+      })
+      .onConflictDoNothing({ target: streaks.wallet });
+    // Re-read in the rare case a concurrent request won the insert race.
+    const after = await db
+      .select()
+      .from(streaks)
+      .where(eq(streaks.wallet, normalized))
+      .limit(1);
+    const row = after[0];
+    return {
+      currentStreak: row?.currentStreak ?? 1,
+      longestStreak: row?.longestStreak ?? 1,
+    };
+  }
+
+  const row = existing[0];
+  const last = row.lastSolvedDayNumber;
+  let nextCurrent: number;
+  if (last == null) {
+    nextCurrent = 1;
+  } else if (dayNumber === last) {
+    // Same-day re-solve: keep state as-is, don't bump the streak.
+    return {
+      currentStreak: row.currentStreak,
+      longestStreak: row.longestStreak,
+    };
+  } else if (dayNumber === last + 1) {
+    nextCurrent = row.currentStreak + 1;
+  } else if (dayNumber > last + 1) {
+    // Missed at least one day — streak breaks and restarts at 1.
+    nextCurrent = 1;
+  } else {
+    // Solve for a PAST puzzle (archive). Doesn't change the current
+    // streak trajectory; just record that it happened and leave the
+    // streak state untouched.
+    return {
+      currentStreak: row.currentStreak,
+      longestStreak: row.longestStreak,
+    };
+  }
+
+  const nextLongest = Math.max(row.longestStreak, nextCurrent);
+
+  // Optimistic concurrency: include lastSolvedDayNumber in the WHERE
+  // so a concurrent request that updated between our SELECT and this
+  // UPDATE causes 0 affected rows instead of silently clobbering.
+  // The neon-http driver doesn't support interactive transactions, so
+  // this is the atomicity primitive we have.
+  const updated = await db
+    .update(streaks)
+    .set({
+      currentStreak: nextCurrent,
+      longestStreak: nextLongest,
+      lastSolvedDayNumber: dayNumber,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(streaks.wallet, normalized),
+        last == null
+          ? isNull(streaks.lastSolvedDayNumber)
+          : eq(streaks.lastSolvedDayNumber, last),
+      ),
+    )
+    .returning({
+      currentStreak: streaks.currentStreak,
+      longestStreak: streaks.longestStreak,
+    });
+
+  if (updated.length > 0) {
+    return updated[0];
+  }
+
+  // Concurrent update won the race — re-read the winner's state.
+  const reread = await db
+    .select()
+    .from(streaks)
+    .where(eq(streaks.wallet, normalized))
+    .limit(1);
+  return {
+    currentStreak: reread[0]?.currentStreak ?? nextCurrent,
+    longestStreak: reread[0]?.longestStreak ?? nextLongest,
+  };
+}
+
+/**
+ * Count of lifetime eligible solves for a wallet. Used by
+ * awardWordmarks to decide Fledgling (1st) and Goldfinch (100th).
+ * Includes the just-inserted row since this is called post-insert.
+ */
+export async function getLifetimeSolveCount(wallet: string): Promise<number> {
+  const normalized = wallet.toLowerCase();
+  // COUNT(DISTINCT puzzle_id) to prevent inflated Goldfinch progress
+  // when a user re-solves the same puzzle (refresh → re-submit). The
+  // solves table has no unique constraint on (wallet, puzzle_id), so
+  // duplicate rows are expected. Without DISTINCT, re-solves would
+  // accumulate toward the 100-puzzle threshold.
+  const rows = await db
+    .select({ count: sql<number>`count(DISTINCT ${solves.puzzleId})::int` })
+    .from(solves)
+    .where(
+      and(
+        eq(solves.wallet, normalized),
+        eq(solves.solved, true),
+        isNull(solves.flag),
+      ),
+    );
+  return rows[0]?.count ?? 0;
 }

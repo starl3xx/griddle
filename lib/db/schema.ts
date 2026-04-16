@@ -45,6 +45,16 @@ export const solves = pgTable(
     keystrokeCount: integer('keystroke_count'),
     keystrokeStddevMs: integer('keystroke_stddev_ms'),
     keystrokeMinMs: integer('keystroke_min_ms'),
+    // Wordmark-driving telemetry added in M5j. All nullable for
+    // backwards-compatibility with rows written before the migration.
+    //   - backspaceCount  — times the player hit Backspace during the attempt
+    //   - resetCount      — times the player hit Reset during the attempt
+    //   - foundWords      — distinct 4–8 letter dictionary hits (Crumbs)
+    // Used by awardWordmarks() at solve time to decide Blameless,
+    // Wordsmith, Labyrinth, and Dauntless.
+    backspaceCount: integer('backspace_count'),
+    resetCount: integer('reset_count'),
+    foundWords: jsonb('found_words').$type<string[]>(),
     unassisted: boolean('unassisted').default(false).notNull(),
     flag: varchar('flag', { length: 16 }), // null | 'ineligible' | 'suspicious'
     rewardClaimed: boolean('reward_claimed').default(false).notNull(),
@@ -94,6 +104,42 @@ export const premiumUsers = pgTable(
     stripeSessionIdx: uniqueIndex('premium_users_stripe_session_idx')
       .on(t.stripeSessionId)
       .where(sql`${t.stripeSessionId} is not null`),
+  }),
+);
+
+/**
+ * Wordmarks (achievement badges) earned by players. One row per
+ * (wallet, wordmark_id) — the unique index on that pair is how the
+ * insert-if-new helper in lib/db/queries.ts dedups re-awards.
+ *
+ * `puzzle_id` records which puzzle earned the wordmark (for
+ * per-solve wordmarks) and is null for lifetime milestones like
+ * Goldfinch (100 solves) where no single puzzle is the trigger.
+ *
+ * Keyed on `wallet` rather than profile id because the leaderboard
+ * already joins by wallet and the solve path already resolves to a
+ * wallet. A fiat-only handle-holder without a wallet currently can't
+ * earn wordmarks — revisiting if/when the handle-only path becomes
+ * a first-class leaderboard identity.
+ */
+export const wordmarks = pgTable(
+  'wordmarks',
+  {
+    id: serial('id').primaryKey(),
+    wallet: varchar('wallet', { length: 42 }).notNull(),
+    wordmarkId: varchar('wordmark_id', { length: 16 }).notNull(),
+    puzzleId: integer('puzzle_id').references(() => puzzles.id),
+    earnedAt: timestamp('earned_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    // UNIQUE (wallet, wordmark_id) — one row per player per wordmark.
+    // Insert uses ON CONFLICT DO NOTHING against this index.
+    walletWordmarkIdx: uniqueIndex('wordmarks_wallet_wordmark_idx').on(
+      t.wallet,
+      t.wordmarkId,
+    ),
+    // Covering the common "show me this wallet's Lexicon grid" query.
+    walletIdx: index('wordmarks_wallet_idx').on(t.wallet),
   }),
 );
 
