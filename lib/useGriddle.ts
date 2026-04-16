@@ -34,6 +34,12 @@ export interface GriddleActions {
   reset: () => void;
   /** Hard reset for puzzle switches — clears foundWords and counters too. */
   fullReset: () => void;
+  /**
+   * Merge server-persisted crumbs into the current foundWords list.
+   * De-duped against existing entries. Does NOT fire onCrumbFound
+   * (these are already persisted — no need to re-save).
+   */
+  seedFoundWords: (words: string[]) => void;
 }
 
 /**
@@ -65,6 +71,11 @@ interface UseGriddleOptions {
    * don’t silently fill the grid behind the modal.
    */
   disabled?: boolean;
+  /**
+   * Fires whenever a new crumb is discovered (not on initial load).
+   * The caller can use this to persist the word server-side.
+   */
+  onCrumbFound?: (word: string) => void;
 }
 
 export function useGriddle({
@@ -73,6 +84,7 @@ export function useGriddle({
   onSolved,
   unassisted = false,
   disabled = false,
+  onCrumbFound,
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
   const [path, setPath] = useState<number[]>([]);
   const [shakeSignal, setShakeSignal] = useState(0);
@@ -104,6 +116,12 @@ export function useGriddle({
    */
   const foundWordsRef = useRef<string[]>([]);
   useEffect(() => { foundWordsRef.current = foundWords; }, [foundWords]);
+
+  // Ref mirror of onCrumbFound so the word-detection effect always
+  // reads the latest callback without listing it in deps (which would
+  // re-fire the effect on every render since the prop is a new closure).
+  const onCrumbFoundRef = useRef(onCrumbFound);
+  useEffect(() => { onCrumbFoundRef.current = onCrumbFound; }, [onCrumbFound]);
 
   // Dedup ref for the real-time dictionary check — prevents re-
   // enqueueing the same candidate when the effect re-fires on an
@@ -215,6 +233,21 @@ export function useGriddle({
     telemetryRef.current?.reset();
   }, []);
 
+  // Merge server-persisted crumbs into the live list without firing
+  // onCrumbFound (they're already saved). Used by GameClient after
+  // the async /api/crumbs fetch resolves.
+  const seedFoundWords = useCallback((words: string[]) => {
+    if (words.length === 0) return;
+    setFoundWords((prev) => {
+      const existing = new Set(prev);
+      const newOnes = words.filter((w) => !existing.has(w));
+      if (newOnes.length === 0) return prev;
+      // Append persisted crumbs after any newly found ones (newest-first)
+      return [...prev, ...newOnes];
+    });
+  }, []);
+
+
   // Real-time shorter-word detection (4-8 letters). The dictionary is
   // lazy-loaded via dynamic import — the first check after page load
   // may take ~50-100ms while the chunk downloads, but `prefetchDictionary`
@@ -237,7 +270,16 @@ export function useGriddle({
         // Persist the find for the duration of the attempt. Dedup via
         // the state update callback so rapid re-finds of the same word
         // don't create duplicate entries even under React batching.
-        setFoundWords((prev) => (prev.includes(candidate) ? prev : [candidate, ...prev]));
+        // Side effect (onCrumbFound) lives OUTSIDE the updater — React
+        // StrictMode double-invokes updaters, so a side effect inside
+        // would fire twice per crumb.
+        let isNew = false;
+        setFoundWords((prev) => {
+          if (prev.includes(candidate)) return prev;
+          isNew = true;
+          return [candidate, ...prev];
+        });
+        if (isNew) onCrumbFoundRef.current?.(candidate);
       })
       .catch(() => {
         // Dictionary chunk failed to load — silently skip.
@@ -452,6 +494,6 @@ export function useGriddle({
       pendingSolve,
       foundWords,
     },
-    { typeLetter, tapCell, backspace, reset, fullReset },
+    { typeLetter, tapCell, backspace, reset, fullReset, seedFoundWords },
   ];
 }

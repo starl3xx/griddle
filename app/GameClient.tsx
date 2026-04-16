@@ -102,6 +102,33 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     setActivePuzzle(initialPuzzle);
   }, [initialPuzzle]);
 
+  // ── Persisted crumbs ─────────────────────────────────────────────
+  // Fetch any previously saved crumbs whenever the active puzzle
+  // changes. Seeded into useGriddle as initialFoundWords so the
+  // player's earlier discoveries appear immediately on page load.
+  const [persistedCrumbs, setPersistedCrumbs] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/crumbs?dayNumber=${activePuzzle.dayNumber}`)
+      .then((r) => (r.ok ? r.json() : { crumbs: [] }))
+      .then((data: { crumbs: string[] }) => {
+        if (!cancelled) setPersistedCrumbs(data.crumbs);
+      })
+      .catch(() => { /* best-effort — empty list is fine */ });
+    return () => { cancelled = true; };
+  }, [activePuzzle.dayNumber]);
+
+  // Fire-and-forget POST when a new crumb is discovered during play.
+  const handleCrumbFound = useCallback((word: string) => {
+    fetch('/api/crumbs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dayNumber: activePuzzle.dayNumber, word }),
+    }).catch(() => { /* best-effort */ });
+  }, [activePuzzle.dayNumber]);
+
+
   /**
    * Tracks the Farcaster pfp URL last successfully POSTed to
    * /api/profile/farcaster. Shared between handleWalletConnect
@@ -254,7 +281,25 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     onSolved: handleSolved,
     disabled: showTutorial,
     unassisted: unassistedMode,
+    onCrumbFound: handleCrumbFound,
   });
+
+  // When persisted crumbs arrive from the server, merge them into the
+  // live foundWords list. seedFoundWords is de-duped and doesn't fire
+  // onCrumbFound (no re-saving already-persisted words).
+  //
+  // Destructure stable callbacks from actions (each is a useCallback
+  // with [] deps). The actions object itself is a fresh literal every
+  // render, so depending on it would re-fire effects on every render.
+  const { seedFoundWords, fullReset } = actions;
+
+  // Depend on persistedCrumbs only — seedFoundWords has stable identity.
+  useEffect(() => {
+    if (persistedCrumbs.length > 0) {
+      seedFoundWords(persistedCrumbs);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persistedCrumbs]);
 
   const handlePlayAgain = useCallback(() => {
     setSolveResult(null);
@@ -269,9 +314,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     if (prevDayRef.current !== activePuzzle.dayNumber) {
       prevDayRef.current = activePuzzle.dayNumber;
       setSolveResult(null);
-      actions.fullReset();
+      fullReset();
     }
-  }, [activePuzzle.dayNumber, actions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePuzzle.dayNumber]);
 
   /**
    * Wallet linking + premium read. Fired once when a wallet connects.

@@ -400,3 +400,38 @@ export const funnelEvents = pgTable(
       .where(sql`${t.idempotencyKey} is not null`),
   }),
 );
+
+/**
+ * Puzzle crumbs — shorter words (4–8 letters) discovered during a puzzle
+ * attempt. Persisted so they reload if the player returns later in the day
+ * (or down the road for archive replays). Permanent per puzzle per user.
+ *
+ * Keyed on `session_id` (always present) so anonymous players get
+ * persistence too. `wallet` is populated when known so a future cross-
+ * device merge can union by wallet.
+ */
+export const puzzleCrumbs = pgTable(
+  'puzzle_crumbs',
+  {
+    id: serial('id').primaryKey(),
+    puzzleId: integer('puzzle_id').references(() => puzzles.id).notNull(),
+    sessionId: varchar('session_id', { length: 64 }).notNull(),
+    wallet: varchar('wallet', { length: 42 }),
+    word: varchar('word', { length: 8 }).notNull(),
+    foundAt: timestamp('found_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    // One occurrence of each word per session per puzzle
+    sessionPuzzleWordIdx: uniqueIndex('puzzle_crumbs_session_puzzle_word_idx').on(
+      t.sessionId,
+      t.puzzleId,
+      t.word,
+    ),
+    // Fast lookup: all crumbs for a session on a given puzzle
+    sessionPuzzleIdx: index('puzzle_crumbs_session_puzzle_idx').on(t.sessionId, t.puzzleId),
+    // Future: cross-device merge by wallet
+    walletPuzzleIdx: index('puzzle_crumbs_wallet_puzzle_idx')
+      .on(t.wallet, t.puzzleId)
+      .where(sql`${t.wallet} is not null`),
+  }),
+);
