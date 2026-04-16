@@ -3,10 +3,16 @@ import { kv } from '@/lib/kv';
 /**
  * Fixed-window rate limiter backed by Upstash Redis.
  *
- * Uses INCR + EXPIRE (only on the first hit in a window) so each call is
- * one round-trip to Upstash. A fixed window is less precise than a
- * sliding log but fine for the griefing-class threats we're defending
- * against here (casual flood, not a sophisticated actor).
+ * A single EVAL per check so the INCR and the first-hit EXPIRE land in
+ * the same atomic Redis step — a network blip between a separate INCR
+ * and EXPIRE would orphan the key without a TTL and permanently
+ * rate-limit the caller. The same script also returns the key's real
+ * PTTL so `resetAt` reflects when the window actually expires, not when
+ * a window starting at the current request would expire.
+ *
+ * Fixed windows are less precise than a sliding log but fine for the
+ * griefing-class threats we're defending against (casual flood, not a
+ * sophisticated actor).
  *
  * If Upstash is unreachable we fail open — an outage that silently
  * disables rate limits is preferable to one that 429s every payment
@@ -24,23 +30,39 @@ export interface RateLimitResult {
   degraded?: boolean;
 }
 
+// Atomic INCR + first-hit EXPIRE, returning [count, pttl_ms]. PTTL
+// returns -1 for a key with no TTL (shouldn't happen after this runs,
+// but we still guard against it) and -2 if the key doesn't exist (can't
+// happen — INCR just created it).
+const INCR_WITH_TTL_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return { count, redis.call('PTTL', KEYS[1]) }
+`.trim();
+
 export async function checkRateLimit(
   key: string,
   limit: number,
   windowSec: number,
 ): Promise<RateLimitResult> {
   const redisKey = `griddle:ratelimit:${key}`;
-  const now = Math.floor(Date.now() / 1000);
-  const resetAt = now + windowSec;
+  const nowMs = Date.now();
 
   try {
-    const count = await kv.incr(redisKey);
-    if (count === 1) {
-      // First hit in a fresh window — set the TTL so the counter
-      // doesn't live forever. Subsequent INCRs in the same window
-      // leave the TTL untouched.
-      await kv.expire(redisKey, windowSec);
-    }
+    const result = (await kv.eval(
+      INCR_WITH_TTL_SCRIPT,
+      [redisKey],
+      [String(windowSec)],
+    )) as [number, number];
+    const count = Number(result[0]);
+    const pttlMs = Number(result[1]);
+    // If PTTL came back -1 (key somehow exists without TTL), fall back
+    // to windowSec so resetAt is at worst over-estimated rather than
+    // stuck at epoch. Same for -2 (key not found, impossible here).
+    const effectiveTtlMs = pttlMs > 0 ? pttlMs : windowSec * 1000;
+    const resetAt = Math.floor((nowMs + effectiveTtlMs) / 1000);
     const remaining = Math.max(0, limit - count);
     return {
       allowed: count <= limit,
@@ -52,7 +74,7 @@ export async function checkRateLimit(
     return {
       allowed: true,
       remaining: limit,
-      resetAt,
+      resetAt: Math.floor(nowMs / 1000) + windowSec,
       degraded: true,
     };
   }

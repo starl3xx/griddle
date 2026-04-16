@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { CellState } from '@/lib/useGriddle';
 
 interface GridProps {
@@ -22,6 +22,21 @@ export function Grid({ grid, cellStates, sequenceByCell, shakeSignal, solved, on
     return () => clearTimeout(t);
   }, [shakeSignal]);
 
+  // `onCellTap` from useGriddle is a `useCallback` whose deps include
+  // `path`, so its reference changes on every tap. Passing it straight
+  // through would defeat `React.memo` on Cell (shallow-compare sees a
+  // new function and re-renders). A ref + empty-dep stable forwarder
+  // decouples identity from content: Cell's `onTap` never changes, so
+  // cells whose own props are unchanged stay memoized, while the
+  // forwarder still invokes the latest callback through the ref.
+  const onCellTapRef = useRef(onCellTap);
+  useEffect(() => {
+    onCellTapRef.current = onCellTap;
+  });
+  const stableOnTap = useCallback((idx: number) => {
+    onCellTapRef.current(idx);
+  }, []);
+
   return (
     <div
       className={[
@@ -37,7 +52,7 @@ export function Grid({ grid, cellStates, sequenceByCell, shakeSignal, solved, on
           letter={grid[i]}
           state={cellStates[i]}
           sequence={sequenceByCell[i]}
-          onTap={onCellTap}
+          onTap={stableOnTap}
         />
       ))}
     </div>
@@ -53,9 +68,8 @@ interface CellProps {
 }
 
 // Memoized so a state change on one cell doesn't re-render all nine.
-// Passes `index` + the parent's stable `onTap` callback instead of an
-// inline `() => onCellTap(i)` closure — the closure would have been a
-// fresh function every render and would have defeated React.memo.
+// `onTap` is guaranteed stable by the ref indirection in Grid above,
+// so memo's shallow comparison actually prunes unchanged cells.
 const Cell = memo(function Cell({ index, letter, state, sequence, onTap }: CellProps) {
   const base =
     'relative w-20 h-20 sm:w-24 sm:h-24 rounded-lg border-4 flex items-center justify-center text-3xl sm:text-4xl font-black uppercase transition-all duration-fast select-none';
