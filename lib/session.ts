@@ -1,5 +1,11 @@
 import { headers } from 'next/headers';
 
+// Re-exported from `lib/session-id` so existing callers keep their
+// import path. The constants live in a standalone module because
+// middleware.ts also needs them and can't transitively pull in
+// `next/headers` via this file.
+export { SESSION_ID_REGEX, isValidSessionId } from '@/lib/session-id';
+
 /**
  * Session id reader.
  *
@@ -11,18 +17,6 @@ import { headers } from 'next/headers';
  * middleware — e.g. a misconfigured matcher), throw loudly so the bug
  * surfaces immediately rather than silently corrupting data.
  */
-
-/**
- * Canonical session id format. Middleware mints `crypto.randomUUID()`
- * with dashes stripped = exactly 32 lowercase hex chars. Shared between
- * the middleware cookie check and any other validation surface (e.g.
- * Stripe webhook metadata) so there's one source of truth.
- */
-export const SESSION_ID_REGEX = /^[0-9a-f]{32}$/i;
-
-export function isValidSessionId(value: unknown): value is string {
-  return typeof value === 'string' && SESSION_ID_REGEX.test(value);
-}
 
 export async function getSessionId(): Promise<string> {
   const h = await headers();
