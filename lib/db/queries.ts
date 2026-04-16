@@ -14,7 +14,7 @@ import {
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
-import { slugifyUsername } from '@/lib/username';
+import { slugifyUsername, validateUsername } from '@/lib/username';
 
 /**
  * Server-side puzzle/solve queries shared between the server component
@@ -1463,21 +1463,24 @@ export async function upsertProfileForFarcaster(input: {
     return toProfileRow(rows[0]);
   }
 
-  // New profile. Use onConflictDoNothing to absorb the TOCTOU race where
-  // a concurrent request creates a row with the same farcaster_fid or
-  // wallet between the SELECT lookups above and this INSERT. On conflict
-  // we re-query to return whichever row won the race.
-  // First-connect Farcaster profile. If the user has no handle, seed
-  // one from their Farcaster @username (or a fallback) so they have a
-  // public identity on the leaderboard without having to pick one.
-  const seedHandle = input.username ? slugifyUsername(input.username) : null;
+  // New profile. Seed a handle from the Farcaster @username — but run
+  // it through the profanity check and null it out if it fails (user
+  // can pick a clean one from Settings later). If the slugified handle
+  // collides with an existing unique-index entry, drop it (null handle)
+  // and let the insert succeed on fid/wallet instead. The user can set
+  // their handle from Settings — better than crashing the first connect.
+  let seedHandle: string | null = null;
+  if (input.username) {
+    const slug = slugifyUsername(input.username);
+    const { valid } = validateUsername(slug);
+    if (valid) seedHandle = slug;
+  }
+
   const inserted = await db.insert(profiles).values({
     farcasterFid: input.fid,
     farcasterUsername: input.username ?? null,
     handle: seedHandle,
     avatarUrl: input.avatarUrl ?? null,
-    // New Farcaster row: if we seeded an avatar, tag it so future
-    // syncs know it's safe to refresh.
     avatarSource: input.avatarUrl ? 'farcaster' : null,
     wallet,
     updatedAt: new Date(),
@@ -1485,17 +1488,34 @@ export async function upsertProfileForFarcaster(input: {
 
   let r = inserted[0];
   if (!r) {
-    // Another request won — re-fetch by FID (preferred) or wallet.
-    const refetch = await db
-      .select()
-      .from(profiles)
-      .where(eq(profiles.farcasterFid, input.fid))
-      .limit(1);
-    r = refetch[0]
-      ?? (wallet
-        ? (await db.select().from(profiles).where(eq(profiles.wallet, wallet)).limit(1))[0]
-        : undefined);
-    if (!r) throw new Error('upsertProfileForFarcaster: insert conflict but no row found on re-fetch');
+    // onConflictDoNothing returned empty — could be fid, wallet, OR
+    // handle collision. If it was a handle collision on a new FID/wallet,
+    // retry without the handle so the profile still gets created.
+    if (seedHandle) {
+      const retry = await db.insert(profiles).values({
+        farcasterFid: input.fid,
+        farcasterUsername: input.username ?? null,
+        handle: null,
+        avatarUrl: input.avatarUrl ?? null,
+        avatarSource: input.avatarUrl ? 'farcaster' : null,
+        wallet,
+        updatedAt: new Date(),
+      }).onConflictDoNothing().returning();
+      r = retry[0];
+    }
+    if (!r) {
+      // True FID/wallet collision — another request won the race.
+      const refetch = await db
+        .select()
+        .from(profiles)
+        .where(eq(profiles.farcasterFid, input.fid))
+        .limit(1);
+      r = refetch[0]
+        ?? (wallet
+          ? (await db.select().from(profiles).where(eq(profiles.wallet, wallet)).limit(1))[0]
+          : undefined);
+      if (!r) throw new Error('upsertProfileForFarcaster: insert conflict but no row found on re-fetch');
+    }
   }
   return toProfileRow(r);
 }

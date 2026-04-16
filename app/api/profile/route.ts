@@ -126,10 +126,6 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   // sync can re-seed it as 'farcaster'.
   const patch: Record<string, string | null> = {};
   if (body.handle !== undefined) {
-    // Handle changes are Premium-gated. The structural check still
-    // runs before the premium check so a malformed handle from a
-    // premium user gets a 400 (not a 402) and the error message is
-    // about the shape, not the gate.
     const handle = body.handle.trim().toLowerCase().slice(0, 32);
     const validation = validateUsername(handle);
     if (!validation.valid) {
@@ -138,12 +134,28 @@ export async function PATCH(req: Request): Promise<NextResponse> {
         { status: 400 },
       );
     }
-    const premium = await isSessionPremium(sessionId);
-    if (!premium) {
-      return NextResponse.json(
-        { error: 'Changing your username is a Premium feature.' },
-        { status: 402 },
-      );
+    // Premium gate only on CHANGES — not on initial sets. The email
+    // sign-up flow stashes a pending username in localStorage and
+    // PATCHes it after the magic-link verify lands; that user has no
+    // profile handle yet and shouldn't need Premium just to complete
+    // onboarding. We detect "initial set" by checking whether the
+    // current profile row already has a handle. If it does, this is
+    // a rename → require Premium. If it doesn't, this is first-time
+    // setup → allow.
+    const currentRows = await db
+      .select({ handle: profiles.handle })
+      .from(profiles)
+      .where(eq(profiles.id, profileId))
+      .limit(1);
+    const currentHandle = currentRows[0]?.handle;
+    if (currentHandle && currentHandle !== handle) {
+      const premium = await isSessionPremium(sessionId);
+      if (!premium) {
+        return NextResponse.json(
+          { error: 'Changing your username is a Premium feature.' },
+          { status: 402 },
+        );
+      }
     }
     patch.handle = handle;
   }
