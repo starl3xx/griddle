@@ -15,3 +15,10 @@ contracts/out
 contracts/cache
 contracts/broadcast
 contracts/foundry.lock
+
+# Puzzle seed data — deliberately NOT committed. The word list and
+# day-number → word mapping are the entire product secret; any local
+# file at these paths must be kept out of git. The live DB in Neon is
+# the source of truth.
+data/puzzles.local.json
+griddle_words.local.txt
