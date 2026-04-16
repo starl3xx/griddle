@@ -1933,7 +1933,24 @@ export async function updateStreakForSolve(
     .where(eq(streaks.wallet, normalized))
     .limit(1);
 
+  const today = getCurrentDayNumber();
+
   if (existing.length === 0) {
+    // Archive solve as first-ever solve: create a row but don't start
+    // a streak (no lastSolvedDayNumber, streak stays at 0).
+    if (dayNumber !== today) {
+      await db
+        .insert(streaks)
+        .values({
+          wallet: normalized,
+          currentStreak: 0,
+          longestStreak: 0,
+          lastSolvedDayNumber: null,
+          updatedAt: new Date(),
+        })
+        .onConflictDoNothing({ target: streaks.wallet });
+      return { currentStreak: 0, longestStreak: 0 };
+    }
     await db
       .insert(streaks)
       .values({
@@ -1959,6 +1976,17 @@ export async function updateStreakForSolve(
 
   const row = existing[0];
   const last = row.lastSolvedDayNumber;
+
+  // Archive solves (any day that isn't today) never affect streak state.
+  // Without this guard, solving an archive puzzle between lastSolved and
+  // today would incorrectly break or extend the streak.
+  if (dayNumber !== today) {
+    return {
+      currentStreak: row.currentStreak,
+      longestStreak: row.longestStreak,
+    };
+  }
+
   let nextCurrent: number;
   if (last == null) {
     nextCurrent = 1;
@@ -1970,17 +1998,9 @@ export async function updateStreakForSolve(
     };
   } else if (dayNumber === last + 1) {
     nextCurrent = row.currentStreak + 1;
-  } else if (dayNumber > last + 1) {
+  } else {
     // Missed at least one day — streak breaks and restarts at 1.
     nextCurrent = 1;
-  } else {
-    // Solve for a PAST puzzle (archive). Doesn't change the current
-    // streak trajectory; just record that it happened and leave the
-    // streak state untouched.
-    return {
-      currentStreak: row.currentStreak,
-      longestStreak: row.longestStreak,
-    };
   }
 
   const nextLongest = Math.max(row.longestStreak, nextCurrent);
