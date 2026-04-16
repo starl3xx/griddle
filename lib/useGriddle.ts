@@ -128,10 +128,14 @@ export function useGriddle({
     return Array.from({ length: 9 }, (_, i) => {
       if (i === current) return 'current';
       if (used.has(i)) return 'used';
+      // Unassisted mode: suppress adjacency hints — all unused cells
+      // look the same ('open') so the solver gets no visual feedback
+      // about which cells are reachable.
+      if (unassisted) return 'open';
       if (blocked.has(i)) return 'blocked';
       return inProgress ? 'available' : 'open';
     });
-  }, [path]);
+  }, [path, unassisted]);
 
   const sequenceByCell = useMemo<Array<number | null>>(() => {
     const arr: Array<number | null> = new Array(9).fill(null);
