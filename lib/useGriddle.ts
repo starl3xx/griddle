@@ -134,6 +134,29 @@ export function useGriddle({
   }, []);
 
   const reset = useCallback(() => {
+    // Wordmark counter: only a MID-ATTEMPT Reset press disqualifies
+    // Blameless. A reset that happens after a confirmed solve is the
+    // "Play Again" transition — handlePlayAgain calls this same
+    // function to clear the board for the next attempt, and counting
+    // that as a user Reset would make Blameless impossible to earn
+    // on any Play Again session (the next attempt would start with
+    // resetCountRef=1). Skip the increment when `solved` is true.
+    //
+    // Reset the counters BEFORE the state mutations so the new
+    // attempt always starts with zeros, whether we arrived here
+    // from a Play Again (solved=true → skip increment, counters
+    // already zeroed by triggerSolve anyway) or a mid-attempt
+    // Reset press (solved=false → count this press).
+    if (!solved) {
+      resetCountRef.current += 1;
+    } else {
+      // Play Again path — make sure counters are zero for the next
+      // attempt. triggerSolve also zeros them on the success branch,
+      // but doing it here too means a reset-after-solve is idempotent
+      // even if the solve flow was interrupted.
+      backspaceCountRef.current = 0;
+      resetCountRef.current = 0;
+    }
     setPath([]);
     inFlightAttemptRef.current = null;
     setSolved(false);
@@ -146,11 +169,7 @@ export function useGriddle({
     // `lastFoundWordRef` also intentionally persists so retyping a
     // previously-found word after Reset doesn't re-enqueue it.
     telemetryRef.current?.reset();
-    // Wordmark counter: track Reset presses for Blameless.
-    // Not cleared here (that'd make Blameless trivially earnable by
-    // hitting Reset once to zero it); cleared only on confirmed solve.
-    resetCountRef.current += 1;
-  }, []);
+  }, [solved]);
 
   // Real-time shorter-word detection (4-8 letters). The dictionary is
   // lazy-loaded via dynamic import — the first check after page load
