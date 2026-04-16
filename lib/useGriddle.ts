@@ -117,6 +117,12 @@ export function useGriddle({
   const foundWordsRef = useRef<string[]>([]);
   useEffect(() => { foundWordsRef.current = foundWords; }, [foundWords]);
 
+  // Ref mirror of onCrumbFound so the word-detection effect always
+  // reads the latest callback without listing it in deps (which would
+  // re-fire the effect on every render since the prop is a new closure).
+  const onCrumbFoundRef = useRef(onCrumbFound);
+  useEffect(() => { onCrumbFoundRef.current = onCrumbFound; }, [onCrumbFound]);
+
   // Dedup ref for the real-time dictionary check — prevents re-
   // enqueueing the same candidate when the effect re-fires on an
   // identical letters state (which shouldn't happen normally but
@@ -273,7 +279,7 @@ export function useGriddle({
           isNew = true;
           return [candidate, ...prev];
         });
-        if (isNew) onCrumbFound?.(candidate);
+        if (isNew) onCrumbFoundRef.current?.(candidate);
       })
       .catch(() => {
         // Dictionary chunk failed to load — silently skip.
