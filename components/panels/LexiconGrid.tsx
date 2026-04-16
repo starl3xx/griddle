@@ -39,6 +39,7 @@ export function LexiconGrid({ wallet }: LexiconGridProps) {
     }
     let cancelled = false;
     setLoading(true);
+    setEarned(new Set());
     fetch(`/api/wordmarks/${wallet}`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { entries?: Array<{ wordmarkId: string }> } | null) => {

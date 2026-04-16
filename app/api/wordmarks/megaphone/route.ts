@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
-import { getLifetimeSolveCount, insertWordmarksIfNew } from '@/lib/db/queries';
+import { insertWordmarksIfNew } from '@/lib/db/queries';
+import { db } from '@/lib/db/client';
+import { solves } from '@/lib/db/schema';
+import { and, eq } from 'drizzle-orm';
 
 /**
  * POST /api/wordmarks/megaphone
@@ -37,12 +40,18 @@ export async function POST(): Promise<NextResponse> {
     );
   }
 
-  // Guard: the user must have at least one solve to earn Megaphone.
-  // Without this, a direct POST (curl) could mint the badge without
-  // ever solving or sharing. One solve is the minimum proof that the
-  // user had something to share.
-  const solves = await getLifetimeSolveCount(wallet);
-  if (solves === 0) {
+  // Guard: the user must have at least one successful solve to earn
+  // Megaphone. Without this, a direct POST (curl) could mint the badge
+  // without ever solving or sharing. Deliberately does NOT exclude
+  // flagged solves — a user whose solve was flagged still saw the
+  // SolveModal, could share, and the share succeeded. Excluding them
+  // would return 403 after a real share action.
+  const hasSolve = await db
+    .select({ id: solves.id })
+    .from(solves)
+    .where(and(eq(solves.wallet, wallet.toLowerCase()), eq(solves.solved, true)))
+    .limit(1);
+  if (hasSolve.length === 0) {
     return NextResponse.json(
       { error: 'solve a puzzle before earning Megaphone' },
       { status: 403 },
