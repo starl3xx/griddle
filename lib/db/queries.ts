@@ -11,6 +11,7 @@ import {
   magicLinks,
   funnelEvents,
   wordmarks,
+  puzzleCrumbs,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
@@ -86,13 +87,7 @@ async function safeKvSet<T>(key: string, value: T, ttl: number): Promise<void> {
  * roundtrip so the next /api/solve hit also gets a cache hit.
  */
 export async function getTodayPuzzle(): Promise<TodayPuzzlePayload | null> {
-  const dayNumber = getCurrentDayNumber();
-
-  const cached = await safeKvGet<TodayPuzzlePayload>(PUBLIC_KEY(dayNumber));
-  if (cached) return cached;
-
-  const row = await refreshCacheForDay(dayNumber);
-  return row ? toPublicPayload(row) : null;
+  return getPuzzleByDay(getCurrentDayNumber());
 }
 
 /**
@@ -2055,4 +2050,55 @@ export async function getLifetimeSolveCount(wallet: string): Promise<number> {
       ),
     );
   return rows[0]?.count ?? 0;
+}
+
+// ─── Puzzle Crumbs ─────────────────────────────────────────────────
+
+/**
+ * Fetch all crumbs a session has found on a given puzzle, oldest first.
+ * Returns the raw word strings — the caller (API route or hook) owns
+ * the response shape.
+ */
+export async function getCrumbsForSession(
+  sessionId: string,
+  puzzleId: number,
+): Promise<string[]> {
+  const rows = await db
+    .select({ word: puzzleCrumbs.word })
+    .from(puzzleCrumbs)
+    .where(
+      and(
+        eq(puzzleCrumbs.sessionId, sessionId),
+        eq(puzzleCrumbs.puzzleId, puzzleId),
+      ),
+    )
+    .orderBy(asc(puzzleCrumbs.foundAt));
+  return rows.map((r) => r.word);
+}
+
+/**
+ * Persist a newly discovered crumb. Idempotent — the unique index on
+ * (session_id, puzzle_id, word) means a duplicate insert is a silent
+ * no-op via ON CONFLICT DO NOTHING.
+ *
+ * Returns `true` if the row was inserted (new crumb), `false` if it
+ * already existed.
+ */
+export async function saveCrumb(
+  sessionId: string,
+  puzzleId: number,
+  word: string,
+  wallet: string | null,
+): Promise<boolean> {
+  const result = await db
+    .insert(puzzleCrumbs)
+    .values({
+      sessionId,
+      puzzleId,
+      word: word.toUpperCase(),
+      wallet: wallet?.toLowerCase() ?? null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: puzzleCrumbs.id });
+  return result.length > 0;
 }
