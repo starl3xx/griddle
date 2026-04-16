@@ -150,7 +150,7 @@ export function StatsPanel({
           locked ones grayed out. Modeled on LHAW's Lexicon panel.
           Replaces the old "Coming soon — achievements for your best
           solves" placeholder. */}
-      {hasAccount && <LexiconGrid wallet={wallet} />}
+      {hasAccount && <LexiconGrid enabled={hasAccount} />}
     </>
   );
 }
