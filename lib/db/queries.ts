@@ -413,12 +413,27 @@ export interface StatsIdentity {
 }
 
 /**
+ * Synthetic `player_key` for an identity. Profile wins; wallet is the
+ * fallback; session-only has no key (anonymous). Matches the generated
+ * column on wordmarks + streaks so app code can hit the unique indexes
+ * on those tables directly.
+ */
+export function playerKeyFor(identity: {
+  profileId?: number | null;
+  wallet?: string | null;
+}): string | null {
+  if (identity.profileId != null) return `p:${identity.profileId}`;
+  if (identity.wallet) return identity.wallet.toLowerCase();
+  return null;
+}
+
+/**
  * SQL fragment matching a solve row to the caller's identity. See
  * StatsIdentity docs for the resolution order; this is the shared
  * predicate used by getWalletStats, getPremiumStats, and any future
  * profile-keyed query that needs the same matching semantics.
  */
-function solveBelongsTo(identity: StatsIdentity) {
+export function solveBelongsTo(identity: StatsIdentity) {
   const clauses = [] as ReturnType<typeof sql>[];
   if (identity.profileId != null) {
     clauses.push(sql`${solves.profileId} = ${identity.profileId}`);
@@ -456,13 +471,13 @@ export async function getWalletStats(identity: StatsIdentity): Promise<WalletSta
       ),
     );
 
-  // Streaks are still wallet-keyed — handle-only users will land on
-  // zero until the follow-up PR that migrates streaks to profile_id.
-  // Not a regression; they were already zero under the old code.
+  // Streaks key on the player_key (profile_id preferred, wallet
+  // fallback) so handle-only users see their streak here too.
   let currentStreak = 0;
   let longestStreak = 0;
-  if (normalizedWallet) {
-    const streakRow = await selectStreakRow(normalizedWallet);
+  const playerKey = playerKeyFor(identity);
+  if (playerKey) {
+    const streakRow = await selectStreakRow(playerKey);
     currentStreak = streakRow?.currentStreak ?? 0;
     longestStreak = streakRow?.longestStreak ?? 0;
   }
@@ -2027,41 +2042,56 @@ export interface EarnedWordmarkRow {
  * costs a round trip).
  */
 export async function insertWordmarksIfNew(
-  wallet: string,
+  identity: StatsIdentity,
   wordmarkIds: readonly string[],
   puzzleId: number | null,
 ): Promise<string[]> {
   if (wordmarkIds.length === 0) return [];
-  const normalized = wallet.toLowerCase();
+  const profileId = identity.profileId ?? null;
+  const wallet = identity.wallet?.toLowerCase() ?? null;
+  // No identifiable player → nothing to write. Anonymous (session-only)
+  // callers can't earn wordmarks since there's no durable identity to
+  // attach them to.
+  if (profileId == null && wallet == null) return [];
+
   const rows = wordmarkIds.map((id) => ({
-    wallet: normalized,
+    profileId,
+    wallet,
     wordmarkId: id,
     puzzleId,
   }));
+  // ON CONFLICT targets the generated `player_key` column's unique
+  // index so a wallet + profile row collides with a profile-only row
+  // (once profile_id is the same), preventing a player from double-
+  // earning the same wordmark across identity changes.
   const inserted = await db
     .insert(wordmarks)
     .values(rows)
     .onConflictDoNothing({
-      target: [wordmarks.wallet, wordmarks.wordmarkId],
+      target: [wordmarks.playerKey, wordmarks.wordmarkId],
     })
     .returning({ wordmarkId: wordmarks.wordmarkId });
   return inserted.map((r) => r.wordmarkId);
 }
 
 /**
- * Fetch all wordmarks earned by a wallet, newest first. Used by the
+ * Fetch all wordmarks earned by a player, newest first. Used by the
  * Lexicon grid on the Stats panel.
  *
+ * Keyed on player_key (profile_id preferred, wallet fallback) so a
+ * handle-only user and a wallet-only user each see their own row
+ * set under the same identity scheme the /api/solve write path uses.
+ *
  * Uses raw SQL — see the "Drizzle wallet-eq drift" note in the README
- * Code Style section. Empirically, `eq(wordmarks.wallet, normalized)`
- * from a dynamic `[wallet]` route file can reproducibly return 0 rows
- * for rows that raw SQL finds fine, and this helper is called from
- * exactly such a route (`/api/wordmarks/[wallet]`).
+ * Code Style section. The original wallet-eq flakiness was observed
+ * on the same column pattern being used here, so the same raw-SQL
+ * precaution applies.
  */
-export async function getWordmarksForWallet(
-  wallet: string,
+export async function getWordmarksForPlayer(
+  identity: StatsIdentity,
 ): Promise<EarnedWordmarkRow[]> {
-  const normalized = wallet.toLowerCase();
+  const playerKey = playerKeyFor(identity);
+  if (playerKey == null) return [];
   const result = await db.execute<{
     wordmarkId: string;
     earnedAt: Date;
@@ -2072,7 +2102,7 @@ export async function getWordmarksForWallet(
       earned_at   AS "earnedAt",
       puzzle_id   AS "puzzleId"
     FROM wordmarks
-    WHERE wallet = ${normalized}
+    WHERE player_key = ${playerKey}
     ORDER BY earned_at DESC
   `);
   const rows = Array.isArray(result) ? result : (result.rows ?? []);
@@ -2109,16 +2139,23 @@ export async function getWordmarksForWallet(
  * into awardWordmarks without a follow-up SELECT.
  */
 export async function updateStreakForSolve(
-  wallet: string,
+  identity: StatsIdentity,
   dayNumber: number,
 ): Promise<{ currentStreak: number; longestStreak: number }> {
-  const normalized = wallet.toLowerCase();
+  const playerKey = playerKeyFor(identity);
+  if (playerKey == null) {
+    // Fully anonymous (session-only) — no identity to attach a
+    // streak to. Caller shouldn't hit this path, but zero out
+    // defensively instead of crashing.
+    return { currentStreak: 0, longestStreak: 0 };
+  }
+  const profileId = identity.profileId ?? null;
+  const wallet = identity.wallet?.toLowerCase() ?? null;
 
-  // Raw SQL for every `streaks` read below — see "Drizzle wallet-eq
-  // drift" in README Code Style. The UPDATE ... WHERE clauses further
-  // down keep drizzle's query builder since no drift has been observed
-  // on writes.
-  const existing = await selectStreakRow(normalized);
+  // Raw SQL read — see "Drizzle wallet-eq drift" in README Code Style.
+  // Writes below stay on drizzle's builder since no drift has been
+  // observed on that path.
+  const existing = await selectStreakRow(playerKey);
 
   const today = getCurrentDayNumber();
 
@@ -2129,27 +2166,29 @@ export async function updateStreakForSolve(
       await db
         .insert(streaks)
         .values({
-          wallet: normalized,
+          profileId,
+          wallet,
           currentStreak: 0,
           longestStreak: 0,
           lastSolvedDayNumber: null,
           updatedAt: new Date(),
         })
-        .onConflictDoNothing({ target: streaks.wallet });
+        .onConflictDoNothing({ target: streaks.playerKey });
       return { currentStreak: 0, longestStreak: 0 };
     }
     await db
       .insert(streaks)
       .values({
-        wallet: normalized,
+        profileId,
+        wallet,
         currentStreak: 1,
         longestStreak: 1,
         lastSolvedDayNumber: dayNumber,
         updatedAt: new Date(),
       })
-      .onConflictDoNothing({ target: streaks.wallet });
+      .onConflictDoNothing({ target: streaks.playerKey });
     // Re-read in the rare case a concurrent request won the insert race.
-    const after = await selectStreakRow(normalized);
+    const after = await selectStreakRow(playerKey);
     return {
       currentStreak: after?.currentStreak ?? 1,
       longestStreak: after?.longestStreak ?? 1,
@@ -2202,7 +2241,7 @@ export async function updateStreakForSolve(
     })
     .where(
       and(
-        eq(streaks.wallet, normalized),
+        eq(streaks.playerKey, playerKey),
         last == null
           ? isNull(streaks.lastSolvedDayNumber)
           : eq(streaks.lastSolvedDayNumber, last),
@@ -2218,7 +2257,7 @@ export async function updateStreakForSolve(
   }
 
   // Concurrent update won the race — re-read the winner's state.
-  const reread = await selectStreakRow(normalized);
+  const reread = await selectStreakRow(playerKey);
   return {
     currentStreak: reread?.currentStreak ?? nextCurrent,
     longestStreak: reread?.longestStreak ?? nextLongest,
@@ -2226,41 +2265,38 @@ export async function updateStreakForSolve(
 }
 
 /**
- * Internal helper — raw SQL SELECT of a streaks row by (lowercased)
- * wallet. Exists only so the three reads inside `updateStreakForSolve`
- * (and the stats helper above) share a drift-proof code path without
+ * Internal helper — raw SQL SELECT of a streaks row by player_key.
+ * Exists only so the three reads inside `updateStreakForSolve` (and
+ * the stats helper above) share a drift-proof code path without
  * duplicating the raw SQL three times. See "Drizzle wallet-eq drift"
- * in README Code Style.
+ * in README Code Style — the same pattern that bit us on wallet has
+ * been observed here too on dynamic routes.
  */
-async function selectStreakRow(normalizedWallet: string): Promise<{
-  wallet: string;
+async function selectStreakRow(playerKey: string): Promise<{
   currentStreak: number;
   longestStreak: number;
   lastSolvedDayNumber: number | null;
   updatedAt: Date;
 } | null> {
   const result = await db.execute<{
-    wallet: string;
     currentStreak: number;
     longestStreak: number;
     lastSolvedDayNumber: number | null;
     updatedAt: Date | string;
   }>(sql`
     SELECT
-      wallet,
       current_streak         AS "currentStreak",
       longest_streak         AS "longestStreak",
       last_solved_day_number AS "lastSolvedDayNumber",
       updated_at             AS "updatedAt"
     FROM streaks
-    WHERE wallet = ${normalizedWallet}
+    WHERE player_key = ${playerKey}
     LIMIT 1
   `);
   const rows = Array.isArray(result) ? result : (result.rows ?? []);
   if (rows.length === 0) return null;
   const r = rows[0];
   return {
-    wallet: r.wallet,
     currentStreak: r.currentStreak,
     longestStreak: r.longestStreak,
     lastSolvedDayNumber: r.lastSolvedDayNumber,
@@ -2269,12 +2305,22 @@ async function selectStreakRow(normalizedWallet: string): Promise<{
 }
 
 /**
- * Count of lifetime eligible solves for a wallet. Used by
+ * Count of lifetime eligible solves for a player. Used by
  * awardWordmarks to decide Fledgling (1st) and Goldfinch (100th).
  * Includes the just-inserted row since this is called post-insert.
+ *
+ * Identity-aware so handle-only users (no wallet) still get their
+ * milestones. Prefers profile_id matching with a wallet fallback —
+ * same rule as solveBelongsTo but embedded inline because we want a
+ * single scalar count, not the predicate.
  */
-export async function getLifetimeSolveCount(wallet: string): Promise<number> {
-  const normalized = wallet.toLowerCase();
+export async function getLifetimeSolveCount(
+  identity: StatsIdentity,
+): Promise<number> {
+  const profileId = identity.profileId ?? null;
+  const wallet = identity.wallet?.toLowerCase() ?? null;
+  if (profileId == null && wallet == null) return 0;
+
   // Raw SQL — see "Drizzle wallet-eq drift" in README Code Style. This
   // result feeds Fledgling / Goldfinch awarding, so a drift-induced
   // undercount would deny legitimate milestones.
@@ -2284,12 +2330,20 @@ export async function getLifetimeSolveCount(wallet: string): Promise<number> {
   // solves table has no unique constraint on (wallet, puzzle_id), so
   // duplicate rows are expected. Without DISTINCT, re-solves would
   // accumulate toward the 100-puzzle threshold.
+  //
+  // Match on profile_id OR wallet so a player's pre-wallet and
+  // post-wallet rows both count toward the same milestone. No
+  // double-counting because DISTINCT puzzle_id collapses any
+  // duplication across identity paths.
   const result = await db.execute<{ count: number }>(sql`
     SELECT COUNT(DISTINCT puzzle_id)::int AS count
     FROM solves
-    WHERE wallet = ${normalized}
-      AND solved = true
+    WHERE solved = true
       AND (flag IS NULL OR flag = 'suspicious')
+      AND (
+        ${profileId != null ? sql`profile_id = ${profileId}` : sql`false`}
+        OR ${wallet != null ? sql`wallet = ${wallet}` : sql`false`}
+      )
   `);
   const rows = Array.isArray(result) ? result : (result.rows ?? []);
   return rows[0]?.count ?? 0;

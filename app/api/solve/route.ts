@@ -228,11 +228,12 @@ export async function POST(
     flag,
   });
 
-  // Wordmarks are only awarded on a successful, wallet-attributed
-  // solve. Anonymous solves + failed attempts bypass the award
-  // pipeline entirely — no DB writes, no response payload churn.
+  // Wordmarks are awarded on any successful solve that has SOME
+  // identity (wallet OR profile_id). Anonymous session-only solves
+  // bypass the pipeline since they have nowhere to store the award.
   let earnedWordmarks: string[] = [];
-  if (solved && wallet) {
+  const identity = { profileId, wallet };
+  if (solved && (wallet != null || profileId != null)) {
     try {
       // Flagged solves (ineligible / suspicious) must not advance the
       // streak — a bot chaining flagged solves could otherwise farm
@@ -242,12 +243,13 @@ export async function POST(
       // already suppresses speed wordmarks inside awardWordmarks).
       const [{ currentStreak }, lifetimeSolves] = await Promise.all([
         flag === null
-          ? updateStreakForSolve(wallet, body.dayNumber)
+          ? updateStreakForSolve(identity, body.dayNumber)
           : Promise.resolve({ currentStreak: 0, longestStreak: 0 }),
-        getLifetimeSolveCount(wallet),
+        getLifetimeSolveCount(identity),
       ]);
       earnedWordmarks = await awardWordmarks({
         wallet,
+        profileId,
         puzzleId: puzzle.id,
         puzzleWord: puzzle.word,
         solveTimeMs: serverSolveMs,
