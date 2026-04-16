@@ -2198,25 +2198,32 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
     // 1. solveTrend — last 30 puzzles this player has solved, fastest
     //    per puzzle, oldest first. DISTINCT ON + matching ORDER BY
     //    lets PG use an index walk to pick the fastest per puzzle.
+    //
+    //    NOTE: no `s` alias on solves here. `solveBelongsTo` renders
+    //    Drizzle column references as "solves"."col"; aliasing the
+    //    FROM clause would hide the real name and error at runtime
+    //    ("invalid reference to FROM-clause entry for table \"solves\"").
     db.execute<{ day_number: number; server_solve_ms: number }>(sql`
       WITH per_puzzle AS (
         SELECT DISTINCT ON (p.day_number)
-          p.day_number, s.server_solve_ms
-        FROM solves s
-        JOIN puzzles p ON p.id = s.puzzle_id
+          p.day_number, solves.server_solve_ms
+        FROM solves
+        JOIN puzzles p ON p.id = solves.puzzle_id
         WHERE ${identityMatches}
-          AND s.solved = true
-          AND (s.flag IS NULL OR s.flag = 'suspicious')
-          AND s.server_solve_ms IS NOT NULL
-          AND s.created_at::date = p.date::date
-        ORDER BY p.day_number DESC, s.server_solve_ms ASC
+          AND solves.solved = true
+          AND (solves.flag IS NULL OR solves.flag = 'suspicious')
+          AND solves.server_solve_ms IS NOT NULL
+          AND solves.created_at::date = p.date::date
+        ORDER BY p.day_number DESC, solves.server_solve_ms ASC
         LIMIT 30
       )
       SELECT day_number, server_solve_ms FROM per_puzzle ORDER BY day_number ASC
     `),
 
     // 2. last7Days — every day in the trailing 7 appears exactly once,
-    //    null server_solve_ms signals a gap for the bar chart.
+    //    null server_solve_ms signals a gap for the bar chart. Same
+    //    no-alias-on-solves rule as solveTrend so `identityMatches`
+    //    (which renders "solves"."col") resolves correctly.
     db.execute<{
       day_number: number;
       date: string;
@@ -2226,15 +2233,15 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
         p.day_number,
         p.date::text AS date,
         MIN(CASE
-          WHEN s.solved = true
-            AND (s.flag IS NULL OR s.flag = 'suspicious')
-            AND s.server_solve_ms IS NOT NULL
-            AND s.created_at::date = p.date::date
-          THEN s.server_solve_ms
+          WHEN solves.solved = true
+            AND (solves.flag IS NULL OR solves.flag = 'suspicious')
+            AND solves.server_solve_ms IS NOT NULL
+            AND solves.created_at::date = p.date::date
+          THEN solves.server_solve_ms
         END)::int AS server_solve_ms
       FROM puzzles p
-      LEFT JOIN solves s
-        ON s.puzzle_id = p.id
+      LEFT JOIN solves
+        ON solves.puzzle_id = p.id
         AND ${identityMatches}
       WHERE p.day_number > ${today - 7} AND p.day_number <= ${today}
       GROUP BY p.day_number, p.date
