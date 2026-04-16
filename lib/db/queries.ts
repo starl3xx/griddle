@@ -1880,8 +1880,13 @@ export async function updateStreakForSolve(
  */
 export async function getLifetimeSolveCount(wallet: string): Promise<number> {
   const normalized = wallet.toLowerCase();
+  // COUNT(DISTINCT puzzle_id) to prevent inflated Goldfinch progress
+  // when a user re-solves the same puzzle (refresh → re-submit). The
+  // solves table has no unique constraint on (wallet, puzzle_id), so
+  // duplicate rows are expected. Without DISTINCT, re-solves would
+  // accumulate toward the 100-puzzle threshold.
   const rows = await db
-    .select({ count: sql<number>`count(*)::int` })
+    .select({ count: sql<number>`count(DISTINCT ${solves.puzzleId})::int` })
     .from(solves)
     .where(
       and(
