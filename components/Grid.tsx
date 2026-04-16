@@ -71,12 +71,20 @@ export function Grid({ grid, cellStates, sequenceByCell, path, shakeSignal, solv
   }, [solved]);
 
   // Measure tile pitch (cell size + gap) so transforms are pixel-accurate
-  // at any breakpoint. Recomputed on resize so a window-resize mid-reveal
-  // doesn't land tiles in the wrong spots.
+  // at any breakpoint. Gated on animPhase === 'idle' because during
+  // 'shuffling' and 'settled' the wrappers carry transforms that would
+  // poison getBoundingClientRect (it returns post-transform visual
+  // positions — potentially negative when tiles have swapped sides).
+  // Resizing during the animation is rare — mid-flight tiles can't be
+  // re-aimed coherently anyway — so we skip the measurement and
+  // re-measure on the next idle transition (reset / Play Again /
+  // archive switch), which catches any viewport change that landed
+  // while tiles were transforming.
   const cellRefs = useRef<Array<HTMLDivElement | null>>([]);
   const [unit, setUnit] = useState<{ x: number; y: number } | null>(null);
 
   useLayoutEffect(() => {
+    if (animPhase !== 'idle') return;
     const measure = () => {
       const c0 = cellRefs.current[0];
       const c1 = cellRefs.current[1];
@@ -90,7 +98,7 @@ export function Grid({ grid, cellStates, sequenceByCell, path, shakeSignal, solv
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, []);
+  }, [animPhase]);
 
   const transforms = useMemo<Array<{ dx: number; dy: number; delay: number } | null>>(() => {
     const nulls: Array<null> = new Array(9).fill(null);
