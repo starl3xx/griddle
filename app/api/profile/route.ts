@@ -111,6 +111,13 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   // Patch values are `string` for set-to-value and `null` for
   // clear-this-column. Drizzle's .set() happily writes null into a
   // nullable varchar; the schema marks all three fields nullable.
+  //
+  // Note on avatarSource: any avatar patch coming through PATCH
+  // /api/profile is a user-driven edit (Settings' upload flow, a
+  // manual URL paste, etc.), so we always tag it as 'custom' — this
+  // shields it from the Farcaster sync overwrite path. Clearing
+  // avatarUrl to null also clears avatarSource, so a later Farcaster
+  // sync can re-seed it as 'farcaster'.
   const patch: Record<string, string | null> = {};
   if (body.handle !== undefined) {
     // Handles can't be cleared — losing a handle is destructive since
@@ -147,8 +154,10 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     // must be non-empty after trim so it can't render as <img src="">.
     if (body.avatarUrl === null || body.avatarUrl.trim() === '') {
       patch.avatarUrl = null;
+      patch.avatarSource = null;
     } else {
       patch.avatarUrl = body.avatarUrl.trim().slice(0, 500);
+      patch.avatarSource = 'custom';
     }
   }
 

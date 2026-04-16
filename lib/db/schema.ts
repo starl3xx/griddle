@@ -189,6 +189,22 @@ export const profiles = pgTable(
     /** URL to the user's avatar image (Farcaster pfp, uploaded, etc.). */
     avatarUrl: varchar('avatar_url', { length: 500 }),
     /**
+     * Provenance tag for `avatar_url`. Lets the Farcaster refresh flow
+     * auto-update a stale pfp without clobbering a user's uploaded photo.
+     *
+     * Values:
+     *   - `'farcaster'` — came from `upsertProfileForFarcaster`. Safe to
+     *     overwrite on future Farcaster sync calls.
+     *   - `'custom'`    — user uploaded via POST /api/profile/avatar or
+     *     supplied via PATCH /api/profile. DO NOT overwrite on Farcaster
+     *     sync.
+     *   - `null`        — unknown (pre-migration rows). Treated as
+     *     `'farcaster'` for safety on FID-bearing rows that were
+     *     backfilled at migration time, else `'custom'`-equivalent
+     *     (don't auto-overwrite).
+     */
+    avatarSource: varchar('avatar_source', { length: 16 }),
+    /**
      * Farcaster user id (numeric). Set when the user connects via the
      * Farcaster miniapp connector. Partial unique index so null rows
      * don't conflict (same pattern as wallet / email).

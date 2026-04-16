@@ -81,6 +81,17 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const [sessionWallet, setSessionWallet] = useState<string | null>(null);
   const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
 
+  /**
+   * Tracks the Farcaster pfp URL last successfully POSTed to
+   * /api/profile/farcaster. Shared between handleWalletConnect
+   * (initial connect path) and the pfp-listening useEffect further
+   * down (ongoing refresh path) so the two paths can deduplicate
+   * against each other. Declared up here — above handleWalletConnect
+   * — to stay out of the TDZ when the connect callback closes over it.
+   * See the big comment on the sync effect below for the dedup rules.
+   */
+  const lastSyncedPfpUrlRef = useRef<string | null>(null);
+
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
@@ -355,6 +366,13 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
       // isn't. Awaiting serializes the two so downstream reads see a
       // fully-formed session.
       if (inMiniAppRef.current && fidRef.current) {
+        // Capture the pfp URL BEFORE the await so we can mark exactly
+        // that value as synced after the request resolves. If we read
+        // pfpUrlRef.current a second time post-await, a racing SDK
+        // update could change it — we'd then mark a URL as "synced"
+        // that was never actually POSTed, and the pfp-listening
+        // effect would skip the real new URL on its next run.
+        const sentPfpUrl = pfpUrlRef.current ?? null;
         try {
           const res = await fetch('/api/profile/farcaster', {
             method: 'POST',
@@ -363,13 +381,21 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
               fid: fidRef.current,
               username: usernameRef.current ?? null,
               displayName: displayNameRef.current ?? null,
-              avatarUrl: pfpUrlRef.current ?? null,
+              avatarUrl: sentPfpUrl,
               wallet: normalized,
             }),
           });
           // Refetch the profile so SettingsModal + the gear avatar
           // reflect the server-side binding without a reload.
-          if (res.ok) await refetchProfile();
+          if (res.ok) {
+            // Mark the CAPTURED (not re-read) pfp URL as synced so
+            // the sibling `lastSyncedPfpUrlRef` effect below doesn't
+            // fire a duplicate POST when `setSessionWallet(normalized)`
+            // runs moments later. Without this, every Farcaster wallet
+            // connect would produce two identical POSTs back-to-back.
+            lastSyncedPfpUrlRef.current = sentPfpUrl;
+            await refetchProfile();
+          }
         } catch {/* best-effort — non-fatal */}
       } else {
         // Non-Farcaster wallet connect: the /api/wallet/link call above
@@ -412,6 +438,69 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     },
     [],
   );
+
+  /**
+   * Auto-refresh a Farcaster user's avatar when their pfp URL changes.
+   *
+   * Problem this solves: `handleWalletConnect` fires once when the
+   * wallet connects and snapshots `pfpUrlRef.current` into the profile
+   * row. If the Farcaster miniapp SDK later resolves a newer pfp URL
+   * (or the user updates their pfp on Farcaster and plays again), that
+   * change never propagates into `profiles.avatar_url` — the profile
+   * is pinned to whatever was set on first connect.
+   *
+   * This effect listens for `pfpUrl` changes and re-POSTs to
+   * /api/profile/farcaster. The server uses the `avatar_source` column
+   * to decide whether the overwrite is allowed:
+   *   - `'farcaster'` or `null` → apply the incoming pfp
+   *   - `'custom'`              → keep the user's uploaded photo
+   *
+   * Dedup via `lastSyncedPfpUrlRef` so we don't spam the endpoint when
+   * the effect re-runs on unrelated state changes; only fire when the
+   * pfp URL actually differs from the last value we synced.
+   *
+   * The ref itself is declared further up (near the other cross-
+   * callback refs) so `handleWalletConnect` can also advance it after
+   * its own Farcaster POST — that prevents the connect path's POST
+   * from being immediately followed by a duplicate POST from this
+   * effect when `setSessionWallet` fires.
+   */
+  useEffect(() => {
+    if (!inMiniApp) return;
+    if (!fid) return;
+    if (!sessionWallet) return;
+    if (!pfpUrl) return;
+    if (lastSyncedPfpUrlRef.current === pfpUrl) return;
+    // Capture the URL we're about to sync in a local so closure reads
+    // are stable across the async boundary. Do NOT mark the ref as
+    // synced yet — if the effect tears down before the fetch resolves
+    // (e.g. `username` or `displayName` changes and the cleanup aborts
+    // the in-flight request), an eagerly-set ref would record the URL
+    // as "already synced" and the retry-on-next-effect-run would be
+    // skipped, silently losing the pfp update. The ref only moves
+    // forward after a confirmed server response.
+    const targetPfpUrl = pfpUrl;
+    const controller = new AbortController();
+    fetch('/api/profile/farcaster', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        fid,
+        username,
+        displayName,
+        avatarUrl: targetPfpUrl,
+        wallet: sessionWallet,
+      }),
+      signal: controller.signal,
+    })
+      .then((r) => {
+        if (!r.ok) return;
+        lastSyncedPfpUrlRef.current = targetPfpUrl;
+        void refetchProfile();
+      })
+      .catch(() => {/* best-effort; silent — ref stays unset so a later run retries */});
+    return () => controller.abort();
+  }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile]);
 
   // Reset premium state on disconnect AND clear the server-side
   // session→wallet binding so subsequent solves aren’t silently
