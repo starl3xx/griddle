@@ -199,7 +199,18 @@ export async function recordPuzzleLoad(sessionId: string, puzzleId: number): Pro
  */
 export interface LeaderboardEntry {
   rank: number;
-  wallet: string;
+  /**
+   * Synthetic player key — `p:<profile_id>` when the solve carries a
+   * profile_id, otherwise the lowercased wallet. Used as the React
+   * list key and as the stable identity across a user's solve history.
+   */
+  playerKey: string;
+  /** Display handle (username) when the owning profile has one. */
+  handle: string | null;
+  /** Lowercased wallet address when known. Used as display fallback. */
+  wallet: string | null;
+  /** Profile avatar URL when set. */
+  avatarUrl: string | null;
   serverSolveMs: number;
   unassisted: boolean;
 }
@@ -208,15 +219,19 @@ export interface LeaderboardEntry {
  * Top N solvers for a given day. Filters:
  *   - solved = true (no failed attempts)
  *   - flag is NULL or 'suspicious' (only 'ineligible' is excluded)
- *   - wallet IS NOT NULL (no anonymous solves on the leaderboard)
- *   - same-day only: solve created_at matches the puzzle date (archive
- *     solves don't qualify for leaderboard placement)
+ *   - (wallet IS NOT NULL OR profile_id IS NOT NULL) — anonymous
+ *     session-only solves are still excluded, but handle-only and
+ *     email-auth users (who may never bind a wallet) now qualify so
+ *     they can appear on the board under their handle.
+ *   - same-day only: solve created_at matches the puzzle date
+ *     (archive solves don't qualify for leaderboard placement).
  *
- * Each wallet appears once with their fastest serverSolveMs. Drizzle
- * `selectDistinctOn` would be cleaner but isn't available across all
- * dialects we care about, so we use a raw window function over the
- * result. For ~100 row leaderboards this is fast enough that the
- * extra complexity isn't worth optimizing.
+ * Each player appears once with their fastest serverSolveMs. Grouping
+ * uses the same synthetic player_key as getPremiumStats — profile_id
+ * preferred, wallet fallback — so a user whose pre-wallet and post-
+ * wallet solves collapse to a single board entry. A LEFT JOIN back to
+ * profiles carries the handle / avatarUrl / canonical wallet to the
+ * client.
  */
 export async function getDailyLeaderboard(
   dayNumber: number,
@@ -231,49 +246,64 @@ export async function getDailyLeaderboard(
   const puzzleId = puzzleRows[0].id;
   const puzzleDate = puzzleRows[0].date;
 
-  // Pull all eligible solves for the puzzle, sorted by speed. Walk the
-  // result once and keep the first occurrence per wallet  -  that's their
-  // fastest. For a real puzzle this is at most ~hundreds of rows; for
-  // viral days we can swap to DISTINCT ON later.
-  const rows = await db
-    .select({
-      wallet: solves.wallet,
-      serverSolveMs: solves.serverSolveMs,
-      unassisted: solves.unassisted,
-    })
-    .from(solves)
-    .where(
-      and(
-        eq(solves.puzzleId, puzzleId),
-        eq(solves.solved, true),
-        // Only 'ineligible' is excluded — 'suspicious' is an internal
-        // flag for admin review, not a leaderboard ban.
-        sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
-        isNotNull(solves.wallet),
-        isNotNull(solves.serverSolveMs),
-        // Same-day filter: only solves submitted on the puzzle's date
-        // qualify for leaderboard placement. Archive/late solves are
-        // excluded so retroactive play can't inflate past leaderboards.
-        sql`${solves.createdAt}::date = ${puzzleDate}::date`,
-      ),
+  const rows = await db.execute<{
+    player_key: string;
+    profile_id: number | null;
+    row_wallet: string | null;
+    server_solve_ms: number;
+    unassisted: boolean;
+    handle: string | null;
+    profile_wallet: string | null;
+    avatar_url: string | null;
+  }>(sql`
+    WITH eligible AS (
+      SELECT
+        COALESCE('p:' || solves.profile_id::text, solves.wallet) AS player_key,
+        solves.profile_id,
+        solves.wallet AS row_wallet,
+        solves.server_solve_ms,
+        solves.unassisted,
+        ROW_NUMBER() OVER (
+          PARTITION BY COALESCE('p:' || solves.profile_id::text, solves.wallet)
+          ORDER BY solves.server_solve_ms ASC
+        ) AS rn
+      FROM solves
+      WHERE solves.puzzle_id = ${puzzleId}
+        AND solves.solved = true
+        AND (solves.flag IS NULL OR solves.flag = 'suspicious')
+        AND (solves.wallet IS NOT NULL OR solves.profile_id IS NOT NULL)
+        AND solves.server_solve_ms IS NOT NULL
+        AND solves.created_at::date = ${puzzleDate}::date
     )
-    .orderBy(asc(solves.serverSolveMs));
+    SELECT
+      e.player_key,
+      e.profile_id,
+      e.row_wallet,
+      e.server_solve_ms,
+      e.unassisted,
+      p.handle,
+      p.wallet AS profile_wallet,
+      p.avatar_url
+    FROM eligible e
+    LEFT JOIN profiles p ON p.id = e.profile_id
+    WHERE e.rn = 1
+    ORDER BY e.server_solve_ms ASC
+    LIMIT ${limit}
+  `);
 
-  const seen = new Set<string>();
-  const result: LeaderboardEntry[] = [];
-  for (const row of rows) {
-    if (!row.wallet || row.serverSolveMs == null) continue;
-    if (seen.has(row.wallet)) continue;
-    seen.add(row.wallet);
-    result.push({
-      rank: result.length + 1,
-      wallet: row.wallet,
-      serverSolveMs: row.serverSolveMs,
-      unassisted: row.unassisted,
-    });
-    if (result.length >= limit) break;
-  }
-  return result;
+  const resolved = Array.isArray(rows) ? rows : (rows.rows ?? []);
+  return resolved.map((r, i) => ({
+    rank: i + 1,
+    playerKey: String(r.player_key),
+    handle: r.handle ?? null,
+    // Prefer the canonical profile.wallet when set — it's the
+    // lowercased / normalized version; fall back to the solve row's
+    // wallet (handles pre-backfill rows where the profile join missed).
+    wallet: (r.profile_wallet ?? r.row_wallet)?.toLowerCase() ?? null,
+    avatarUrl: r.avatar_url ?? null,
+    serverSolveMs: Number(r.server_solve_ms),
+    unassisted: Boolean(r.unassisted),
+  }));
 }
 
 /**
