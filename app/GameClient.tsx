@@ -835,17 +835,22 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100 inline-block">
             Griddl<span className="relative inline-block">
               e
-              {/* Premium-only crown perched on the final 'e'. Non-premium
-                  users see the bare wordmark — the crown is the Premium
-                  indicator, replacing the diamond that used to live in
-                  the subtitle. Sizes + offsets are em-based so the crown
-                  scales + stays anchored to the 'e' across breakpoints
-                  (mobile text-4xl vs sm:text-5xl) without re-tuning
-                  absolute pixel values. Slight right tilt for playful
-                  character. */}
+              {/* Premium-only crown perched on the final 'e'. The crown
+                  is the Premium indicator — replaces the diamond that
+                  used to live in the subtitle.
+
+                  Positioning note: `bottom-full` anchors the crown's
+                  bottom edge to the top of the 'e' span, then
+                  `translate-y-[35%]` pulls it down by 35% of its own
+                  height so the crown's lower tines overlap the top of
+                  the letter (the "perched on" look). `translate-x-1/4`
+                  gives a small right overhang for the jaunty feel.
+                  Pixel-sized w-5/w-6 is a simpler, more predictable
+                  alternative to em-scaled values, which didn't resolve
+                  as expected on Phosphor's SVG viewbox. */}
               {premium && (
                 <Crown
-                  className="absolute -top-[0.45em] -right-[0.15em] w-[0.55em] h-[0.55em] rotate-[18deg] text-accent pointer-events-none"
+                  className="absolute bottom-full right-0 translate-x-1/4 translate-y-[35%] w-5 h-5 sm:w-6 sm:h-6 rotate-[18deg] text-accent pointer-events-none"
                   weight="fill"
                   aria-hidden
                 />
