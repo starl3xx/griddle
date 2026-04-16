@@ -286,11 +286,18 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // When persisted crumbs arrive from the server, merge them into the
   // live foundWords list. seedFoundWords is de-duped and doesn't fire
   // onCrumbFound (no re-saving already-persisted words).
+  //
+  // Depend on persistedCrumbs only — seedFoundWords is a useCallback
+  // with [] deps (stable identity). Including `actions` would re-fire
+  // on every render (actions is a fresh object literal) and re-seed
+  // stale crumbs from the previous puzzle after archive navigation.
+  const { seedFoundWords } = actions;
   useEffect(() => {
     if (persistedCrumbs.length > 0) {
-      actions.seedFoundWords(persistedCrumbs);
+      seedFoundWords(persistedCrumbs);
     }
-  }, [persistedCrumbs, actions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persistedCrumbs]);
 
   const handlePlayAgain = useCallback(() => {
     setSolveResult(null);
