@@ -5,6 +5,7 @@ import { Diamond, Trophy } from '@phosphor-icons/react';
 import { formatMs } from '@/lib/format';
 import { Avatar } from '../Avatar';
 import { LexiconGrid } from './LexiconGrid';
+import { PremiumStatsSection } from './PremiumStatsSection';
 import type { WalletStats } from '@/lib/db/queries';
 
 interface StatsResponse {
@@ -133,6 +134,20 @@ export function StatsPanel({
         )}
       </div>
 
+      {/* Premium stats: sparkline, 7-day bar chart, percentile, podium.
+          Rendered once `hasAccount` is true. Real data for premium,
+          placeholder-behind-blur for free users with an upgrade CTA. */}
+      {hasAccount && !statsLoading && (
+        <PremiumStatsSection
+          wallet={wallet}
+          premium={premium}
+          onUpgrade={onUpgrade}
+        />
+      )}
+
+      {/* Free-user micro-teaser stays visible below the blurred preview —
+          the PremiumStatsSection overlay explains the upgrade, this strip
+          reinforces the included feature list. */}
       {!premium && hasAccount && !statsLoading && (
         <PremiumTeaser onUpgrade={onUpgrade} />
       )}

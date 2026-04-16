@@ -2073,6 +2073,194 @@ export async function getLifetimeSolveCount(wallet: string): Promise<number> {
   return rows[0]?.count ?? 0;
 }
 
+// ─── Premium Stats ─────────────────────────────────────────────────
+
+export interface PremiumStats {
+  /** Last 30 eligible solves for this wallet, one point per puzzle, oldest first. */
+  solveTrend: { dayNumber: number; serverSolveMs: number }[];
+  /** Last 7 puzzle days; serverSolveMs is null for days the user didn't solve. */
+  last7Days: { dayNumber: number; date: string; serverSolveMs: number | null }[];
+  /**
+   * Today's percentile: 0–100, where 88 means "faster than 88% of the
+   * field". Null when the user hasn't solved today (or when they're the
+   * only solver; the UI handles both by showing a CTA / alternate copy).
+   */
+  percentileRank: number | null;
+  /** Career podium / top-10 counts using the same same-day policy as the leaderboard. */
+  placements: {
+    first: number;
+    second: number;
+    third: number;
+    /** Includes 1st/2nd/3rd. */
+    topTen: number;
+  };
+}
+
+/**
+ * Aggregate stat bundle feeding the premium stats dashboard. Four reads
+ * in parallel:
+ *
+ *   1. solveTrend     — DISTINCT ON (day_number) so a wallet with
+ *                       multiple solves per puzzle contributes once,
+ *                       keyed on fastest time.
+ *   2. last7Days      — left-joined against the puzzles table so days
+ *                       with no user solve still appear (as null) and
+ *                       the bar chart can render gap placeholders.
+ *   3. percentileRank — computed from today's leaderboard: rank among
+ *                       eligible wallets by best server_solve_ms,
+ *                       inverted to a "faster than %" number.
+ *   4. placements     — single window-function CTE over the full
+ *                       eligible solve history. Scales with the
+ *                       `solves(puzzle_id, server_solve_ms)` index
+ *                       added in PR #53.
+ *
+ * Every read applies the same eligibility filter as the public
+ * leaderboard: solved + wallet + server_solve_ms + (flag null | flag =
+ * 'suspicious') + same-day-as-puzzle-date. Using different rules here
+ * would let the stats dashboard diverge from the leaderboard, which
+ * is exactly the kind of drift users notice and distrust.
+ */
+export async function getPremiumStats(wallet: string): Promise<PremiumStats> {
+  const normalized = wallet.toLowerCase();
+  const today = getCurrentDayNumber();
+
+  const [trendRows, weekRows, percentileRows, placementRows] = await Promise.all([
+    // 1. solveTrend — last 30 puzzles the wallet has solved, fastest
+    //    per puzzle, oldest first. DISTINCT ON + matching ORDER BY
+    //    lets PG use an index walk to pick the fastest per puzzle.
+    db.execute<{ day_number: number; server_solve_ms: number }>(sql`
+      WITH per_puzzle AS (
+        SELECT DISTINCT ON (p.day_number)
+          p.day_number, s.server_solve_ms
+        FROM solves s
+        JOIN puzzles p ON p.id = s.puzzle_id
+        WHERE s.wallet = ${normalized}
+          AND s.solved = true
+          AND (s.flag IS NULL OR s.flag = 'suspicious')
+          AND s.server_solve_ms IS NOT NULL
+          AND s.created_at::date = p.date::date
+        ORDER BY p.day_number DESC, s.server_solve_ms ASC
+        LIMIT 30
+      )
+      SELECT day_number, server_solve_ms FROM per_puzzle ORDER BY day_number ASC
+    `),
+
+    // 2. last7Days — every day in the trailing 7 appears exactly once,
+    //    null server_solve_ms signals a gap for the bar chart.
+    db.execute<{
+      day_number: number;
+      date: string;
+      server_solve_ms: number | null;
+    }>(sql`
+      SELECT
+        p.day_number,
+        p.date::text AS date,
+        MIN(CASE
+          WHEN s.solved = true
+            AND (s.flag IS NULL OR s.flag = 'suspicious')
+            AND s.server_solve_ms IS NOT NULL
+            AND s.created_at::date = p.date::date
+          THEN s.server_solve_ms
+        END)::int AS server_solve_ms
+      FROM puzzles p
+      LEFT JOIN solves s
+        ON s.puzzle_id = p.id
+        AND s.wallet = ${normalized}
+      WHERE p.day_number > ${today - 7} AND p.day_number <= ${today}
+      GROUP BY p.day_number, p.date
+      ORDER BY p.day_number ASC
+    `),
+
+    // 3. percentileRank — one query: caller's best vs total field.
+    //    Returns both so "alone on the board" is distinguishable from
+    //    "hasn't solved today" in application code.
+    db.execute<{ rank: number | null; total: number }>(sql`
+      WITH today_eligible AS (
+        SELECT s.wallet, MIN(s.server_solve_ms) AS best_ms
+        FROM solves s
+        JOIN puzzles p ON p.id = s.puzzle_id
+        WHERE p.day_number = ${today}
+          AND s.solved = true
+          AND (s.flag IS NULL OR s.flag = 'suspicious')
+          AND s.wallet IS NOT NULL
+          AND s.server_solve_ms IS NOT NULL
+          AND s.created_at::date = p.date::date
+        GROUP BY s.wallet
+      )
+      SELECT
+        (SELECT count(*) + 1 FROM today_eligible
+          WHERE best_ms < (SELECT best_ms FROM today_eligible WHERE wallet = ${normalized}))::int AS rank,
+        (SELECT count(*) FROM today_eligible)::int AS total
+    `),
+
+    // 4. placements — window-function RANK over all eligible solves
+    //    gives every wallet a rank per puzzle in a single scan.
+    //    FILTER counts collapse to the four numbers we need.
+    db.execute<{ first: number; second: number; third: number; top_ten: number }>(sql`
+      WITH eligible AS (
+        SELECT s.puzzle_id, s.wallet, MIN(s.server_solve_ms) AS best_ms
+        FROM solves s
+        JOIN puzzles p ON p.id = s.puzzle_id
+        WHERE s.solved = true
+          AND (s.flag IS NULL OR s.flag = 'suspicious')
+          AND s.wallet IS NOT NULL
+          AND s.server_solve_ms IS NOT NULL
+          AND s.created_at::date = p.date::date
+        GROUP BY s.puzzle_id, s.wallet
+      ),
+      ranked AS (
+        SELECT puzzle_id, wallet,
+               RANK() OVER (PARTITION BY puzzle_id ORDER BY best_ms ASC) AS rnk
+        FROM eligible
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE rnk = 1)::int  AS first,
+        COUNT(*) FILTER (WHERE rnk = 2)::int  AS second,
+        COUNT(*) FILTER (WHERE rnk = 3)::int  AS third,
+        COUNT(*) FILTER (WHERE rnk <= 10)::int AS top_ten
+      FROM ranked
+      WHERE wallet = ${normalized}
+    `),
+  ]);
+
+  const trend = (Array.isArray(trendRows) ? trendRows : trendRows.rows) ?? [];
+  const week = (Array.isArray(weekRows) ? weekRows : weekRows.rows) ?? [];
+  const percentile = (Array.isArray(percentileRows) ? percentileRows : percentileRows.rows) ?? [];
+  const placements = (Array.isArray(placementRows) ? placementRows : placementRows.rows) ?? [];
+
+  const { rank, total } = percentile[0] ?? { rank: null, total: 0 };
+  let percentileRank: number | null = null;
+  if (rank != null && total > 0) {
+    // "Faster than X%": (field-behind-you / total) * 100. The
+    // subtraction by rank gives the count of wallets slower-or-equal;
+    // clamping to [0, 100] keeps the value sane when rank > total (a
+    // race between today_eligible and wallet could technically produce
+    // this mid-query, though the CTE makes it impossible in practice).
+    percentileRank = Math.max(0, Math.min(100, Math.round(((total - rank) / total) * 100)));
+  }
+
+  const p = placements[0] ?? { first: 0, second: 0, third: 0, top_ten: 0 };
+
+  return {
+    solveTrend: trend.map((r) => ({
+      dayNumber: Number(r.day_number),
+      serverSolveMs: Number(r.server_solve_ms),
+    })),
+    last7Days: week.map((r) => ({
+      dayNumber: Number(r.day_number),
+      date: String(r.date),
+      serverSolveMs: r.server_solve_ms == null ? null : Number(r.server_solve_ms),
+    })),
+    percentileRank,
+    placements: {
+      first: Number(p.first ?? 0),
+      second: Number(p.second ?? 0),
+      third: Number(p.third ?? 0),
+      topTen: Number(p.top_ten ?? 0),
+    },
+  };
+}
+
 // ─── Puzzle Crumbs ─────────────────────────────────────────────────
 
 /**
