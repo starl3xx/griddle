@@ -487,10 +487,10 @@ export async function getArchiveList(limit = 60): Promise<ArchiveEntry[]> {
 
 /**
  * Player profile queries  -  scaffolding for the inclusive leaderboard in
- * M4f. A profile is identified by a wallet, a handle, or both; the UI
+ * M5-premium-checkout. A profile is identified by a wallet, a handle, or both; the UI
  * renders `handle` when set and falls back to a truncated wallet.
  *
- * These helpers are safe to call before M4f's UI ships  -  nothing in the
+ * These helpers are safe to call before M5-premium-checkout's UI ships  -  nothing in the
  * game currently reads from `profiles`, so an empty table is a no-op
  * for existing flows. The leaderboard render path will start consuming
  * these once the profile-collection UI lands.
@@ -645,7 +645,7 @@ export interface UpsertProfileInput {
 /**
  * Thrown by `upsertProfile` when the wallet and handle passed in
  * already identify two different existing profile rows. See the note
- * on that function for why the merge itself is deferred to M4f.
+ * on that function for why the merge itself is deferred to M5-premium-checkout.
  */
 export class MergeConflictError extends Error {
   constructor(
@@ -711,7 +711,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // raw-SQL CTE (one HTTP round trip = one implicit server transaction).
   //
   // Rather than ship a half-right merge in the scaffolding PR, detect
-  // the case and throw an explicit `MergeConflictError`. M4f will add
+  // the case and throw an explicit `MergeConflictError`. M5-premium-checkout will add
   // a dedicated `mergeProfiles(walletId, handleId)` helper that runs
   // the CTE when it actually needs this path (wallet-link flow from
   // the handle-only Apple Pay path). No call sites hit upsertProfile
@@ -845,8 +845,8 @@ async function updateProfileInPlace(
  *     immediately reads as premium from `/api/premium/[wallet]`.
  *   - `{ handle }`  -  upserts a `profiles` row with `premium_source='admin_grant'`
  *     and no wallet. The handle becomes premium via the profiles-table
- *     path (wiring up in M4f). For now this creates the profile row so
- *     the grant is recorded even before the M4f check-path lands.
+ *     path (wiring up in M5-premium-checkout). For now this creates the profile row so
+ *     the grant is recorded even before the M5-premium-checkout check-path lands.
  *
  * Both modes are idempotent: re-granting the same wallet/handle just
  * updates the existing row.
@@ -913,7 +913,7 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
   // Handle path: upsert into profiles with premium_source='admin_grant'.
   // Note: the game's premium check currently only reads from
   // premium_users (keyed on wallet). Handle-only premium becomes
-  // effective when M4f wires the leaderboard/premium reads through
+  // effective when M5-premium-checkout wires the leaderboard/premium reads through
   // profiles. The grant is recorded now so the audit trail is intact.
   const profile = await upsertProfile({
     handle,
@@ -931,7 +931,7 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
  * One row in the admin grant audit list. Grants live in two different
  * tables depending on identity kind:
  *   - `premium_users`  -  grant-by-wallet path
- *   - `profiles`  -  grant-by-handle path (no wallet, M4f-facing)
+ *   - `profiles`  -  grant-by-handle path (no wallet, M5-premium-checkout-facing)
  *
  * The discriminated `identity` field lets the audit UI render both
  * without the client needing to know which table each row came from.
@@ -2171,9 +2171,14 @@ export async function getPremiumStats(wallet: string): Promise<PremiumStats> {
       ORDER BY p.day_number ASC
     `),
 
-    // 3. percentileRank — one query: caller's best vs total field.
-    //    Returns both so "alone on the board" is distinguishable from
-    //    "hasn't solved today" in application code.
+    // 3. percentileRank — caller's best vs total field. Guarded with
+    //    EXISTS so a non-solver gets rank = NULL (not rank = 1):
+    //    without the guard, the inner `best_ms < NULL` comparison is
+    //    NULL for every row, count(*) returns 0, and rank becomes
+    //    `0 + 1 = 1` — a bogus "best on the board" for users who
+    //    haven't even solved today. Returning total alongside lets
+    //    application code distinguish "alone on the board" from
+    //    "hasn't solved today".
     db.execute<{ rank: number | null; total: number }>(sql`
       WITH today_eligible AS (
         SELECT s.wallet, MIN(s.server_solve_ms) AS best_ms
@@ -2188,8 +2193,12 @@ export async function getPremiumStats(wallet: string): Promise<PremiumStats> {
         GROUP BY s.wallet
       )
       SELECT
-        (SELECT count(*) + 1 FROM today_eligible
-          WHERE best_ms < (SELECT best_ms FROM today_eligible WHERE wallet = ${normalized}))::int AS rank,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM today_eligible WHERE wallet = ${normalized}) THEN
+            (SELECT count(*) + 1 FROM today_eligible
+              WHERE best_ms < (SELECT best_ms FROM today_eligible WHERE wallet = ${normalized}))::int
+          ELSE NULL
+        END AS rank,
         (SELECT count(*) FROM today_eligible)::int AS total
     `),
 

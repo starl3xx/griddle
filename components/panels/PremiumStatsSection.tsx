@@ -35,26 +35,49 @@ export function PremiumStatsSection({
 }: PremiumStatsSectionProps) {
   const [stats, setStats] = useState<PremiumStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errored, setErrored] = useState(false);
 
   useEffect(() => {
     if (!premium || !wallet) return;
     let cancelled = false;
     setLoading(true);
+    setErrored(false);
     fetch('/api/stats/premium')
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j: PremiumStatsResponse | null) => {
         if (!cancelled) {
           setStats(j?.stats ?? null);
+          setErrored(false);
           setLoading(false);
         }
       })
       .catch(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setErrored(true);
+          setLoading(false);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [premium, wallet]);
+
+  // Premium + fetch failed: surface the error instead of silently
+  // rendering the free-user PLACEHOLDER_STATS as if they were real.
+  // Showing fabricated numbers in the premium slot is worse than
+  // showing a retry — users trust whatever they see here.
+  if (premium && errored) {
+    return (
+      <section className="mt-5 bg-error-50 dark:bg-error-900/30 border border-error-200 dark:border-error-700 rounded-md p-3 text-center animate-fade-in">
+        <p className="text-sm font-semibold text-error-700 dark:text-error-300">
+          Couldn’t load premium stats.
+        </p>
+        <p className="text-xs text-error-600 dark:text-error-400 mt-1">
+          Try again in a moment — your stats are safe.
+        </p>
+      </section>
+    );
+  }
 
   const data = premium && stats ? stats : PLACEHOLDER_STATS;
   const isPreview = !premium;
@@ -130,9 +153,13 @@ function SolveTrendSparkline({ points }: { points: PremiumStats['solveTrend'] })
   const dx = (W - padX * 2) / Math.max(1, points.length - 1);
   const xy = points.map((p, i) => {
     const x = padX + i * dx;
-    // y inverted so faster (smaller ms) is higher on screen.
+    // SVG y grows downward, so faster (smaller ms) maps directly to a
+    // smaller y. For the fastest point we want y near the top (padY);
+    // for the slowest we want y near the bottom (H - padY). The
+    // formula below already does that — previously we negated it with
+    // `H - y`, which flipped the chart upside-down.
     const y = padY + ((p.serverSolveMs - min) / range) * (H - padY * 2);
-    return [x, H - y] as const;
+    return [x, y] as const;
   });
 
   const line = xy.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
