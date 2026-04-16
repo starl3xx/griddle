@@ -233,8 +233,16 @@ export async function POST(
   let earnedWordmarks: string[] = [];
   if (solved && wallet) {
     try {
+      // Flagged solves (ineligible / suspicious) must not advance the
+      // streak — a bot chaining flagged solves could otherwise farm
+      // Fireproof / Steadfast / Centurion. Skip the write and pass
+      // currentStreak=0 so streak wordmarks are unreachable for flagged
+      // solves. Milestone + skill wordmarks still fire (botFlagged
+      // already suppresses speed wordmarks inside awardWordmarks).
       const [{ currentStreak }, lifetimeSolves] = await Promise.all([
-        updateStreakForSolve(wallet, body.dayNumber),
+        flag === null
+          ? updateStreakForSolve(wallet, body.dayNumber)
+          : Promise.resolve({ currentStreak: 0, longestStreak: 0 }),
         getLifetimeSolveCount(wallet),
       ]);
       earnedWordmarks = await awardWordmarks({
