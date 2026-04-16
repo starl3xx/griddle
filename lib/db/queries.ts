@@ -86,13 +86,7 @@ async function safeKvSet<T>(key: string, value: T, ttl: number): Promise<void> {
  * roundtrip so the next /api/solve hit also gets a cache hit.
  */
 export async function getTodayPuzzle(): Promise<TodayPuzzlePayload | null> {
-  const dayNumber = getCurrentDayNumber();
-
-  const cached = await safeKvGet<TodayPuzzlePayload>(PUBLIC_KEY(dayNumber));
-  if (cached) return cached;
-
-  const row = await refreshCacheForDay(dayNumber);
-  return row ? toPublicPayload(row) : null;
+  return getPuzzleByDay(getCurrentDayNumber());
 }
 
 /**
