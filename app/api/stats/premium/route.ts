@@ -44,9 +44,10 @@ export async function GET(): Promise<NextResponse> {
   }
 
   // Cache key matches the synthetic player_key used inside
-  // getPremiumStats so wallet + profile-only callers each get their
-  // own cache slot.
-  const playerKey = wallet?.toLowerCase() ?? `p:${profileId}`;
+  // getPremiumStats — profile_id preferred, wallet fallback — so a
+  // user whose identity picks up a wallet mid-day doesn't suddenly
+  // see a cache miss AND lose continuity with earlier solves.
+  const playerKey = profileId != null ? `p:${profileId}` : wallet?.toLowerCase();
   const day = getCurrentDayNumber();
   const cacheKey = `griddle:premium-stats:${playerKey}:${day}`;
 

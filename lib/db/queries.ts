@@ -2180,17 +2180,20 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
   const today = getCurrentDayNumber();
 
   // Synthetic "player key" used to group today's/all-time solves when
-  // computing percentile + placements. A wallet solve is keyed on its
-  // lowercase address; a profile-only (handle-only / email-auth)
-  // solve is keyed on `p:<profile_id>`. This lets the same SQL grouping
-  // identify both wallet and handle-only players uniquely, without
-  // forcing handle-only users off the ranked queries entirely.
+  // computing percentile + placements. profile_id is preferred over
+  // wallet so a single user's pre-wallet and post-wallet solves share
+  // the same key — without this preference, a handle-only user who
+  // later linked a wallet would have their history split between
+  // `p:<profile_id>` and `<wallet>` keys and the ranked queries would
+  // silently drop the pre-wallet half.
   //
-  // Anonymous session-only rows (no wallet, no profile_id) are excluded
-  // from ranked queries — they belong to no identifiable player.
+  // Wallet-only users (no profile) fall back to wallet. Anonymous
+  // session-only rows (no wallet, no profile_id) are excluded from
+  // ranked queries — they belong to no identifiable player.
   const callerKey =
-    identity.wallet?.toLowerCase() ??
-    (identity.profileId != null ? `p:${identity.profileId}` : null);
+    identity.profileId != null
+      ? `p:${identity.profileId}`
+      : (identity.wallet?.toLowerCase() ?? null);
 
   const identityMatches = solveBelongsTo(identity);
 
@@ -2257,7 +2260,7 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
       : db.execute<{ rank: number | null; total: number }>(sql`
         WITH today_eligible AS (
           SELECT
-            COALESCE(s.wallet, 'p:' || s.profile_id::text) AS player_key,
+            COALESCE('p:' || s.profile_id::text, s.wallet) AS player_key,
             MIN(s.server_solve_ms) AS best_ms
           FROM solves s
           JOIN puzzles p ON p.id = s.puzzle_id
@@ -2288,7 +2291,7 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
         WITH eligible AS (
           SELECT
             s.puzzle_id,
-            COALESCE(s.wallet, 'p:' || s.profile_id::text) AS player_key,
+            COALESCE('p:' || s.profile_id::text, s.wallet) AS player_key,
             MIN(s.server_solve_ms) AS best_ms
           FROM solves s
           JOIN puzzles p ON p.id = s.puzzle_id
