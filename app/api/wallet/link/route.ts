@@ -23,12 +23,12 @@ import { mergeProfiles } from '@/lib/db/queries';
  * (defensive against a session that's already been linked to a
  * different wallet, which shouldn't happen but isn't worth crashing on).
  *
- * In M4f when the premium burn lands, this same endpoint will also
- * trigger a stream of leaderboard recomputes. For M4c it's pure
+ * In M5-premium-checkout when the premium burn lands, this same endpoint will also
+ * trigger a stream of leaderboard recomputes. For M5-wallets it's pure
  * backfill — no other side effects.
  *
  * Note: this endpoint accepts the wallet from the request body without
- * verification (no signature). That's intentional for M4c — wallet
+ * verification (no signature). That's intentional for M5-wallets — wallet
  * authentication via SIWE / signed message can come in M5 if we ever
  * need to prove ownership beyond "the user told us." The risk surface
  * is "user A claims wallet B's anonymous solves," which is a credit

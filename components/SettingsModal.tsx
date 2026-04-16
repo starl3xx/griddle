@@ -32,7 +32,7 @@ export interface ProfileSnapshot {
    * User's public username. Stored in the `handle` column on profiles
    * — we kept the DB name but renamed everywhere else to "username"
    * when the old two-field (display_name + handle) design collapsed
-   * in M5k.
+   * into a single field.
    */
   handle: string | null;
   avatarUrl: string | null;

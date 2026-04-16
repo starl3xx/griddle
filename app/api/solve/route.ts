@@ -60,7 +60,7 @@ interface SolveRequestBody {
   keystrokeCount: number;
   unassisted?: boolean;
   /**
-   * Wordmark-driving fields added in M5j. All optional for
+   * Wordmark-driving fields. All optional for
    * backwards-compatibility with older client bundles mid-deploy —
    * a null/missing field just means "don't award wordmarks that
    * depend on this counter" rather than a hard rejection.

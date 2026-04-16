@@ -38,7 +38,7 @@ export type FunnelEvent =
   /**
    * A new profile row was created. `method` distinguishes the entry
    * path so we can compare which onboarding flow converts best.
-   * Wired as a follow-up after M4i merges (profiles table enrichments).
+   * Wired as a follow-up after M6-email-auth merges (profiles table enrichments).
    */
   | { name: 'profile_created'; method: 'handle' | 'email' | 'wallet' | 'farcaster' }
   /**

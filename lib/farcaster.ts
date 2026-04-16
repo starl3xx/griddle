@@ -19,8 +19,8 @@ import { useEffect, useState } from 'react';
  *
  * Detection uses `context.client.clientFid` rather than `context.user.fid`
  * because the signal we want is "am I running inside a Farcaster client
- * container?", not "is there an authenticated user?". For M4 wallet /
- * auth work we’ll also read user.fid.
+ * container?", not "is there an authenticated user?". For M5-wallets and
+ * M6-email-auth work we’ll also read user.fid.
  *
  * The SDK is loaded via a dynamic import so the ~30 kB bundle cost only
  * hits browsers that actually resolve it — web users never pay. All entry

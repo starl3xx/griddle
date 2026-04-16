@@ -34,7 +34,7 @@ import { eq } from 'drizzle-orm';
  *
  * Note on the old `displayName` field: the previous two-field design
  * (free-form display name + slugified handle) collapsed into a
- * single "username" in M5k. For back-compat with older client
+ * single "username". For back-compat with older client
  * bundles still mid-deploy, we accept `displayName` as an alias.
  */
 export const runtime = 'nodejs';

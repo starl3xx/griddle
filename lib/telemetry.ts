@@ -1,10 +1,10 @@
 /**
- * Client-side solve telemetry. Captures keystroke timing data so that in M4
- * the server can flag bot solves as ineligible for rewards/streaks and surface
- * anomalies in the admin dashboard.
+ * Client-side solve telemetry. Captures keystroke timing data so that in
+ * M4-server the server can flag bot solves as ineligible for rewards/streaks
+ * and surface anomalies in the admin dashboard.
  *
  * All data lives in memory — nothing is persisted client-side. On solve, the
- * full payload is sent with /api/solve (server wiring is M4).
+ * full payload is sent with /api/solve (server wiring is M4-server).
  */
 
 export interface SolvePayload {
@@ -14,7 +14,7 @@ export interface SolvePayload {
   firstKeystrokeAt: number | null;
   keystrokeCount: number;
   /**
-   * Wordmark-driving counters added in M5j. Populated by useGriddle
+   * Wordmark-driving counters. Populated by useGriddle
    * from its own action counters (telemetry doesn't track these — it
    * only knows about keystrokes). The server uses them to evaluate
    * Blameless (both zero), Wordsmith (foundWords.length >= 9), and

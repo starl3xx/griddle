@@ -1913,7 +1913,7 @@ export async function getWordmarksForWallet(
  * For now, missing a day always resets the streak regardless of the
  * user_settings.streak_protection_enabled flag.
  *
- * This is the first write path for the `streaks` table — prior to M5j
+ * This is the first write path for the `streaks` table — previously
  * the table was read-only from the admin-seeded side, which meant
  * Fireproof / Steadfast / Centurion never had a chance to fire. Now
  * that solves drive streak state, those three wordmarks become

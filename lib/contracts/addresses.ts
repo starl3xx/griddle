@@ -22,7 +22,7 @@ export function getWordTokenAddress(): `0x${string}` | null {
 }
 
 /**
- * GriddlePremium contract. Null until M4e deploys it on Base mainnet
+ * GriddlePremium contract. Null until M5-contracts deploys it on Base mainnet
  * and the env var is set. Crypto-unlock flow checks for non-null
  * before rendering and surfaces a "crypto checkout is not configured"
  * message if missing.

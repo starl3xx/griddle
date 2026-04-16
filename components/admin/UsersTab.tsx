@@ -10,7 +10,7 @@ interface UserRow {
   premium: boolean;
   premiumSource: string | null;
   createdAt: string;
-  // Extended by M4i post-merge:
+  // Extended by M6-email-auth post-merge:
   email?: string | null;
   avatarUrl?: string | null;
   farcasterFid?: number | null;
@@ -26,7 +26,7 @@ interface UsersResponse {
 /**
  * Admin Users tab — searchable, paginated view of all profile rows.
  * Displays wallet, handle, and premium status. Email, display name,
- * Farcaster FID, and avatar columns arrive after M4i merges.
+ * Farcaster FID, and avatar columns arrive after M6-email-auth merges.
  */
 export function UsersTab() {
   const [query, setQuery] = useState('');
