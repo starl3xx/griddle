@@ -158,30 +158,69 @@ export const wordmarks = pgTable(
   'wordmarks',
   {
     id: serial('id').primaryKey(),
-    wallet: varchar('wallet', { length: 42 }).notNull(),
+    /**
+     * Wallet that earned the wordmark. Nullable since handle-only and
+     * email-auth users — who may never bind a wallet — can now earn
+     * wordmarks. Either `wallet` or `profileId` must be set (enforced
+     * by the `wordmarks_identity_required` CHECK constraint in the
+     * migration).
+     */
+    wallet: varchar('wallet', { length: 42 }),
+    /** Profile identity that earned the wordmark. Canonical going forward. */
+    profileId: integer('profile_id').references(() => profiles.id),
     wordmarkId: varchar('wordmark_id', { length: 16 }).notNull(),
     puzzleId: integer('puzzle_id').references(() => puzzles.id),
     earnedAt: timestamp('earned_at').defaultNow().notNull(),
+    /**
+     * Generated column: profile-preferring synthetic identity. Drives
+     * the single unique index below so ON CONFLICT targets one place
+     * regardless of which identity the caller passed. Same convention
+     * as getDailyLeaderboard / getPremiumStats.
+     */
+    playerKey: varchar('player_key', { length: 64 })
+      .generatedAlwaysAs(sql`COALESCE('p:' || profile_id::text, wallet)`)
+      .notNull(),
   },
   (t) => ({
-    // UNIQUE (wallet, wordmark_id) — one row per player per wordmark.
-    // Insert uses ON CONFLICT DO NOTHING against this index.
-    walletWordmarkIdx: uniqueIndex('wordmarks_wallet_wordmark_idx').on(
-      t.wallet,
+    // One row per player per wordmark. Uses the generated player_key
+    // so wallet users and profile-only users share a single uniqueness
+    // scheme (no partial indexes to keep in sync).
+    playerWordmarkIdx: uniqueIndex('wordmarks_player_wordmark_idx').on(
+      t.playerKey,
       t.wordmarkId,
     ),
-    // Covering the common "show me this wallet's Lexicon grid" query.
-    walletIdx: index('wordmarks_wallet_idx').on(t.wallet),
+    // Covering the "show me this player's Lexicon grid" read.
+    playerKeyIdx: index('wordmarks_player_key_idx').on(t.playerKey),
   }),
 );
 
-export const streaks = pgTable('streaks', {
-  wallet: varchar('wallet', { length: 42 }).primaryKey(),
-  currentStreak: integer('current_streak').default(0).notNull(),
-  longestStreak: integer('longest_streak').default(0).notNull(),
-  lastSolvedDayNumber: integer('last_solved_day_number'),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+export const streaks = pgTable(
+  'streaks',
+  {
+    /**
+     * Wallet that earned the streak. Nullable for the same reason as
+     * wordmarks.wallet — handle-only and email-auth users now have
+     * streaks too. Either wallet or profileId must be set (CHECK
+     * constraint in the migration).
+     */
+    wallet: varchar('wallet', { length: 42 }),
+    /** Profile identity that earned the streak. Canonical going forward. */
+    profileId: integer('profile_id').references(() => profiles.id),
+    currentStreak: integer('current_streak').default(0).notNull(),
+    longestStreak: integer('longest_streak').default(0).notNull(),
+    lastSolvedDayNumber: integer('last_solved_day_number'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    playerKey: varchar('player_key', { length: 64 })
+      .generatedAlwaysAs(sql`COALESCE('p:' || profile_id::text, wallet)`)
+      .notNull(),
+  },
+  (t) => ({
+    // One row per player. The old PK was `wallet`; that moves to a
+    // unique on player_key so the same slot serves wallet and
+    // profile-only players.
+    playerKeyIdx: uniqueIndex('streaks_player_key_idx').on(t.playerKey),
+  }),
+);
 
 export const leaderboard = pgTable(
   'leaderboard',
