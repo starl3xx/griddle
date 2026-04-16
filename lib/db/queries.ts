@@ -432,21 +432,9 @@ export async function getWalletStats(identity: StatsIdentity): Promise<WalletSta
   let currentStreak = 0;
   let longestStreak = 0;
   if (normalizedWallet) {
-    // Raw SQL — see "Drizzle wallet-eq drift" in README Code Style.
-    const streakResult = await db.execute<{
-      currentStreak: number;
-      longestStreak: number;
-    }>(sql`
-      SELECT
-        current_streak AS "currentStreak",
-        longest_streak AS "longestStreak"
-      FROM streaks
-      WHERE wallet = ${normalizedWallet}
-      LIMIT 1
-    `);
-    const streakRows = Array.isArray(streakResult) ? streakResult : (streakResult.rows ?? []);
-    currentStreak = streakRows[0]?.currentStreak ?? 0;
-    longestStreak = streakRows[0]?.longestStreak ?? 0;
+    const streakRow = await selectStreakRow(normalizedWallet);
+    currentStreak = streakRow?.currentStreak ?? 0;
+    longestStreak = streakRow?.longestStreak ?? 0;
   }
 
   return {
