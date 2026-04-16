@@ -18,6 +18,7 @@ import {
 import { Avatar } from './Avatar';
 import { FaqAccordion } from './FaqAccordion';
 import { uploadAvatar } from '@/lib/avatar-upload';
+import { validateUsername } from '@/lib/username';
 
 /**
  * Shape of the profile object surfaced by GET /api/profile. Kept narrow
@@ -27,8 +28,13 @@ export interface ProfileSnapshot {
   id: number;
   email: string | null;
   emailVerifiedAt: string | null;
+  /**
+   * User's public username. Stored in the `handle` column on profiles
+   * — we kept the DB name but renamed everywhere else to "username"
+   * when the old two-field (display_name + handle) design collapsed
+   * in M5k.
+   */
   handle: string | null;
-  displayName: string | null;
   avatarUrl: string | null;
   wallet: string | null;
   premiumSource: 'crypto' | 'fiat' | 'admin_grant' | null;
@@ -71,22 +77,6 @@ interface SettingsModalProps {
 // Mirrors the 7-day cooldown constant in lib/db/queries.ts / the settings API
 const PROTECTION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-// Handles are lowercase letters, digits, and underscores only —
-// no hyphens, no special characters, no unicode glyphs. "starl3xx"
-// works; "$t✪rl3xx" does not.
-//
-// The structure `[a-z0-9]+(_[a-z0-9]+)*` is equivalent to
-// "one or more runs of alphanumerics separated by single
-// underscores" — this enforces the same structural invariants the
-// old hyphen regex did:
-//   - must contain at least one alphanumeric (rejects `__`)
-//   - no leading/trailing underscore (rejects `_foo` / `foo_`)
-//   - no consecutive underscores (rejects `foo__bar`)
-// A flat `/^[a-z0-9_]+$/` would accept all of those, which the
-// slugifier in /api/profile/create explicitly cleans up — keeping
-// the validator in sync means anything the slugifier produces
-// round-trips through PATCH /api/profile.
-const HANDLE_RE = /^[a-z0-9]+(_[a-z0-9]+)*$/;
 
 /**
  * Settings modal — all identity and preferences surfaces, accessed via
@@ -128,8 +118,7 @@ export function SettingsModal({
   // Local edit buffers for profile fields. Seeded from the incoming
   // profile whenever the modal opens (or the profile refetches) so we
   // don't clobber in-flight user typing.
-  const [displayNameDraft, setDisplayNameDraft] = useState('');
-  const [handleDraft, setHandleDraft] = useState('');
+  const [usernameDraft, setUsernameDraft] = useState('');
   const [avatarUrlDraft, setAvatarUrlDraft] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -193,8 +182,7 @@ export function SettingsModal({
     if (!open) { seededOpenRef.current = false; return; }
     if (seededOpenRef.current) return;
     if (!profile) return; // wait for profile
-    setDisplayNameDraft(profile.displayName ?? '');
-    setHandleDraft(profile.handle ?? '');
+    setUsernameDraft(profile.handle ?? '');
     setAvatarUrlDraft(profile.avatarUrl ?? '');
     seededOpenRef.current = true;
   }, [open, profile]);
@@ -246,21 +234,20 @@ export function SettingsModal({
     setProfileError(null);
     setProfileSavedAt(null);
 
-    const trimmedName = displayNameDraft.trim();
-    const trimmedHandle = handleDraft.trim().toLowerCase();
+    const trimmedUsername = usernameDraft.trim().toLowerCase();
     const trimmedAvatar = avatarUrlDraft.trim();
 
     // Two modes:
-    //   a) profile exists → PATCH /api/profile with the diff of changed
-    //      fields (displayName / handle / avatarUrl). Empty blanks on
-    //      displayName or handle surface as specific errors; blank
-    //      avatarUrl sends explicit `null` to clear the column.
+    //   a) profile exists → PATCH /api/profile with the diff of
+    //      changed fields. Username changes are Premium-gated (both
+    //      client-side here for UX and server-side for enforcement).
     //   b) no profile yet (wallet-connected user completing onboarding
     //      for the first time) → POST /api/profile/create with the
     //      drafts, server auto-attaches the session wallet.
     if (!profile) {
-      if (!trimmedName) {
-        setProfileError('Display name is required.');
+      const validation = validateUsername(trimmedUsername);
+      if (!validation.valid) {
+        setProfileError(validation.error ?? 'Invalid username.');
         return;
       }
       setProfileSaving(true);
@@ -269,11 +256,26 @@ export function SettingsModal({
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            displayName: trimmedName,
+            username: trimmedUsername,
             ...(trimmedAvatar ? { avatarUrl: trimmedAvatar } : {}),
           }),
         });
-        if (!res.ok) {
+        if (res.status === 409) {
+          // Profile already exists server-side but client state was
+          // stale. Fall back to PATCH so the user isn't stuck.
+          const patchRes = await fetch('/api/profile', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              handle: trimmedUsername,
+              ...(trimmedAvatar ? { avatarUrl: trimmedAvatar } : {}),
+            }),
+          });
+          if (!patchRes.ok) {
+            const d = (await patchRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(d.error ?? `Save failed (${patchRes.status})`);
+          }
+        } else if (!res.ok) {
           const d = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(d.error ?? `Save failed (${res.status})`);
         }
@@ -288,28 +290,24 @@ export function SettingsModal({
     }
 
     // PATCH path — existing profile.
-    const patch: { displayName?: string; handle?: string; avatarUrl?: string | null } = {};
-    const currentName = profile.displayName ?? '';
+    const patch: { handle?: string; avatarUrl?: string | null } = {};
     const currentHandle = profile.handle ?? '';
     const currentAvatar = profile.avatarUrl ?? '';
 
-    if (trimmedName !== currentName) {
-      if (!trimmedName) {
-        setProfileError('Display name cannot be empty.');
+    if (currentHandle && trimmedUsername !== currentHandle) {
+      // Only gate on Premium for RENAMES — initial handle set (when
+      // currentHandle is null/empty) is free, matching the server-side
+      // check in PATCH /api/profile.
+      if (!premium) {
+        setProfileError('Changing your username is a Premium feature.');
         return;
       }
-      patch.displayName = trimmedName;
-    }
-    if (trimmedHandle !== currentHandle) {
-      if (!trimmedHandle) {
-        setProfileError('Handle cannot be empty.');
+      const validation = validateUsername(trimmedUsername);
+      if (!validation.valid) {
+        setProfileError(validation.error ?? 'Invalid username.');
         return;
       }
-      if (!HANDLE_RE.test(trimmedHandle) || trimmedHandle.length < 2 || trimmedHandle.length > 32) {
-        setProfileError('Handle must be 2–32 chars, lowercase letters, numbers, or underscores.');
-        return;
-      }
-      patch.handle = trimmedHandle;
+      patch.handle = trimmedUsername;
     }
     if (trimmedAvatar !== currentAvatar) {
       // Empty → null = clear the avatar. Non-empty → set the URL.
@@ -369,11 +367,10 @@ export function SettingsModal({
 
   if (!open) return null;
 
-  // Identity resolution for the header — prefer display name, then
-  // handle, then a truncated wallet, then "Anonymous."
+  // Identity resolution for the header — prefer username (handle),
+  // then a truncated wallet, then "Anonymous."
   const headerLabel =
-    profile?.displayName?.trim()
-    || (profile?.handle ? `/${profile.handle}` : null)
+    profile?.handle?.trim()
     || (profile?.wallet ? `${profile.wallet.slice(0, 6)}…${profile.wallet.slice(-4)}` : null)
     || 'Anonymous';
   const hasIdentity = !!profile;
@@ -464,34 +461,31 @@ export function SettingsModal({
 
         {/* Profile editor — shown for both existing profiles and
             wallet-connected users completing onboarding. In
-            "complete" mode (no profile yet) we hide the handle field
-            since it's auto-slugged from the displayName on the
-            server, and the whole flow is framed as "Complete your
-            profile" rather than "edit." */}
+            "complete" mode (no profile yet) the user picks their
+            username (slugified + profanity-checked server-side),
+            and the whole flow is framed as "Complete your profile"
+            rather than "edit." For existing profiles, the username
+            field is read-only unless Premium. */}
         {(hasIdentity || sessionWallet) && (
           <Section title={hasIdentity ? 'Profile' : 'Complete your profile'}>
             {!hasIdentity && (
               <p className="text-[12px] text-gray-500 dark:text-gray-400 leading-relaxed">
-                Your wallet is connected. Add a display name so your solves appear under a real identity on the leaderboard.
+                Your wallet is connected. Choose a username so your solves appear under a real identity on the leaderboard.
               </p>
             )}
             <LabeledInput
-              label="Display name"
-              value={displayNameDraft}
-              onChange={setDisplayNameDraft}
-              placeholder="alice"
-              maxLength={50}
+              label="Username"
+              value={usernameDraft}
+              onChange={(v) => setUsernameDraft(v.toLowerCase())}
+              placeholder="starl3xx"
+              maxLength={32}
+              hint={
+                profile?.handle && !premium
+                  ? 'Upgrade to Premium to change your username'
+                  : '2–32 chars, a–z, 0–9, underscores'
+              }
+              disabled={!!profile?.handle && !premium}
             />
-            {hasIdentity && (
-              <LabeledInput
-                label="Handle"
-                value={handleDraft}
-                onChange={(v) => setHandleDraft(v.toLowerCase())}
-                placeholder="alice_42"
-                maxLength={32}
-                hint="2–32 chars, a–z, 0–9, underscores"
-              />
-            )}
             <AvatarUploadRow
               avatarUrl={avatarUrlDraft}
               uploading={avatarUploading}
@@ -672,8 +666,8 @@ export function SettingsModal({
             premiumLocked={!premium}
             description={
               !premium
-                ? 'Hide cell hints for an Ace Wordmark on solves'
-                : 'Hides cell hints — earn 🎯 Ace for solving blind'
+                ? 'Hide cell hints for a Blameless Wordmark on solves'
+                : 'Hides cell hints — earn 🎯 Blameless for solving blind'
             }
             checked={premium ? (settings?.unassistedModeEnabled ?? false) : false}
             disabled={!premium || savingUnassisted}
@@ -870,7 +864,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function LabeledInput({
-  label, value, onChange, placeholder, maxLength, hint,
+  label, value, onChange, placeholder, maxLength, hint, disabled,
 }: {
   label: string;
   value: string;
@@ -878,6 +872,7 @@ function LabeledInput({
   placeholder?: string;
   maxLength?: number;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
     <div>
@@ -890,8 +885,9 @@ function LabeledInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         maxLength={maxLength}
+        disabled={disabled}
         spellCheck={false}
-        className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
+        className={`w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       />
       {hint && (
         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">{hint}</p>

@@ -64,10 +64,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
+  // We still accept `displayName` in the request body for back-compat
+  // with older client bundles, but it's ignored by upsertProfileForFarcaster
+  // now that the profiles table no longer has a display_name column.
+  // The authoritative human-readable tag is the Farcaster @username
+  // (stored as `farcaster_username`) and the slugged `handle`.
   const profile = await upsertProfileForFarcaster({
     fid: body.fid,
     username: body.username ?? null,
-    displayName: body.displayName ?? null,
     avatarUrl: body.avatarUrl ?? null,
     wallet: requestWallet,
   });
@@ -92,7 +96,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       id: profile.id,
       farcasterFid: profile.farcasterFid,
       farcasterUsername: profile.farcasterUsername,
-      displayName: profile.displayName,
+      handle: profile.handle,
       avatarUrl: profile.avatarUrl,
       wallet: profile.wallet,
       email: profile.email,

@@ -12,7 +12,6 @@ interface UserRow {
   createdAt: string;
   // Extended by M4i post-merge:
   email?: string | null;
-  displayName?: string | null;
   avatarUrl?: string | null;
   farcasterFid?: number | null;
   farcasterUsername?: string | null;
@@ -77,7 +76,7 @@ export function UsersTab() {
   // Treat empty strings as missing so label never returns "" (which would
   // crash `label(u)[0].toUpperCase()` on the avatar initial).
   const label = (u: UserRow) => {
-    const display = u.displayName?.trim() || u.handle?.trim();
+    const display = u.handle?.trim();
     if (display) return display;
     if (u.wallet) return `${u.wallet.slice(0, 6)}...${u.wallet.slice(-4)}`;
     return `#${u.id}`;

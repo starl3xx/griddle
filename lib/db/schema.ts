@@ -184,8 +184,6 @@ export const profiles = pgTable(
     email: varchar('email', { length: 254 }),
     /** Set when the user clicks the magic link. Null until then. */
     emailVerifiedAt: timestamp('email_verified_at'),
-    /** Display name chosen by the user. Distinct from handle (slug). */
-    displayName: varchar('display_name', { length: 50 }),
     /** URL to the user's avatar image (Farcaster pfp, uploaded, etc.). */
     avatarUrl: varchar('avatar_url', { length: 500 }),
     /**
@@ -289,7 +287,7 @@ export const userSettings = pgTable('user_settings', {
    * Null = never used (protection is available from the start).
    */
   streakProtectionUsedAt: timestamp('streak_protection_used_at'),
-  /** Hide green/dim cell hints during play. Earns the Ace Wordmark instead. */
+  /** Hide green/dim cell hints during play. Earns the Blameless Wordmark instead. */
   unassistedModeEnabled: boolean('unassisted_mode_enabled').default(false).notNull(),
   /** Prefer dark color scheme across all devices where the wallet is connected. */
   darkModeEnabled: boolean('dark_mode_enabled').default(false).notNull(),

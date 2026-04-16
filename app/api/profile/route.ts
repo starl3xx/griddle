@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import { getSessionProfile } from '@/lib/session-profile';
 import { getSessionWallet } from '@/lib/wallet-session';
+import { isSessionPremium } from '@/lib/premium-check';
+import { validateUsername } from '@/lib/username';
 import { db } from '@/lib/db/client';
 import { profiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -34,7 +36,6 @@ export async function GET(): Promise<NextResponse> {
           id: p.id,
           email: p.email,
           handle: p.handle,
-          displayName: p.displayName,
           avatarUrl: p.avatarUrl,
           wallet: p.wallet,
           premiumSource: p.premiumSource,
@@ -59,7 +60,6 @@ export async function GET(): Promise<NextResponse> {
           id: p.id,
           email: p.email,
           handle: p.handle,
-          displayName: p.displayName,
           avatarUrl: p.avatarUrl,
           wallet: p.wallet,
           premiumSource: p.premiumSource,
@@ -75,10 +75,18 @@ export async function GET(): Promise<NextResponse> {
 /**
  * PATCH /api/profile
  *
- * Body: `{ handle?, displayName?, avatarUrl? }`
+ * Body: `{ handle?, avatarUrl? }`
  *
- * Updates the profile bound to the current session. Requires a profile
- * to already exist (via email auth or wallet connect).
+ * Updates the profile bound to the current session. Requires a
+ * profile to already exist.
+ *
+ * Changing the handle (username) is a **Premium** feature — free
+ * users get whatever handle was seeded at profile creation and
+ * can't rename without upgrading. The gate is enforced here rather
+ * than client-side so a direct POST can't bypass it.
+ *
+ * Profanity check runs on any handle patch via `validateUsername`.
+ * The check is a floor, not a ceiling — see lib/profanity.ts.
  */
 export async function PATCH(req: Request): Promise<NextResponse> {
   const sessionId = await getSessionId();
@@ -99,7 +107,6 @@ export async function PATCH(req: Request): Promise<NextResponse> {
 
   let body: {
     handle?: string;
-    displayName?: string;
     avatarUrl?: string | null;
   };
   try {
@@ -109,8 +116,7 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   }
 
   // Patch values are `string` for set-to-value and `null` for
-  // clear-this-column. Drizzle's .set() happily writes null into a
-  // nullable varchar; the schema marks all three fields nullable.
+  // clear-this-column.
   //
   // Note on avatarSource: any avatar patch coming through PATCH
   // /api/profile is a user-driven edit (Settings' upload flow, a
@@ -120,38 +126,43 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   // sync can re-seed it as 'farcaster'.
   const patch: Record<string, string | null> = {};
   if (body.handle !== undefined) {
-    // Handles can't be cleared — losing a handle is destructive since
-    // another user could immediately claim it, and the leaderboard uses
-    // handle as display identity. Validate the slug shape either way.
     const handle = body.handle.trim().toLowerCase().slice(0, 32);
-    // Lowercase letters, digits, underscores. No hyphens, no unicode,
-    // no special characters. Structural equivalent to the old hyphen
-    // regex: alphanumeric runs joined by single underscores, so
-    // `__`, `_foo`, `foo_`, and `foo__bar` are all rejected. Kept in
-    // sync with HANDLE_RE in SettingsModal and the slugifier in
-    // /api/profile/create.
-    if (!/^[a-z0-9]+(_[a-z0-9]+)*$/.test(handle) || handle.length < 2) {
+    const validation = validateUsername(handle);
+    if (!validation.valid) {
       return NextResponse.json(
-        { error: 'handle must be 2–32 chars, lowercase letters, numbers, or underscores' },
+        { error: validation.error ?? 'invalid username' },
         { status: 400 },
       );
     }
-    patch.handle = handle;
-  }
-  if (body.displayName !== undefined) {
-    // displayName is required once the user has a profile — empty would
-    // render as a literal "" everywhere it surfaces. Reject blanks.
-    const displayName = body.displayName.trim().slice(0, 50);
-    if (!displayName) {
-      return NextResponse.json({ error: 'displayName cannot be empty' }, { status: 400 });
+    // Premium gate only on CHANGES — not on initial sets. The email
+    // sign-up flow stashes a pending username in localStorage and
+    // PATCHes it after the magic-link verify lands; that user has no
+    // profile handle yet and shouldn't need Premium just to complete
+    // onboarding. We detect "initial set" by checking whether the
+    // current profile row already has a handle. If it does, this is
+    // a rename → require Premium. If it doesn't, this is first-time
+    // setup → allow.
+    const currentRows = await db
+      .select({ handle: profiles.handle })
+      .from(profiles)
+      .where(eq(profiles.id, profileId))
+      .limit(1);
+    const currentHandle = currentRows[0]?.handle;
+    if (currentHandle && currentHandle !== handle) {
+      const premium = await isSessionPremium(sessionId);
+      if (!premium) {
+        return NextResponse.json(
+          { error: 'Changing your username is a Premium feature.' },
+          { status: 402 },
+        );
+      }
     }
-    patch.displayName = displayName;
+    patch.handle = handle;
   }
   if (body.avatarUrl !== undefined) {
     // avatarUrl CAN be cleared — send `null` explicitly to drop it
     // back to the default silhouette. Empty string is treated the same
-    // as null (common mistake) to be forgiving to clients. A real URL
-    // must be non-empty after trim so it can't render as <img src="">.
+    // as null (common mistake) to be forgiving to clients.
     if (body.avatarUrl === null || body.avatarUrl.trim() === '') {
       patch.avatarUrl = null;
       patch.avatarSource = null;
@@ -167,9 +178,6 @@ export async function PATCH(req: Request): Promise<NextResponse> {
 
   // Catch unique-index violations (handle collision with another
   // profile) and surface them as a 409 instead of an unhandled 500.
-  // drizzle re-throws the underlying pg error; detect by SQLSTATE
-  // 23505 code or index name substring so we don't couple to a
-  // specific driver error class.
   let rows;
   try {
     rows = await db
@@ -180,7 +188,7 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('profiles_handle_lower_idx') || msg.includes('23505')) {
-      return NextResponse.json({ error: 'handle already taken' }, { status: 409 });
+      return NextResponse.json({ error: 'That username is taken.' }, { status: 409 });
     }
     throw err;
   }
@@ -195,7 +203,6 @@ export async function PATCH(req: Request): Promise<NextResponse> {
       id: p.id,
       email: p.email,
       handle: p.handle,
-      displayName: p.displayName,
       avatarUrl: p.avatarUrl,
       wallet: p.wallet,
       premiumSource: p.premiumSource,

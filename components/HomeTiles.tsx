@@ -1,17 +1,11 @@
 'use client';
 
-import { Trophy, Archive, Diamond, ChartBar } from '@phosphor-icons/react';
+import { Trophy, Archive, ChartBar } from '@phosphor-icons/react';
 import type { BrowseTab } from './BrowseModal';
 
 interface HomeTilesProps {
-  /**
-   * Called with the requested tab name. GameClient decides whether
-   * to open BrowseModal (premium / stats path) or to show the
-   * PremiumGateModal for locked tabs.
-   */
+  /** Called with the requested tab name — always opens BrowseModal. */
   onTileClick: (tab: BrowseTab) => void;
-  /** True when the user has premium unlocked — drives the lock badge on gated tiles. */
-  premium: boolean;
 }
 
 /**
@@ -26,24 +20,16 @@ interface HomeTilesProps {
  * jumping into data surfaces (your own stats, the ranked leaderboard,
  * the puzzle archive).
  */
-export function HomeTiles({ onTileClick, premium }: HomeTilesProps) {
+export function HomeTiles({ onTileClick }: HomeTilesProps) {
   return (
     <div className="w-full max-w-[420px] grid grid-cols-3 gap-3">
       <Tile label="Stats" onClick={() => onTileClick('stats')}>
         <ChartBar className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
-      <Tile
-        label="Leaderboard"
-        onClick={() => onTileClick('leaderboard')}
-        locked={!premium}
-      >
+      <Tile label="Leaderboard" onClick={() => onTileClick('leaderboard')}>
         <Trophy className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
-      <Tile
-        label="Archive"
-        onClick={() => onTileClick('archive')}
-        locked={!premium}
-      >
+      <Tile label="Archive" onClick={() => onTileClick('archive')}>
         <Archive className="w-5 h-5 text-accent" weight="bold" aria-hidden />
       </Tile>
     </div>
@@ -53,30 +39,20 @@ export function HomeTiles({ onTileClick, premium }: HomeTilesProps) {
 interface TileProps {
   label: string;
   onClick: () => void;
-  locked?: boolean;
   children: React.ReactNode;
 }
 
-function Tile({ label, onClick, locked = false, children }: TileProps) {
+function Tile({ label, onClick, children }: TileProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="relative bg-white dark:bg-gray-800 hover:bg-brand-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 hover:border-brand-200 dark:hover:border-brand-600 rounded-card px-3 py-3 flex flex-col items-center justify-center gap-1.5 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      className="bg-white dark:bg-gray-800 hover:bg-brand-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 hover:border-brand-200 dark:hover:border-brand-600 rounded-card px-3 py-3 flex flex-col items-center justify-center gap-1.5 shadow-card transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
     >
       {children}
       <span className="text-[11px] font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
         {label}
       </span>
-      {locked && (
-        <span
-          className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-accent/15 text-accent flex items-center justify-center"
-          aria-label="Premium"
-          title="Premium"
-        >
-          <Diamond className="w-2.5 h-2.5" weight="fill" aria-hidden />
-        </span>
-      )}
     </button>
   );
 }
