@@ -26,6 +26,8 @@ interface BrowseModalProps {
 
   /** Today's day number — default view for the leaderboard tab. */
   todayDayNumber: number;
+  /** Loads an archive puzzle into the main game grid and closes the modal. */
+  onLoadPuzzle: (dayNumber: number) => void;
 }
 
 /**
@@ -56,6 +58,7 @@ export function BrowseModal({
   onCreateProfile,
   onUpgrade,
   todayDayNumber,
+  onLoadPuzzle,
 }: BrowseModalProps) {
   // The leaderboard panel lets the user scroll through past days. The
   // active day is kept in modal-level state so switching tabs and
@@ -120,8 +123,8 @@ export function BrowseModal({
               premium={premium}
               onUpgrade={onUpgrade}
               onDayPick={(d) => {
-                setLeaderboardDay(d);
-                onTabChange('leaderboard');
+                onLoadPuzzle(d);
+                onClose();
               }}
               onClose={onClose}
             />

@@ -32,6 +32,8 @@ export interface GriddleActions {
   tapCell: (cellIdx: number) => void;
   backspace: () => void;
   reset: () => void;
+  /** Hard reset for puzzle switches — clears foundWords and counters too. */
+  fullReset: () => void;
 }
 
 /**
@@ -118,6 +120,12 @@ export function useGriddle({
    */
   const inFlightAttemptRef = useRef<string | null>(null);
 
+  // Generation counter — incremented by fullReset (puzzle switch).
+  // triggerSolve captures the current value before the async call and
+  // bails in .then() if the generation changed, preventing a stale
+  // solve verdict from mutating the state of a different puzzle.
+  const generationRef = useRef(0);
+
   const letters = useMemo(() => path.map((i) => grid[i]), [path, grid]);
 
   const cellStates = useMemo<CellState[]>(() => {
@@ -191,6 +199,22 @@ export function useGriddle({
     telemetryRef.current?.reset();
   }, [solved]);
 
+  // Hard reset for puzzle switches — clears everything including
+  // foundWords and wordmark counters. Unlike `reset` (which preserves
+  // foundWords across mid-puzzle retries), this is a clean slate.
+  const fullReset = useCallback(() => {
+    generationRef.current += 1;
+    setPath([]);
+    inFlightAttemptRef.current = null;
+    setSolved(false);
+    setPendingSolve(false);
+    setFoundWords([]);
+    lastFoundWordRef.current = null;
+    backspaceCountRef.current = 0;
+    resetCountRef.current = 0;
+    telemetryRef.current?.reset();
+  }, []);
+
   // Real-time shorter-word detection (4-8 letters). The dictionary is
   // lazy-loaded via dynamic import — the first check after page load
   // may take ~50-100ms while the chunk downloads, but `prefetchDictionary`
@@ -263,9 +287,12 @@ export function useGriddle({
         foundWords: [...foundWordsRef.current],
       };
       setPendingSolve(true);
+      const gen = generationRef.current;
 
       onSolveAttempt({ ...payload, unassisted })
         .then((verdict) => {
+          // Bail if the puzzle changed while the solve was in flight.
+          if (generationRef.current !== gen) return;
           // Treat "solved without word" as a server contract violation
           // (the API guarantees `word` is present when solved=true).
           // If we ever receive solved=true with no word, fall through
@@ -290,9 +317,11 @@ export function useGriddle({
           }
         })
         .catch(() => {
+          if (generationRef.current !== gen) return;
           triggerShake();
         })
         .finally(() => {
+          if (generationRef.current !== gen) return;
           setPendingSolve(false);
           inFlightAttemptRef.current = null;
         });
@@ -423,6 +452,6 @@ export function useGriddle({
       pendingSolve,
       foundWords,
     },
-    { typeLetter, tapCell, backspace, reset },
+    { typeLetter, tapCell, backspace, reset, fullReset },
   ];
 }

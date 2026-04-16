@@ -26,6 +26,8 @@ interface AnomalyRow {
   keystrokeCount: number | null;
   flag: 'ineligible' | 'suspicious';
   createdAt: string;
+  handle: string | null;
+  avatarUrl: string | null;
 }
 
 /**
@@ -60,6 +62,24 @@ export function AnomaliesTab() {
   useEffect(() => {
     void fetchAnomalies();
   }, [fetchAnomalies]);
+
+  const moderateFlag = async (solveId: number, flag: 'ineligible' | 'suspicious' | null) => {
+    try {
+      const res = await fetch('/api/admin/anomalies', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ solveId, flag }),
+      });
+      if (!res.ok) return;
+      // Optimistically update the local list — if flag is null (cleared),
+      // remove the row; otherwise update it in place.
+      if (flag === null) {
+        setEntries((prev) => prev.filter((e) => e.id !== solveId));
+      } else {
+        setEntries((prev) => prev.map((e) => e.id === solveId ? { ...e, flag } : e));
+      }
+    } catch {/* best-effort */}
+  };
 
   return (
     <Card>
@@ -103,12 +123,13 @@ export function AnomaliesTab() {
                 <TableHead>When</TableHead>
                 <TableHead>Puzzle</TableHead>
                 <TableHead>Flag</TableHead>
-                <TableHead>Wallet / session</TableHead>
+                <TableHead>Identity</TableHead>
                 <TableHead className="text-right">Server</TableHead>
                 <TableHead className="text-right">Client</TableHead>
                 <TableHead className="text-right">Strokes</TableHead>
                 <TableHead className="text-right">Stddev</TableHead>
                 <TableHead className="text-right">Min</TableHead>
+                <TableHead>Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -123,10 +144,19 @@ export function AnomaliesTab() {
                   <TableCell>
                     <FlagPill flag={e.flag} />
                   </TableCell>
-                  <TableCell className="font-mono text-xs max-w-[200px] truncate">
-                    {e.wallet
-                      ? `${e.wallet.slice(0, 6)}…${e.wallet.slice(-4)}`
-                      : `anon:${e.sessionId.slice(0, 8)}`}
+                  <TableCell className="text-xs max-w-[200px]">
+                    <div className="flex items-center gap-1.5">
+                      {e.avatarUrl && (
+                        <img src={e.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover flex-shrink-0" />
+                      )}
+                      <span className="font-mono truncate">
+                        {e.handle
+                          ? e.handle
+                          : e.wallet
+                            ? `${e.wallet.slice(0, 6)}\u2026${e.wallet.slice(-4)}`
+                            : `anon:${e.sessionId.slice(0, 8)}`}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-mono text-xs">
                     {e.serverSolveMs != null ? formatMs(e.serverSolveMs) : '—'}
@@ -141,7 +171,39 @@ export function AnomaliesTab() {
                     {e.keystrokeStddevMs ?? '—'}
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-mono text-xs">
-                    {e.keystrokeMinMs ?? '—'}
+                    {e.keystrokeMinMs ?? '\u2014'}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      {e.flag === 'ineligible' && (
+                        <button
+                          type="button"
+                          onClick={() => moderateFlag(e.id, 'suspicious')}
+                          className="text-[10px] font-semibold text-warning-700 hover:underline"
+                          title="Downgrade to suspicious"
+                        >
+                          Suspicious
+                        </button>
+                      )}
+                      {e.flag === 'suspicious' && (
+                        <button
+                          type="button"
+                          onClick={() => moderateFlag(e.id, 'ineligible')}
+                          className="text-[10px] font-semibold text-error-700 hover:underline"
+                          title="Upgrade to ineligible"
+                        >
+                          Ineligible
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => moderateFlag(e.id, null)}
+                        className="text-[10px] font-semibold text-green-700 hover:underline"
+                        title="Clear flag (mark as legitimate)"
+                      >
+                        Clear
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

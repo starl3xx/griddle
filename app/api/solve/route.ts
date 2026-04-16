@@ -33,8 +33,8 @@ import { awardWordmarks } from '@/lib/wordmarks/award';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const INELIGIBLE_MS = parseInt(process.env.BOT_THRESHOLD_INELIGIBLE_MS ?? '8000', 10);
-const SUSPICIOUS_MS = parseInt(process.env.BOT_THRESHOLD_SUSPICIOUS_MS ?? '15000', 10);
+const INELIGIBLE_MS = parseInt(process.env.BOT_THRESHOLD_INELIGIBLE_MS ?? '2000', 10);
+const SUSPICIOUS_MS = parseInt(process.env.BOT_THRESHOLD_SUSPICIOUS_MS ?? '6000', 10);
 const SUSPICIOUS_STDDEV_MS = parseInt(process.env.BOT_THRESHOLD_STDDEV_MS ?? '30', 10);
 
 // A real solve has 8 inter-keystroke intervals (9 letters → 8 gaps).
@@ -157,14 +157,12 @@ export async function POST(
   const resetCount: number | null = body.resetCount ?? null;
   const foundWords = [...new Set(body.foundWords ?? [])];
 
-  // Clamp dayNumber to today’s puzzle. M4b only allows submitting solves
-  // for the current day — past puzzles bypass anti-bot timing checks
-  // (no puzzle_loads → null serverSolveMs → no flag). M5 will relax
-  // this when the premium archive feature ships, gated by wallet auth.
+  // Allow solves for today’s puzzle and past (archive) puzzles, but
+  // reject future days — same guard as /api/puzzle/[day].
   const todayDayNumber = getCurrentDayNumber();
-  if (body.dayNumber !== todayDayNumber) {
+  if (body.dayNumber > todayDayNumber) {
     return NextResponse.json(
-      { error: 'solve only accepted for today’s puzzle' },
+      { error: 'solve not accepted for future puzzles' },
       { status: 403 },
     );
   }

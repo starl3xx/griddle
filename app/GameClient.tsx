@@ -81,6 +81,27 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const [sessionWallet, setSessionWallet] = useState<string | null>(null);
   const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
 
+  // Active puzzle — defaults to today's. Archive navigation swaps it.
+  const [activePuzzle, setActivePuzzle] = useState<InitialPuzzle>(initialPuzzle);
+  const isArchive = activePuzzle.dayNumber !== initialPuzzle.dayNumber;
+
+  const loadArchivePuzzle = useCallback(async (dayNumber: number) => {
+    if (dayNumber === initialPuzzle.dayNumber) {
+      setActivePuzzle(initialPuzzle);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/puzzle/${dayNumber}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as InitialPuzzle;
+      setActivePuzzle(data);
+    } catch {/* best-effort */}
+  }, [initialPuzzle]);
+
+  const returnToToday = useCallback(() => {
+    setActivePuzzle(initialPuzzle);
+  }, [initialPuzzle]);
+
   /**
    * Tracks the Farcaster pfp URL last successfully POSTed to
    * /api/profile/farcaster. Shared between handleWalletConnect
@@ -161,7 +182,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            dayNumber: initialPuzzle.dayNumber,
+            dayNumber: activePuzzle.dayNumber,
             claimedWord: payload.claimedWord,
             clientSolveMs: payload.clientSolveMs,
             keystrokeIntervalsMs: payload.keystrokeIntervalsMs,
@@ -201,7 +222,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         return { solved: false };
       }
     },
-    [initialPuzzle.dayNumber],
+    [activePuzzle.dayNumber],
   );
 
   const handleSolved = useCallback(
@@ -228,7 +249,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   const [unassistedMode, setUnassistedMode] = useState(false);
 
   const [state, actions] = useGriddle({
-    grid: initialPuzzle.grid,
+    grid: activePuzzle.grid,
     onSolveAttempt: handleSolveAttempt,
     onSolved: handleSolved,
     disabled: showTutorial,
@@ -239,6 +260,18 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     setSolveResult(null);
     actions.reset();
   }, [actions]);
+
+  // Hard-reset the grid when the active puzzle changes (archive
+  // navigation). Uses fullReset instead of reset so foundWords and
+  // wordmark counters from the previous puzzle don't leak across.
+  const prevDayRef = useRef(activePuzzle.dayNumber);
+  useEffect(() => {
+    if (prevDayRef.current !== activePuzzle.dayNumber) {
+      prevDayRef.current = activePuzzle.dayNumber;
+      setSolveResult(null);
+      actions.fullReset();
+    }
+  }, [activePuzzle.dayNumber, actions]);
 
   /**
    * Wallet linking + premium read. Fired once when a wallet connects.
@@ -304,7 +337,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     fetch('/api/settings')
       .then((r) => r.ok ? r.json() : null)
       .then((data: { unassistedModeEnabled?: boolean } | null) => {
-        if (data?.unassistedModeEnabled) setUnassistedMode(true);
+        setUnassistedMode(!!data?.unassistedModeEnabled);
       })
       .catch(() => {/* best-effort */});
   }, [sessionWallet]);
@@ -720,7 +753,8 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           </h1>
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1 tabular-nums flex items-center justify-center gap-1.5">
             <span>
-              #{initialPuzzle.dayNumber.toString().padStart(3, '0')} · find the 9-letter word
+              #{activePuzzle.dayNumber.toString().padStart(3, '0')}
+              {isArchive ? ` · ${activePuzzle.date}` : ' · find the 9-letter word'}
             </span>
             {premium && (
               <span className="text-accent inline-flex items-center" title="Premium unlocked">
@@ -728,6 +762,15 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
               </span>
             )}
           </p>
+          {isArchive && (
+            <button
+              type="button"
+              onClick={returnToToday}
+              className="text-xs font-semibold text-brand hover:text-brand/80 mt-1 transition-colors"
+            >
+              ← Back to today\u2019s puzzle
+            </button>
+          )}
           <button
             type="button"
             onClick={openTutorial}
@@ -741,7 +784,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
         <FoundWords words={state.foundWords} />
 
         <Grid
-          grid={initialPuzzle.grid}
+          grid={activePuzzle.grid}
           cellStates={state.cellStates}
           sequenceByCell={state.sequenceByCell}
           shakeSignal={state.shakeSignal}
@@ -795,6 +838,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
           setPremiumGate('premium');
         }}
         todayDayNumber={initialPuzzle.dayNumber}
+        onLoadPuzzle={loadArchivePuzzle}
       />
 
       <SettingsModal
@@ -866,9 +910,9 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
 
       {solveResult && (
         <SolveModal
-          dayNumber={initialPuzzle.dayNumber}
+          dayNumber={activePuzzle.dayNumber}
           word={solveResult.word}
-          grid={initialPuzzle.grid}
+          grid={activePuzzle.grid}
           solveMs={solveResult.solveMs}
           unassisted={solveResult.unassisted}
           earnedWordmarks={solveResult.earnedWordmarks}

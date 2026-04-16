@@ -300,14 +300,16 @@ export function SettingsModal({
     const currentHandle = profile.handle ?? '';
     const currentAvatar = profile.avatarUrl ?? '';
 
-    if (currentHandle && trimmedUsername !== currentHandle) {
-      // Only gate on Premium for RENAMES — initial handle set (when
-      // currentHandle is null/empty) is free, matching the server-side
-      // check in PATCH /api/profile.
-      if (!premium) {
-        setProfileError('Changing your username is a Premium feature.');
-        return;
+    if (trimmedUsername !== currentHandle) {
+      if (currentHandle) {
+        // Renaming an existing handle — Premium only.
+        if (!premium) {
+          setProfileError('Changing your username is a Premium feature.');
+          return;
+        }
       }
+      // Validate for both initial set and rename — including empty,
+      // which validateUsername rejects with a min-length error.
       const validation = validateUsername(trimmedUsername);
       if (!validation.valid) {
         setProfileError(validation.error ?? 'Invalid username.');
