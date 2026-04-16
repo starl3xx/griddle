@@ -317,9 +317,11 @@ export function useGriddle({
           }
         })
         .catch(() => {
+          if (generationRef.current !== gen) return;
           triggerShake();
         })
         .finally(() => {
+          if (generationRef.current !== gen) return;
           setPendingSolve(false);
           inFlightAttemptRef.current = null;
         });
