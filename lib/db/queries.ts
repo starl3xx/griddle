@@ -432,16 +432,21 @@ export async function getWalletStats(identity: StatsIdentity): Promise<WalletSta
   let currentStreak = 0;
   let longestStreak = 0;
   if (normalizedWallet) {
-    const [streakRow] = await db
-      .select({
-        currentStreak: streaks.currentStreak,
-        longestStreak: streaks.longestStreak,
-      })
-      .from(streaks)
-      .where(eq(streaks.wallet, normalizedWallet))
-      .limit(1);
-    currentStreak = streakRow?.currentStreak ?? 0;
-    longestStreak = streakRow?.longestStreak ?? 0;
+    // Raw SQL — see "Drizzle wallet-eq drift" in README Code Style.
+    const streakResult = await db.execute<{
+      currentStreak: number;
+      longestStreak: number;
+    }>(sql`
+      SELECT
+        current_streak AS "currentStreak",
+        longest_streak AS "longestStreak"
+      FROM streaks
+      WHERE wallet = ${normalizedWallet}
+      LIMIT 1
+    `);
+    const streakRows = Array.isArray(streakResult) ? streakResult : (streakResult.rows ?? []);
+    currentStreak = streakRows[0]?.currentStreak ?? 0;
+    longestStreak = streakRows[0]?.longestStreak ?? 0;
   }
 
   return {
@@ -615,18 +620,82 @@ function toProfileRow(r: RawProfileRow): ProfileRow {
 }
 
 /**
+ * Internal — raw SQL SELECT of a full profiles row by (lowercased)
+ * wallet, returning the drizzle-shaped row (same keys as
+ * `profiles.$inferSelect`) so every caller that previously consumed
+ * the drizzle `select()` output works unchanged.
+ *
+ * Uses raw SQL per the "Drizzle wallet-eq drift" note in README
+ * Code Style — centralizing here so getProfileByWallet and the two
+ * byWallet lookups inside `upsertProfileForFarcaster` share one
+ * drift-proof implementation instead of duplicating the aliased
+ * SELECT three times.
+ */
+async function selectRawProfileByWallet(
+  normalizedWallet: string,
+): Promise<typeof profiles.$inferSelect | null> {
+  const result = await db.execute<{
+    id: number;
+    wallet: string | null;
+    handle: string | null;
+    premiumSource: string | null;
+    grantedBy: string | null;
+    reason: string | null;
+    stripeSessionId: string | null;
+    email: string | null;
+    emailVerifiedAt: Date | string | null;
+    avatarUrl: string | null;
+    avatarSource: string | null;
+    farcasterFid: number | null;
+    farcasterUsername: string | null;
+    createdAt: Date | string;
+    updatedAt: Date | string;
+  }>(sql`
+    SELECT
+      id,
+      wallet,
+      handle,
+      premium_source     AS "premiumSource",
+      granted_by         AS "grantedBy",
+      reason,
+      stripe_session_id  AS "stripeSessionId",
+      email,
+      email_verified_at  AS "emailVerifiedAt",
+      avatar_url         AS "avatarUrl",
+      avatar_source      AS "avatarSource",
+      farcaster_fid      AS "farcasterFid",
+      farcaster_username AS "farcasterUsername",
+      created_at         AS "createdAt",
+      updated_at         AS "updatedAt"
+    FROM profiles
+    WHERE wallet = ${normalizedWallet}
+    LIMIT 1
+  `);
+  const rows = Array.isArray(result) ? result : (result.rows ?? []);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  // Coerce timestamps — neon-http may return ISO strings depending on
+  // driver version. Wrap in Date so the shape matches what the drizzle
+  // builder would have returned and callers can call `.toISOString()`
+  // or compare with Date math without special-casing.
+  return {
+    ...r,
+    emailVerifiedAt: r.emailVerifiedAt == null
+      ? null
+      : r.emailVerifiedAt instanceof Date ? r.emailVerifiedAt : new Date(r.emailVerifiedAt),
+    createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
+    updatedAt: r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt),
+  } as typeof profiles.$inferSelect;
+}
+
+/**
  * Lookup by wallet address. Normalized to lowercase before the query so
  * mixed-case input (e.g. the checksummed form from wagmi) hits the same
  * row as the lowercased form stored on write.
  */
 export async function getProfileByWallet(wallet: string): Promise<ProfileRow | null> {
-  const normalized = wallet.toLowerCase();
-  const rows = await db
-    .select()
-    .from(profiles)
-    .where(eq(profiles.wallet, normalized))
-    .limit(1);
-  return rows.length === 0 ? null : toProfileRow(rows[0]);
+  const raw = await selectRawProfileByWallet(wallet.toLowerCase());
+  return raw == null ? null : toProfileRow(raw);
 }
 
 /**
@@ -1460,16 +1529,18 @@ export async function upsertProfileForFarcaster(input: {
 }): Promise<ProfileRow> {
   const wallet = input.wallet ? input.wallet.toLowerCase() : null;
 
+  // byWallet uses the raw-SQL helper to dodge the drizzle wallet-eq
+  // drift. byFid stays on the drizzle builder — no drift observed on
+  // integer columns, and farcaster_fid is wholly owned by this helper
+  // so a fallback wouldn't save reads elsewhere.
   const [byFid, byWallet] = await Promise.all([
     db.select().from(profiles)
       .where(eq(profiles.farcasterFid, input.fid)).limit(1),
-    wallet ? db.select().from(profiles)
-      .where(eq(profiles.wallet, wallet)).limit(1)
-      : Promise.resolve([] as typeof profiles.$inferSelect[]),
+    wallet ? selectRawProfileByWallet(wallet) : Promise.resolve(null),
   ]);
 
   const fidRow  = byFid[0]   ?? null;
-  const walletRow = byWallet[0] ?? null;
+  const walletRow = byWallet ?? null;
 
   // Decide whether a Farcaster sync is allowed to overwrite an
   // existing avatarUrl on a row. Custom uploads are protected — once
@@ -1607,7 +1678,7 @@ export async function upsertProfileForFarcaster(input: {
         .limit(1);
       r = refetch[0]
         ?? (wallet
-          ? (await db.select().from(profiles).where(eq(profiles.wallet, wallet)).limit(1))[0]
+          ? (await selectRawProfileByWallet(wallet)) ?? undefined
           : undefined);
       if (!r) throw new Error('upsertProfileForFarcaster: insert conflict but no row found on re-fetch');
     }
@@ -1702,21 +1773,48 @@ export const DEFAULT_USER_SETTINGS: Omit<UserSettingsRow, 'wallet' | 'updatedAt'
   darkModeEnabled: false,
 };
 
+/**
+ * Uses raw SQL — see "Drizzle wallet-eq drift" in README Code Style.
+ * Called from both `/api/settings` and (after the SSR hydration PR)
+ * the root `app/page.tsx` server component, so both paths need a
+ * drift-proof read.
+ */
 export async function getUserSettings(wallet: string): Promise<UserSettingsRow | null> {
-  const rows = await db
-    .select()
-    .from(userSettings)
-    .where(eq(userSettings.wallet, wallet.toLowerCase()))
-    .limit(1);
+  const normalized = wallet.toLowerCase();
+  const result = await db.execute<{
+    wallet: string;
+    streakProtectionEnabled: boolean;
+    streakProtectionUsedAt: Date | string | null;
+    unassistedModeEnabled: boolean;
+    darkModeEnabled: boolean;
+    updatedAt: Date | string;
+  }>(sql`
+    SELECT
+      wallet,
+      streak_protection_enabled   AS "streakProtectionEnabled",
+      streak_protection_used_at   AS "streakProtectionUsedAt",
+      unassisted_mode_enabled     AS "unassistedModeEnabled",
+      dark_mode_enabled           AS "darkModeEnabled",
+      updated_at                  AS "updatedAt"
+    FROM user_settings
+    WHERE wallet = ${normalized}
+    LIMIT 1
+  `);
+  const rows = Array.isArray(result) ? result : (result.rows ?? []);
   if (rows.length === 0) return null;
   const r = rows[0];
   return {
     wallet: r.wallet,
     streakProtectionEnabled: r.streakProtectionEnabled,
-    streakProtectionUsedAt: r.streakProtectionUsedAt,
+    streakProtectionUsedAt:
+      r.streakProtectionUsedAt == null
+        ? null
+        : r.streakProtectionUsedAt instanceof Date
+          ? r.streakProtectionUsedAt
+          : new Date(r.streakProtectionUsedAt),
     unassistedModeEnabled: r.unassistedModeEnabled,
     darkModeEnabled: r.darkModeEnabled,
-    updatedAt: r.updatedAt,
+    updatedAt: r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt),
   };
 }
 
@@ -1935,23 +2033,37 @@ export async function insertWordmarksIfNew(
 /**
  * Fetch all wordmarks earned by a wallet, newest first. Used by the
  * Lexicon grid on the Stats panel.
+ *
+ * Uses raw SQL — see the "Drizzle wallet-eq drift" note in the README
+ * Code Style section. Empirically, `eq(wordmarks.wallet, normalized)`
+ * from a dynamic `[wallet]` route file can reproducibly return 0 rows
+ * for rows that raw SQL finds fine, and this helper is called from
+ * exactly such a route (`/api/wordmarks/[wallet]`).
  */
 export async function getWordmarksForWallet(
   wallet: string,
 ): Promise<EarnedWordmarkRow[]> {
   const normalized = wallet.toLowerCase();
-  const rows = await db
-    .select({
-      wordmarkId: wordmarks.wordmarkId,
-      earnedAt: wordmarks.earnedAt,
-      puzzleId: wordmarks.puzzleId,
-    })
-    .from(wordmarks)
-    .where(eq(wordmarks.wallet, normalized))
-    .orderBy(sql`${wordmarks.earnedAt} DESC`);
+  const result = await db.execute<{
+    wordmarkId: string;
+    earnedAt: Date;
+    puzzleId: number | null;
+  }>(sql`
+    SELECT
+      wordmark_id AS "wordmarkId",
+      earned_at   AS "earnedAt",
+      puzzle_id   AS "puzzleId"
+    FROM wordmarks
+    WHERE wallet = ${normalized}
+    ORDER BY earned_at DESC
+  `);
+  const rows = Array.isArray(result) ? result : (result.rows ?? []);
   return rows.map((r) => ({
     wordmarkId: r.wordmarkId,
-    earnedAt: r.earnedAt,
+    // Neon HTTP may return timestamps as either Date or ISO string
+    // depending on driver version — coerce defensively so callers can
+    // always call `.toISOString()` on the result.
+    earnedAt: r.earnedAt instanceof Date ? r.earnedAt : new Date(r.earnedAt),
     puzzleId: r.puzzleId,
   }));
 }
@@ -1984,15 +2096,15 @@ export async function updateStreakForSolve(
 ): Promise<{ currentStreak: number; longestStreak: number }> {
   const normalized = wallet.toLowerCase();
 
-  const existing = await db
-    .select()
-    .from(streaks)
-    .where(eq(streaks.wallet, normalized))
-    .limit(1);
+  // Raw SQL for every `streaks` read below — see "Drizzle wallet-eq
+  // drift" in README Code Style. The UPDATE ... WHERE clauses further
+  // down keep drizzle's query builder since no drift has been observed
+  // on writes.
+  const existing = await selectStreakRow(normalized);
 
   const today = getCurrentDayNumber();
 
-  if (existing.length === 0) {
+  if (existing == null) {
     // Archive solve as first-ever solve: create a row but don't start
     // a streak (no lastSolvedDayNumber, streak stays at 0).
     if (dayNumber !== today) {
@@ -2019,19 +2131,14 @@ export async function updateStreakForSolve(
       })
       .onConflictDoNothing({ target: streaks.wallet });
     // Re-read in the rare case a concurrent request won the insert race.
-    const after = await db
-      .select()
-      .from(streaks)
-      .where(eq(streaks.wallet, normalized))
-      .limit(1);
-    const row = after[0];
+    const after = await selectStreakRow(normalized);
     return {
-      currentStreak: row?.currentStreak ?? 1,
-      longestStreak: row?.longestStreak ?? 1,
+      currentStreak: after?.currentStreak ?? 1,
+      longestStreak: after?.longestStreak ?? 1,
     };
   }
 
-  const row = existing[0];
+  const row = existing;
   const last = row.lastSolvedDayNumber;
 
   // Archive solves (any day that isn't today) never affect streak state.
@@ -2093,14 +2200,53 @@ export async function updateStreakForSolve(
   }
 
   // Concurrent update won the race — re-read the winner's state.
-  const reread = await db
-    .select()
-    .from(streaks)
-    .where(eq(streaks.wallet, normalized))
-    .limit(1);
+  const reread = await selectStreakRow(normalized);
   return {
-    currentStreak: reread[0]?.currentStreak ?? nextCurrent,
-    longestStreak: reread[0]?.longestStreak ?? nextLongest,
+    currentStreak: reread?.currentStreak ?? nextCurrent,
+    longestStreak: reread?.longestStreak ?? nextLongest,
+  };
+}
+
+/**
+ * Internal helper — raw SQL SELECT of a streaks row by (lowercased)
+ * wallet. Exists only so the three reads inside `updateStreakForSolve`
+ * (and the stats helper above) share a drift-proof code path without
+ * duplicating the raw SQL three times. See "Drizzle wallet-eq drift"
+ * in README Code Style.
+ */
+async function selectStreakRow(normalizedWallet: string): Promise<{
+  wallet: string;
+  currentStreak: number;
+  longestStreak: number;
+  lastSolvedDayNumber: number | null;
+  updatedAt: Date;
+} | null> {
+  const result = await db.execute<{
+    wallet: string;
+    currentStreak: number;
+    longestStreak: number;
+    lastSolvedDayNumber: number | null;
+    updatedAt: Date | string;
+  }>(sql`
+    SELECT
+      wallet,
+      current_streak         AS "currentStreak",
+      longest_streak         AS "longestStreak",
+      last_solved_day_number AS "lastSolvedDayNumber",
+      updated_at             AS "updatedAt"
+    FROM streaks
+    WHERE wallet = ${normalizedWallet}
+    LIMIT 1
+  `);
+  const rows = Array.isArray(result) ? result : (result.rows ?? []);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    wallet: r.wallet,
+    currentStreak: r.currentStreak,
+    longestStreak: r.longestStreak,
+    lastSolvedDayNumber: r.lastSolvedDayNumber,
+    updatedAt: r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt),
   };
 }
 
@@ -2111,21 +2257,23 @@ export async function updateStreakForSolve(
  */
 export async function getLifetimeSolveCount(wallet: string): Promise<number> {
   const normalized = wallet.toLowerCase();
-  // COUNT(DISTINCT puzzle_id) to prevent inflated Goldfinch progress
+  // Raw SQL — see "Drizzle wallet-eq drift" in README Code Style. This
+  // result feeds Fledgling / Goldfinch awarding, so a drift-induced
+  // undercount would deny legitimate milestones.
+  //
+  // COUNT(DISTINCT puzzle_id) prevents inflated Goldfinch progress
   // when a user re-solves the same puzzle (refresh → re-submit). The
   // solves table has no unique constraint on (wallet, puzzle_id), so
   // duplicate rows are expected. Without DISTINCT, re-solves would
   // accumulate toward the 100-puzzle threshold.
-  const rows = await db
-    .select({ count: sql<number>`count(DISTINCT ${solves.puzzleId})::int` })
-    .from(solves)
-    .where(
-      and(
-        eq(solves.wallet, normalized),
-        eq(solves.solved, true),
-        sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
-      ),
-    );
+  const result = await db.execute<{ count: number }>(sql`
+    SELECT COUNT(DISTINCT puzzle_id)::int AS count
+    FROM solves
+    WHERE wallet = ${normalized}
+      AND solved = true
+      AND (flag IS NULL OR flag = 'suspicious')
+  `);
+  const rows = Array.isArray(result) ? result : (result.rows ?? []);
   return rows[0]?.count ?? 0;
 }
 
