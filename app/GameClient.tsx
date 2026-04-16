@@ -835,20 +835,21 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100 inline-block">
             Griddl<span className="relative inline-block">
               e
-              {/* Crown perched on the final 'e'. Default state is a black
-                  crown (matches everyone's branding). Premium users get
-                  the same crown in accent-purple — this replaces the
-                  diamond that used to sit in the subtitle. Slight right
-                  tilt for playful character. */}
-              <Crown
-                className={`absolute -top-2.5 -right-1 sm:-top-3.5 sm:-right-1.5 w-4 h-4 sm:w-5 sm:h-5 rotate-[18deg] ${
-                  premium
-                    ? 'text-accent'
-                    : 'text-gray-900 dark:text-gray-100'
-                }`}
-                weight="fill"
-                aria-hidden
-              />
+              {/* Premium-only crown perched on the final 'e'. Non-premium
+                  users see the bare wordmark — the crown is the Premium
+                  indicator, replacing the diamond that used to live in
+                  the subtitle. Sizes + offsets are em-based so the crown
+                  scales + stays anchored to the 'e' across breakpoints
+                  (mobile text-4xl vs sm:text-5xl) without re-tuning
+                  absolute pixel values. Slight right tilt for playful
+                  character. */}
+              {premium && (
+                <Crown
+                  className="absolute -top-[0.45em] -right-[0.15em] w-[0.55em] h-[0.55em] rotate-[18deg] text-accent pointer-events-none"
+                  weight="fill"
+                  aria-hidden
+                />
+              )}
             </span>
           </h1>
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
