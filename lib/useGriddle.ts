@@ -241,6 +241,7 @@ export function useGriddle({
     });
   }, []);
 
+
   // Real-time shorter-word detection (4-8 letters). The dictionary is
   // lazy-loaded via dynamic import — the first check after page load
   // may take ~50-100ms while the chunk downloads, but `prefetchDictionary`

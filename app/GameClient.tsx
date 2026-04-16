@@ -128,6 +128,7 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     }).catch(() => { /* best-effort */ });
   }, [activePuzzle.dayNumber]);
 
+
   /**
    * Tracks the Farcaster pfp URL last successfully POSTed to
    * /api/profile/farcaster. Shared between handleWalletConnect
@@ -287,11 +288,12 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
   // live foundWords list. seedFoundWords is de-duped and doesn't fire
   // onCrumbFound (no re-saving already-persisted words).
   //
-  // Depend on persistedCrumbs only — seedFoundWords is a useCallback
-  // with [] deps (stable identity). Including `actions` would re-fire
-  // on every render (actions is a fresh object literal) and re-seed
-  // stale crumbs from the previous puzzle after archive navigation.
-  const { seedFoundWords } = actions;
+  // Destructure stable callbacks from actions (each is a useCallback
+  // with [] deps). The actions object itself is a fresh literal every
+  // render, so depending on it would re-fire effects on every render.
+  const { seedFoundWords, fullReset } = actions;
+
+  // Depend on persistedCrumbs only — seedFoundWords has stable identity.
   useEffect(() => {
     if (persistedCrumbs.length > 0) {
       seedFoundWords(persistedCrumbs);
@@ -312,9 +314,10 @@ export default function GameClient({ initialPuzzle }: GameClientProps) {
     if (prevDayRef.current !== activePuzzle.dayNumber) {
       prevDayRef.current = activePuzzle.dayNumber;
       setSolveResult(null);
-      actions.fullReset();
+      fullReset();
     }
-  }, [activePuzzle.dayNumber, actions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePuzzle.dayNumber]);
 
   /**
    * Wallet linking + premium read. Fired once when a wallet connects.
