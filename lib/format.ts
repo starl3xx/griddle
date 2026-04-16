@@ -7,10 +7,20 @@ export function formatMs(ms: number): string {
   return formatSeconds(totalSeconds);
 }
 
+/**
+ * Human solve time. Short solves stay compact (`M:SS`) so the common
+ * case — a sub-minute to ~45 min finish — reads tight. Anything past an
+ * hour switches to `H:MM:SS` so a 13-hour session doesn't render as
+ * `790:44`. Mirrors `formatCountdown`'s hours branch for consistency.
+ */
 export function formatSeconds(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  const t = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${m}:${pad(s)}`;
 }
 
 export function formatCountdown(totalSeconds: number): string {
