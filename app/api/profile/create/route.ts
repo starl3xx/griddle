@@ -102,19 +102,24 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   // Slugify the display name into a handle that matches the same shape
-  // PATCH /api/profile validates against: /^[a-z0-9]+(-[a-z0-9]+)*$/,
-  // 2–32 chars. Crucially, trim trailing hyphens AFTER the length slice
-  // — stripping before slice lets the slice itself re-introduce a
-  // hyphen at the cut point, producing handles the PATCH validator
-  // then rejects (making the profile uneditable).
+  // PATCH /api/profile validates against: /^[a-z0-9_]+$/, 2–32 chars.
+  // Any non-matching character (spaces, punctuation, unicode glyphs
+  // like $, ✪, etc.) becomes an underscore — and the slug may not
+  // start or end with an underscore.
+  //
+  // Crucially, trim leading/trailing underscores AFTER the length slice:
+  // stripping before the slice lets the slice itself re-introduce an
+  // underscore at the cut point, producing handles the PATCH validator
+  // would then reject (leaving the profile uneditable).
   const toValidSlug = (raw: string): string => {
     let s = raw
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/_+/g, '_')
       .slice(0, 32)
-      .replace(/^-+|-+$/g, '');
+      .replace(/^_+|_+$/g, '');
     if (!s) s = 'player';
-    if (s.length < 2) s = `${s}-player`.slice(0, 32).replace(/-+$/, '');
+    if (s.length < 2) s = `${s}_player`.slice(0, 32).replace(/_+$/, '');
     return s;
   };
   const handle = toValidSlug(displayName);
@@ -166,11 +171,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
 
     // Not a wallet conflict — assume handle collision, retry with a
-    // 4-digit random suffix. Strip a trailing hyphen from the base
-    // before appending so we never produce "xxx--1234".
+    // 4-digit random suffix. Strip a trailing underscore from the
+    // base before appending so we never produce "xxx__1234", and
+    // so the resulting handle always matches the PATCH validator's
+    // /^[a-z0-9_]+$/ — a hyphen separator here would produce a
+    // handle the PATCH endpoint rejects, leaving the profile
+    // uneditable.
     const suffix = Math.floor(Math.random() * 9000 + 1000).toString();
-    const base = handle.slice(0, 27).replace(/-+$/, '');
-    const fallbackHandle = `${base}-${suffix}`;
+    const base = handle.slice(0, 27).replace(/_+$/, '');
+    const fallbackHandle = `${base}_${suffix}`;
     const retry = await db
       .insert(profiles)
       .values({ ...baseValues, handle: fallbackHandle })
