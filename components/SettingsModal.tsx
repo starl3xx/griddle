@@ -462,11 +462,11 @@ export function SettingsModal({
               placeholder="starl3xx"
               maxLength={32}
               hint={
-                hasIdentity && !premium
+                profile?.handle && !premium
                   ? 'Upgrade to Premium to change your username'
                   : '2–32 chars, a–z, 0–9, underscores'
               }
-              disabled={hasIdentity && !premium}
+              disabled={!!profile?.handle && !premium}
             />
             <AvatarUploadRow
               avatarUrl={avatarUrlDraft}

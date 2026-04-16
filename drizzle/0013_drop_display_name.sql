@@ -14,12 +14,12 @@
 -- same state they'd be in if the user never typed anything.
 UPDATE "profiles"
 SET "handle" = NULLIF(
-  left(
-    regexp_replace(
+  regexp_replace(
+    left(
       regexp_replace(lower("display_name"), '[^a-z0-9_]+', '_', 'g'),
-      '^_+|_+$', '', 'g'
+      32
     ),
-    32
+    '^_+|_+$', '', 'g'
   ),
   ''
 )
