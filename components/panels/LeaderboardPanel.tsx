@@ -23,6 +23,10 @@ interface LeaderboardPanelProps {
   todayDayNumber: number;
   /** Lets the panel move forward/backward through days. */
   onDayChange: (day: number) => void;
+  /** True when the user has Premium — shows full leaderboard. */
+  premium: boolean;
+  /** Opens the Premium upgrade flow. */
+  onUpgrade: () => void;
   onClose: () => void;
 }
 
@@ -44,6 +48,8 @@ export function LeaderboardPanel({
   dayNumber,
   todayDayNumber,
   onDayChange,
+  premium,
+  onUpgrade,
   onClose,
 }: LeaderboardPanelProps) {
   const [data, setData] = useState<LeaderboardResponse | null>(null);
@@ -119,7 +125,17 @@ export function LeaderboardPanel({
 
       {/* Body */}
       <div className="mt-5">
-        {loading ? (
+        {!premium ? (
+          <div className="py-8 text-center space-y-4">
+            <Diamond className="w-8 h-8 text-accent mx-auto" weight="fill" aria-hidden />
+            <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed max-w-xs mx-auto">
+              Upgrade to Premium to see each day's ranked leaderboard and how you stack up.
+            </p>
+            <button type="button" onClick={onUpgrade} className="btn-primary">
+              Upgrade to Premium
+            </button>
+          </div>
+        ) : loading ? (
           <div className="flex justify-center py-10">
             <CircleNotch className="w-6 h-6 text-gray-400 animate-spin" weight="bold" aria-hidden />
           </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChartBar, Trophy, Archive, Diamond } from '@phosphor-icons/react';
+import { ChartBar, Trophy, Archive } from '@phosphor-icons/react';
 import { StatsPanel } from './panels/StatsPanel';
 import { LeaderboardPanel } from './panels/LeaderboardPanel';
 import { ArchivePanel } from './panels/ArchivePanel';
@@ -107,11 +107,15 @@ export function BrowseModal({
               dayNumber={leaderboardDay}
               todayDayNumber={todayDayNumber}
               onDayChange={setLeaderboardDay}
+              premium={premium}
+              onUpgrade={onUpgrade}
               onClose={onClose}
             />
           )}
           {openTab === 'archive' && (
             <ArchivePanel
+              premium={premium}
+              onUpgrade={onUpgrade}
               onDayPick={(d) => {
                 setLeaderboardDay(d);
                 onTabChange('leaderboard');
@@ -123,16 +127,9 @@ export function BrowseModal({
 
         {/* Bottom tab bar — iOS-style. Three equal columns, icon over
             label, brand color on the active tab, gray on the others,
-            2px top border running the full width.
-
-            Premium-locked tabs (Leaderboard, Archive for non-premium)
-            show a lock badge in the corner. Their click handler still
-            fires onTabChange — the parent's handler is responsible
-            for routing locked taps into the PremiumGateModal instead
-            of swapping the active tab. This is critical: without it,
-            a non-premium user who opened the modal via the free Stats
-            tile could tap Leaderboard / Archive in the tab bar and
-            bypass the gate that HomeTiles enforces. */}
+            2px top border running the full width. All three tabs are
+            always accessible; non-premium users see an upgrade CTA
+            inside the Leaderboard/Archive panel body. */}
         <nav
           className="grid grid-cols-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
           role="tablist"
@@ -140,21 +137,18 @@ export function BrowseModal({
         >
           <TabButton
             active={openTab === 'stats'}
-            locked={false}
             label="Stats"
             icon={<ChartBar className="w-5 h-5" weight="bold" aria-hidden />}
             onClick={() => onTabChange('stats')}
           />
           <TabButton
             active={openTab === 'leaderboard'}
-            locked={!premium}
             label="Leaderboard"
             icon={<Trophy className="w-5 h-5" weight="bold" aria-hidden />}
             onClick={() => onTabChange('leaderboard')}
           />
           <TabButton
             active={openTab === 'archive'}
-            locked={!premium}
             label="Archive"
             icon={<Archive className="w-5 h-5" weight="bold" aria-hidden />}
             onClick={() => onTabChange('archive')}
@@ -167,13 +161,11 @@ export function BrowseModal({
 
 function TabButton({
   active,
-  locked,
   label,
   icon,
   onClick,
 }: {
   active: boolean;
-  locked: boolean;
   label: string;
   icon: React.ReactNode;
   onClick: () => void;
@@ -183,9 +175,8 @@ function TabButton({
       type="button"
       role="tab"
       aria-selected={active}
-      aria-disabled={locked}
       onClick={onClick}
-      className={`relative flex flex-col items-center justify-center gap-1 py-3 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${
+      className={`flex flex-col items-center justify-center gap-1 py-3 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${
         active
           ? 'text-brand dark:text-brand-300'
           : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
@@ -195,15 +186,6 @@ function TabButton({
       <span className="text-[10px] font-bold uppercase tracking-wider">
         {label}
       </span>
-      {locked && (
-        <span
-          className="absolute top-1.5 right-2 w-3.5 h-3.5 rounded-full bg-accent/15 text-accent flex items-center justify-center"
-          aria-label="Premium"
-          title="Premium"
-        >
-          <Diamond className="w-2 h-2" weight="fill" aria-hidden />
-        </span>
-      )}
     </button>
   );
 }
