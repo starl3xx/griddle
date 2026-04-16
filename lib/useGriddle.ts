@@ -256,11 +256,16 @@ export function useGriddle({
         // Persist the find for the duration of the attempt. Dedup via
         // the state update callback so rapid re-finds of the same word
         // don't create duplicate entries even under React batching.
+        // Side effect (onCrumbFound) lives OUTSIDE the updater — React
+        // StrictMode double-invokes updaters, so a side effect inside
+        // would fire twice per crumb.
+        let isNew = false;
         setFoundWords((prev) => {
           if (prev.includes(candidate)) return prev;
-          onCrumbFound?.(candidate);
+          isNew = true;
           return [candidate, ...prev];
         });
+        if (isNew) onCrumbFound?.(candidate);
       })
       .catch(() => {
         // Dictionary chunk failed to load — silently skip.

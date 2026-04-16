@@ -2095,7 +2095,7 @@ export async function saveCrumb(
     .values({
       sessionId,
       puzzleId,
-      word: word.toUpperCase(),
+      word: word.toLowerCase(),
       wallet: wallet?.toLowerCase() ?? null,
     })
     .onConflictDoNothing()
