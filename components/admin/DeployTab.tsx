@@ -73,8 +73,23 @@ export function DeployTab() {
     if (!chainOk) {
       await switchChainAsync({ chainId: BASE_CHAIN_ID });
     }
-    setSteps((s) => ({ ...s, deploy: 'running' }));
-    setErrors((e) => ({ ...e, deploy: '' }));
+    // Reset downstream step state that's TIED to the contract
+    // address — a re-deploy produces new addresses, so recipe (set
+    // on the old contract) and escrow (approved on the old contract)
+    // are stale. `migrate` stays — the DB migration is global +
+    // idempotent, not address-specific. Without this reset, `allDone`
+    // would stay true and the success banner would advertise the
+    // fresh address as fully configured even though recipe + escrow
+    // were never re-run.
+    setSteps((s) => ({ ...s, deploy: 'running', recipe: 'idle', escrow: 'idle' }));
+    setErrors((e) => ({ ...e, deploy: '', recipe: '', escrow: '' }));
+    setState((s) => ({
+      ...s,
+      premiumAddress: null,
+      oracleAddress: null,
+      setSwapTx: null,
+      approveEscrow: null,
+    }));
     try {
       // 1a) deploy WordOracle
       const oracleHash = await deployContractAsync({
