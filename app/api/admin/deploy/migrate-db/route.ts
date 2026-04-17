@@ -48,13 +48,18 @@ export async function POST(): Promise<NextResponse> {
   const runner = neon(url);
 
   try {
-    // Neon HTTP runs statements one at a time via `.query()`. Split
-    // on top-level semicolons (the migration is idempotent DDL only —
-    // no semicolons inside strings here) and execute sequentially.
-    const statements = sql
-      .split(/;\s*(?:\n|$)/)
+    // Neon HTTP runs statements one at a time via `.query()`. Strip
+    // line comments FIRST (otherwise a leading block of `--` lines
+    // attached to the ALTER TABLE chunk would make that chunk start
+    // with `--`, and a naive chunk-level comment filter would drop
+    // the migration's main statement — which is what shipped in the
+    // first version of this endpoint until Bugbot caught it). With
+    // comments stripped, splitting on semicolons gives just the DDL.
+    const cleaned = sql.replace(/--[^\n]*/g, '').trim();
+    const statements = cleaned
+      .split(/;\s*/)
       .map((s) => s.trim())
-      .filter((s) => s.length > 0 && !s.startsWith('--'));
+      .filter((s) => s.length > 0);
 
     for (const stmt of statements) {
       await runner.query(stmt);

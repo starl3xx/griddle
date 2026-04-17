@@ -16,18 +16,17 @@
  * only if the pool key (hook / fee / tickSpacing) changes.
  */
 
-/**
- * WORD/WETH v4 Clanker pool parameters.
+/*
+ * WORD/WETH v4 Clanker pool parameters (reference — encoded into the
+ * SWAP_RECIPE.inputs[1] bytes below, not read at runtime).
  * Discovered via Uniswap v4 PoolManager Initialize event on Base:
- *   poolId = 0xc5db937916d2c6f96142a6886ba8b5b74e14949c9cc1080a676ab2a5eb1ea275
+ *   poolId      = 0xc5db937916d2c6f96142a6886ba8b5b74e14949c9cc1080a676ab2a5eb1ea275
+ *   currency0   = 0x304e649e69979298BD1AEE63e175ADf07885fb4b ($WORD)
+ *   currency1   = 0x4200000000000000000000000000000000000006 (WETH)
+ *   fee         = 0x800000 (DYNAMIC_FEE_FLAG — Clanker sets fee at swap time)
+ *   tickSpacing = 200
+ *   hooks       = 0xd60D6B218116cFd801E28F78d011a203D2b068Cc
  */
-export const WORD_POOL = {
-  currency0: '0x304e649e69979298BD1AEE63e175ADf07885fb4b', // $WORD
-  currency1: '0x4200000000000000000000000000000000000006', // WETH
-  fee: 0x800000, // DYNAMIC_FEE_FLAG — Clanker hook sets fee at swap time
-  tickSpacing: 200,
-  hooks: '0xd60D6B218116cFd801E28F78d011a203D2b068Cc',
-} as const;
 
 /** Bytes for `GriddlePremium.setSwapConfig(commands, inputs)`. */
 export const SWAP_RECIPE = {
