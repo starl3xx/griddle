@@ -87,6 +87,16 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   // Parallelize the row fetches — they depend on the counts
   // computed above but are independent of each other.
+  //
+  // Count-phase vs fetch-phase snapshot: the pagination math uses
+  // `registeredTotal` / `anonTotal` from the count phase, and those
+  // same values flow into `counts` in the response — so the page
+  // returned is internally consistent. If a row is inserted or
+  // deleted in the ~ms between the two phases, this page might show
+  // one fewer/extra row than the total would predict, but the next
+  // refresh converges. Acceptable for a single-operator admin
+  // endpoint; not worth wrapping in a REPEATABLE READ transaction.
+  // `anonResult.total` is intentionally ignored for the same reason.
   const [registeredRows, anonResult] = await Promise.all([
     regTake > 0
       ? listRegistered({ q, offset: regOffset, limit: regTake })

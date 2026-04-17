@@ -62,7 +62,13 @@ export function UserDossierModal({
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/admin/users/${targetId}/dossier`, { signal: controller.signal });
+        // Double-encode the full targetId so any `%XX` sequences from
+        // the caller (e.g. the `%2F` produced if a session id happens
+        // to contain '/') become `%25XX` on the wire. Some reverse
+        // proxies decode `%2F` before routing and would otherwise
+        // split the path segment → 404. Next.js decodes once when
+        // populating `params.id`, which restores `targetId` exactly.
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(targetId)}/dossier`, { signal: controller.signal });
         if (!res.ok) throw new Error(`Failed to load (${res.status})`);
         const json = await res.json() as { dossier: DossierData };
         setData(json.dossier);
