@@ -42,9 +42,17 @@ export function GameTimer({ startedAt, frozenMs }: GameTimerProps) {
     ? Math.max(0, frozenMs as number)
     : Math.max(0, Date.now() - startedAt);
 
+  // Frozen state = the puzzle has been solved. Switch to success
+  // coloring so the pill itself communicates "banked" at a glance,
+  // not just a stopped number. The success palette is already used
+  // for other solve-complete affordances, so the grammar carries.
+  const pillClass = frozen
+    ? 'bg-success-100 text-success-800 dark:bg-success-900/40 dark:text-success-200'
+    : 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100';
+
   return (
     <div
-      className="inline-flex items-center rounded-pill bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-1 text-sm font-semibold tabular-nums"
+      className={`inline-flex items-center rounded-pill px-3 py-1 text-sm font-semibold tabular-nums ${pillClass}`}
       aria-live="off"
     >
       {formatMs(displayMs)}

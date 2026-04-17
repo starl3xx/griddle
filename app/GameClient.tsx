@@ -1132,9 +1132,19 @@ export default function GameClient({
                   darker band against the surrounding page. Using
                   `bg-black/50` here layered a near-black rectangle on
                   top of gray-900, which looked like a hard-edged
-                  horizontal stripe spanning the full viewport width. */}
+                  horizontal stripe spanning the full viewport width.
+
+                  The mask-image gradient fades the bottom ~20% of the
+                  overlay so the blur + tint don't end in a visible
+                  straight line where the WordSlots row ends. Without
+                  the mask the cutoff is a pronounced horizontal edge
+                  right above the Backspace / Reset row — especially
+                  obvious in dark mode where the tint and body tones
+                  are close but not identical. `-webkit-mask-image`
+                  pair is for Safari, which still needs the vendor
+                  prefix for mask-image as of 2026. */}
               <div
-                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-gray-900/40"
+                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-gray-900/40 [mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)] [-webkit-mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)]"
                 aria-hidden
               />
               <StartGate onStart={handleStart} pending={startPending} />
