@@ -53,7 +53,7 @@ export async function quoteWordForUsd(
 
   const usd = typeof usdWhole === 'bigint' ? usdWhole : BigInt(usdWhole);
   const usdScaled = usd * 10n ** 18n;
-  const base = (usdScaled * 10n ** 18n) / price;
-  const withBuffer = (base * (10_000n + BigInt(bufferBps))) / 10_000n;
+  const baseAmount = (usdScaled * 10n ** 18n) / price;
+  const withBuffer = (baseAmount * (10_000n + BigInt(bufferBps))) / 10_000n;
   return withBuffer;
 }

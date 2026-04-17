@@ -111,11 +111,28 @@ export async function GET(req: Request): Promise<NextResponse> {
       summary.retriesSucceeded += 1;
     } catch (err) {
       // If the failure was "EscrowAlreadyExists" the on-chain state is
-      // already correct — the event scan below will pick up the burn
-      // whenever it settles. For any other failure, push back on the
-      // queue for a later attempt.
+      // already correct — a prior attempt landed the unlockForUser tx
+      // before failing downstream. Backfill the DB row so the admin
+      // ledger stops showing stale nulls. Match against either the
+      // viem-decoded error name (requires the error in the ABI) or the
+      // raw revert selector — belt-and-suspenders since a missing ABI
+      // entry previously turned the regex into a permanent poison pill.
       const message = err instanceof Error ? err.message : String(err);
-      if (/EscrowAlreadyExists/i.test(message)) {
+      const isAlreadyExists = /EscrowAlreadyExists/i.test(message);
+      if (isAlreadyExists) {
+        // escrowOpenTx stays null — we don't have the original open
+        // tx hash from a prior run. The EscrowBurned/Refunded scan
+        // below will backfill the settle tx + status correctly via
+        // `externalId`, which is enough for the admin ledger.
+        const externalId = (await import('@/lib/contracts/escrowSigner'))
+          .externalIdForStripe(entry.stripeSessionId);
+        await db
+          .update(premiumUsers)
+          .set({
+            externalId,
+            escrowStatus: 'pending',
+          })
+          .where(eq(premiumUsers.wallet, entry.wallet.toLowerCase()));
         summary.retriesSucceeded += 1;
         continue;
       }

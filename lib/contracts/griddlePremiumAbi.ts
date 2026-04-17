@@ -114,6 +114,25 @@ export const griddlePremiumAbi = [
     ],
     anonymous: false,
   },
+  // Errors — included so viem can decode reverts into typed error names
+  // for callers that pattern-match (e.g. the escrow-sync cron treats
+  // `EscrowAlreadyExists` as a success signal). Without the ABI entry,
+  // viem falls back to raw revert bytes and the name-match regex
+  // silently fails, turning a replay into a permanent poison pill.
+  { type: 'error', name: 'EscrowAlreadyExists', inputs: [] },
+  { type: 'error', name: 'EscrowNotPending', inputs: [] },
+  { type: 'error', name: 'EscrowStillLocked', inputs: [] },
+  { type: 'error', name: 'NotEscrowManager', inputs: [] },
+  { type: 'error', name: 'StaleOraclePrice', inputs: [] },
+  { type: 'error', name: 'OracleZeroPrice', inputs: [] },
+  { type: 'error', name: 'MinWordOutTooLow', inputs: [] },
+  { type: 'error', name: 'SwapProducedInsufficientWord', inputs: [] },
+  { type: 'error', name: 'SwapConfigNotSet', inputs: [] },
+  { type: 'error', name: 'ZeroAddress', inputs: [] },
+  { type: 'error', name: 'ZeroAmount', inputs: [] },
+  { type: 'error', name: 'AmountOverflow', inputs: [] },
+  { type: 'error', name: 'NothingToSweep', inputs: [] },
+  { type: 'error', name: 'ConstructorInterfaceMismatch', inputs: [] },
 ] as const;
 
 /**
