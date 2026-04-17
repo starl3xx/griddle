@@ -24,13 +24,13 @@ export function StartGate({ onStart, pending }: StartGateProps) {
         type="button"
         onClick={onStart}
         disabled={pending}
-        className="btn-accent text-2xl sm:text-3xl font-black uppercase tracking-wider px-10 py-5 inline-flex items-center gap-3 shadow-lg disabled:opacity-60"
+        className="btn-primary text-xl sm:text-2xl font-black uppercase tracking-wider px-8 py-4 inline-flex items-center gap-2 shadow-lg disabled:opacity-60"
       >
-        <Play className="w-6 h-6" weight="fill" aria-hidden />
+        <Play className="w-5 h-5" weight="fill" aria-hidden />
         Start
       </button>
       <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-300 text-center px-4">
-        Timer starts when you press Start
+        Timer starts immediately
       </p>
     </div>
   );
