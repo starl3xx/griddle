@@ -1,12 +1,14 @@
 import { notFound } from 'next/navigation';
 import GameClient from './GameClient';
 import {
+  getPreviousSolveMsForPuzzle,
   getPuzzleStartedAt,
   getTodayPuzzle,
   getUserSettings,
   recordPuzzleLoad,
 } from '@/lib/db/queries';
 import { getSessionId } from '@/lib/session';
+import { getSessionProfile } from '@/lib/session-profile';
 import { getSessionWallet } from '@/lib/wallet-session';
 
 /**
@@ -39,22 +41,30 @@ export default async function Page() {
 
   // Kick off the three parallel reads. Wallet → KV (Upstash), puzzle
   // → Neon. Settings depends on wallet so it can't start until after.
-  const [puzzle, sessionWallet] = await Promise.all([
+  // profileId from session KV so we can detect a prior solve against
+  // the handle-only identity path.
+  const [puzzle, sessionWallet, profileId] = await Promise.all([
     getTodayPuzzle(),
     getSessionWallet(sessionId),
+    getSessionProfile(sessionId),
   ]);
   if (!puzzle) {
     notFound();
   }
 
-  // Read started_at in parallel with recordPuzzleLoad + settings. No
-  // ordering constraint: on a first visit the row doesn't exist yet
-  // and the read returns null regardless; on return visits the row
-  // already exists from a prior recordPuzzleLoad and the current
-  // insert is an onConflictDoNothing no-op.
-  const [settings, initialStartedAt] = await Promise.all([
+  // Read started_at + any prior solve in parallel with recordPuzzleLoad
+  // + settings. No ordering constraint: on a first visit no row exists
+  // and both return null; on return visits the row is already there
+  // (onConflictDoNothing no-op). Prior-solve detection matches on
+  // profile_id OR wallet OR session_id, so anonymous refreshes still
+  // hydrate the post-solve UI state.
+  const [settings, initialStartedAt, previousSolveMs] = await Promise.all([
     sessionWallet ? getUserSettings(sessionWallet) : Promise.resolve(null),
     getPuzzleStartedAt(sessionId, puzzle.dayNumber),
+    getPreviousSolveMsForPuzzle(
+      { sessionId, wallet: sessionWallet, profileId },
+      puzzle.id,
+    ),
     recordPuzzleLoad(sessionId, puzzle.id),
   ]);
 
@@ -71,6 +81,7 @@ export default async function Page() {
       initialSessionWallet={sessionWallet}
       initialUnassistedMode={settings?.unassistedModeEnabled ?? false}
       initialStartedAt={initialStartedAt != null ? initialStartedAt.toISOString() : null}
+      initialFinalSolveMs={previousSolveMs}
     />
   );
 }

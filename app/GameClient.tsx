@@ -76,6 +76,15 @@ interface GameClientProps {
    * hasn't started this puzzle yet.
    */
   initialStartedAt: string | null;
+  /**
+   * Authoritative solve duration (ms) for this caller's first
+   * successful solve of today's puzzle, or null if they haven't
+   * solved it yet. Seeds `finalSolveMs` so a refresh after solving
+   * renders the frozen timer + crumb lock from tick zero instead of
+   * the timer ticking from the ancient started_at with crumb
+   * detection armed on a puzzle the player has already banked.
+   */
+  initialFinalSolveMs: number | null;
 }
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
@@ -92,6 +101,7 @@ export default function GameClient({
   initialSessionWallet,
   initialUnassistedMode,
   initialStartedAt,
+  initialFinalSolveMs,
 }: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
 
@@ -150,25 +160,47 @@ export default function GameClient({
   const todayStartedAtRef = useRef<number | null>(
     initialStartedAt != null ? new Date(initialStartedAt).getTime() : null,
   );
+  // Today's finalSolveMs follows the same persistence rule. Archive
+  // detours would otherwise blow away the frozen solve value on a
+  // return-to-today, letting the timer tick fresh from startedAt
+  // against a puzzle the player has already banked.
+  const todayFinalSolveMsRef = useRef<number | null>(initialFinalSolveMs);
 
   const loadArchivePuzzle = useCallback(async (dayNumber: number) => {
     if (dayNumber === initialPuzzle.dayNumber) {
       setActivePuzzle(initialPuzzle);
       setStartedAt(todayStartedAtRef.current);
+      setFinalSolveMs(todayFinalSolveMsRef.current);
       return;
     }
+    // Don't pre-clear finalSolveMs here. Two reasons:
+    //   1. On fetch failure / non-ok, we return without restoring —
+    //      which would permanently unfreeze today's timer even
+    //      though the user never actually navigated away (the
+    //      archive switch didn't happen).
+    //   2. Even on success, pre-clear would visibly unfreeze today's
+    //      timer during the in-flight window because activePuzzle is
+    //      still today until the fetch resolves.
+    // React 18 batches the three post-fetch set*s in this then
+    // callback into a single render, so there's no intermediate
+    // "archive puzzle with today's frozen time" frame to avoid.
     try {
       const res = await fetch(`/api/puzzle/${dayNumber}`);
       if (!res.ok) return;
-      const data = (await res.json()) as InitialPuzzle & { startedAt: string | null };
+      const data = (await res.json()) as InitialPuzzle & {
+        startedAt: string | null;
+        previousSolveMs: number | null;
+      };
       setActivePuzzle({ dayNumber: data.dayNumber, date: data.date, grid: data.grid });
       setStartedAt(data.startedAt != null ? new Date(data.startedAt).getTime() : null);
+      setFinalSolveMs(data.previousSolveMs);
     } catch {/* best-effort */}
   }, [initialPuzzle]);
 
   const returnToToday = useCallback(() => {
     setActivePuzzle(initialPuzzle);
     setStartedAt(todayStartedAtRef.current);
+    setFinalSolveMs(todayFinalSolveMsRef.current);
   }, [initialPuzzle]);
 
   // Start press → POST /api/puzzle/start. On success, seed startedAt
@@ -378,24 +410,47 @@ export default function GameClient({
     [activePuzzle.dayNumber],
   );
 
+  /**
+   * Authoritative solve duration that survives past the SolveModal
+   * close — the visible timer freezes to this value after solve, and
+   * the post-solve `locked` flag to useGriddle is derived from its
+   * non-null-ness. Distinct from solveResult (which gets cleared on
+   * modal close); finalSolveMs persists for the whole puzzle lifetime
+   * so the frozen timer stays visible whether or not the modal is up.
+   */
+  const [finalSolveMs, setFinalSolveMs] = useState<number | null>(initialFinalSolveMs);
+
   const handleSolved = useCallback(
     (payload: SolvePayload & { unassisted: boolean; word: string }) => {
       // Prefer the server-side duration. The client-side value is only
       // a fallback for the no-puzzle-load edge case (direct POST), and
       // is wrong for any user who reloaded mid-attempt.
       const serverMs = serverSolveMsRef.current;
+      const solveMs = serverMs != null ? serverMs : payload.clientSolveMs;
       // Stash the result; Grid will fire onReorderComplete once the
       // tile shuffle settles, and we'll promote the stash to state then.
       pendingSolveResultRef.current = {
-        solveMs: serverMs != null ? serverMs : payload.clientSolveMs,
+        solveMs,
         unassisted: payload.unassisted,
         word: payload.word,
         earnedWordmarks: earnedWordmarksRef.current,
       };
+      // Lock in the displayed time immediately — the visible grid
+      // timer freezes here, before the reveal animation even starts,
+      // rather than waiting for the modal to open. Also drives the
+      // `locked` prop to useGriddle that suppresses post-solve crumb
+      // discovery.
+      setFinalSolveMs(solveMs);
+      // Stash into today's ref so a later archive → return-to-today
+      // restores the frozen state without needing a page refresh
+      // (matches todayStartedAtRef's role for the Start stamp).
+      if (activeDayNumberRef.current === initialPuzzle.dayNumber) {
+        todayFinalSolveMsRef.current = solveMs;
+      }
       serverSolveMsRef.current = null;
       earnedWordmarksRef.current = [];
     },
-    [],
+    [initialPuzzle.dayNumber],
   );
 
   const handleReorderComplete = useCallback(() => {
@@ -418,6 +473,12 @@ export default function GameClient({
     // gate hasn't been cleared — no keystrokes should fill the grid
     // behind a blocking surface.
     disabled: showTutorial || startedAt == null,
+    // Post-solve lock: crumb detection is suppressed once finalSolveMs
+    // is set. Typing still works (Reset + replay explores the grid)
+    // but no new crumbs get added to the strip or POSTed to the crumb
+    // store, and any fresh 9-letter attempt is short-circuited by the
+    // server's first-solve-wins path.
+    locked: finalSolveMs != null,
     unassisted: unassistedMode,
     onCrumbFound: handleCrumbFound,
   });
@@ -447,6 +508,10 @@ export default function GameClient({
     if (prevDayRef.current !== activePuzzle.dayNumber) {
       prevDayRef.current = activePuzzle.dayNumber;
       setSolveResult(null);
+      // finalSolveMs is intentionally NOT cleared here — the nav
+      // function (loadArchivePuzzle / returnToToday) is authoritative
+      // for that value per puzzle. Clearing here would race with the
+      // value those functions set in the same tick.
       fullReset();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -926,35 +991,49 @@ export default function GameClient({
       />
 
       <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
-        <header className="text-center">
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100 inline-block">
-            Griddl<span className="relative inline-block">
-              e
-              {/* Premium-only crown perched on the final 'e'. The crown
-                  is the Premium indicator — replaces the diamond that
-                  used to live in the subtitle.
-
-                  Transform lives in an inline `style` so the translate
-                  and rotate definitely compose into one `transform`
-                  value — mixing arbitrary + preset Tailwind transform
-                  utilities with `bottom-full` left the crown stuck at
-                  the top of the line-box in the Vercel preview,
-                  visibly floating above the ascender of "Griddle"
-                  rather than perched on the visible top of the 'e'.
-                  The translate-y value has to cross both the ascender
-                  space (line-height - x-height) AND Phosphor's
-                  internal SVG padding, which is why it's larger than
-                  a naive "just clear the letter top" would suggest. */}
-              {premium && (
-                <Crown
-                  className="absolute bottom-full right-0 w-5 h-5 sm:w-6 sm:h-6 text-accent pointer-events-none"
-                  style={{ transform: 'translate(25%, 95%) rotate(18deg)' }}
-                  weight="fill"
-                  aria-hidden
-                />
+        <header className="text-center w-full">
+          {/* Timer + title row. Grid columns [1fr auto 1fr] keep the
+              h1 precisely centered regardless of timer presence —
+              filling or vacating the left column doesn't reflow the
+              middle column or the subtitle below. Title and subtitle
+              stay pinned to the same visual position whether or not
+              the timer is visible. */}
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-3">
+            <div className="justify-self-end">
+              {startedAt != null && !solveResult && (
+                <GameTimer startedAt={startedAt} frozenMs={finalSolveMs} />
               )}
-            </span>
-          </h1>
+            </div>
+            <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100 inline-block">
+              Griddl<span className="relative inline-block">
+                e
+                {/* Premium-only crown perched on the final 'e'. The crown
+                    is the Premium indicator — replaces the diamond that
+                    used to live in the subtitle.
+
+                    Transform lives in an inline `style` so the translate
+                    and rotate definitely compose into one `transform`
+                    value — mixing arbitrary + preset Tailwind transform
+                    utilities with `bottom-full` left the crown stuck at
+                    the top of the line-box in the Vercel preview,
+                    visibly floating above the ascender of "Griddle"
+                    rather than perched on the visible top of the 'e'.
+                    The translate-y value has to cross both the ascender
+                    space (line-height - x-height) AND Phosphor's
+                    internal SVG padding, which is why it's larger than
+                    a naive "just clear the letter top" would suggest. */}
+                {premium && (
+                  <Crown
+                    className="absolute bottom-full right-0 w-5 h-5 sm:w-6 sm:h-6 text-accent pointer-events-none"
+                    style={{ transform: 'translate(25%, 95%) rotate(18deg)' }}
+                    weight="fill"
+                    aria-hidden
+                  />
+                )}
+              </span>
+            </h1>
+            <div aria-hidden />
+          </div>
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
             #{activePuzzle.dayNumber.toString().padStart(3, '0')}
             {isArchive ? ` · ${activePuzzle.date}` : ' · find the 9-letter word'}
@@ -978,27 +1057,23 @@ export default function GameClient({
           </button>
         </header>
 
-        {/* Visible solve timer. Mounted only while the player is
-            actively solving — unmounted the moment state.solved flips
-            true so the modal close (which clears solveResult) doesn't
-            remount a fresh `now` reading against the original
-            startedAt, which would display wall-clock-including-modal
-            time instead of the solve duration. */}
-        {startedAt != null && !state.solved && !solveResult && (
-          <GameTimer startedAt={startedAt} />
-        )}
-
-        {/* Grid + slots + action buttons get blurred behind the Start
-            gate. pointer-events-none on the inner container blocks tap
-            interaction while blurred; useGriddle's `disabled` blocks
-            keyboard input. The overlay lives as a sibling (not inside
-            the blurred div) so the Start button itself stays
-            interactive and crisp. */}
+        {/* Puzzle area behind the Start gate: FoundWords, Grid,
+            WordSlots. The gate renders two siblings on top when
+            !startedAt: a backdrop-filter overlay that blurs what's
+            visible behind it, and the Start button itself. Using
+            `backdrop-blur-*` instead of `blur-*` on the content
+            avoids the rectangular halo-clip artifact WebKit produces
+            when filter: blur hits a container edge.
+            pointer-events-none on the inner content blocks tap
+            interaction while gated; useGriddle's `disabled` blocks
+            keyboard. Backspace / Reset live OUTSIDE this wrapper
+            because they carry no puzzle letters — they're just
+            disabled pre-Start, not hidden. */}
         <div className="relative w-full flex flex-col items-center gap-6">
           <div
             className={
               startedAt == null
-                ? 'w-full flex flex-col items-center gap-6 blur-md pointer-events-none select-none'
+                ? 'w-full flex flex-col items-center gap-6 pointer-events-none select-none'
                 : 'w-full flex flex-col items-center gap-6'
             }
             aria-hidden={startedAt == null}
@@ -1017,32 +1092,43 @@ export default function GameClient({
             />
 
             <WordSlots letters={state.letters} />
-
-            <div className="flex gap-2 mt-1">
-              <button
-                type="button"
-                className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-                onClick={actions.backspace}
-                disabled={state.pendingSolve}
-              >
-                <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
-                Backspace
-              </button>
-              <button
-                type="button"
-                className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-                onClick={actions.reset}
-                disabled={state.pendingSolve}
-              >
-                <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
-                Reset
-              </button>
-            </div>
           </div>
 
           {startedAt == null && (
-            <StartGate onStart={handleStart} pending={startPending} />
+            <>
+              {/* Frosted-glass overlay: blurs whatever's behind it via
+                  backdrop-filter. Semi-transparent tint layered on top
+                  ensures the blur reads as "hidden" and not
+                  "accidentally faint" even on a browser that quietly
+                  degrades backdrop-filter to a no-op. */}
+              <div
+                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-black/50"
+                aria-hidden
+              />
+              <StartGate onStart={handleStart} pending={startPending} />
+            </>
           )}
+        </div>
+
+        <div className="flex gap-2 mt-1">
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+            onClick={actions.backspace}
+            disabled={state.pendingSolve || startedAt == null}
+          >
+            <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
+            Backspace
+          </button>
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+            onClick={actions.reset}
+            disabled={state.pendingSolve || startedAt == null}
+          >
+            <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
+            Reset
+          </button>
         </div>
 
         <HomeTiles onTileClick={handleTileClick} />

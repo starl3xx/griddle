@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
 import {
+  getPreviousSolveMsForPuzzle,
   getPuzzleByDay,
   getPuzzleStartedAt,
   recordPuzzleLoad,
 } from '@/lib/db/queries';
+import { getSessionProfile } from '@/lib/session-profile';
+import { getSessionWallet } from '@/lib/wallet-session';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 
 /**
@@ -46,15 +49,26 @@ export async function GET(
 
   await recordPuzzleLoad(sessionId, puzzle.id);
 
-  // Include any existing started_at so a player returning to an archive
-  // puzzle they've already started (or solved) skips the Start gate and
-  // the timer resumes from their original stamp.
-  const startedAt = await getPuzzleStartedAt(sessionId, puzzle.dayNumber);
+  // started_at + prior-solve detection in parallel, for the same
+  // reason app/page.tsx does: so navigating to an archive puzzle the
+  // player has previously started (or solved) hydrates the post-
+  // solve UI state (frozen timer, crumb lock) without flashing a
+  // wrongly-ticking timer or re-arming crumb discovery.
+  const [startedAt, sessionWallet, profileId] = await Promise.all([
+    getPuzzleStartedAt(sessionId, puzzle.dayNumber),
+    getSessionWallet(sessionId),
+    getSessionProfile(sessionId),
+  ]);
+  const previousSolveMs = await getPreviousSolveMsForPuzzle(
+    { sessionId, wallet: sessionWallet, profileId },
+    puzzle.id,
+  );
 
   return NextResponse.json({
     dayNumber: puzzle.dayNumber,
     date: puzzle.date,
     grid: puzzle.grid,
     startedAt: startedAt != null ? startedAt.toISOString() : null,
+    previousSolveMs,
   });
 }
