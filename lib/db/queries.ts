@@ -1402,6 +1402,31 @@ export interface RecordCryptoUnlockInput {
   wordBurned: bigint;
 }
 
+/**
+ * Look up the current `premium_users` row for a wallet. Returns null if
+ * none exists. Used by the Stripe webhook to short-circuit before
+ * opening a new on-chain escrow — if the wallet is already premium
+ * (prior crypto unlock, admin grant, or earlier fiat), pulling more
+ * $WORD from the stockpile would lock funds with no DB trace, since
+ * `onConflictDoNothing` on the insert would drop the new row.
+ */
+export async function getPremiumRowByWallet(wallet: string): Promise<{
+  wallet: string;
+  source: string;
+  unlockedAt: Date;
+} | null> {
+  const rows = await db
+    .select({
+      wallet: premiumUsers.wallet,
+      source: premiumUsers.source,
+      unlockedAt: premiumUsers.unlockedAt,
+    })
+    .from(premiumUsers)
+    .where(eq(premiumUsers.wallet, wallet.toLowerCase()))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function recordCryptoUnlock(input: RecordCryptoUnlockInput): Promise<void> {
   const normalized = input.wallet.toLowerCase();
   // USDC is 6-decimal, so convert the integer unit count back to a

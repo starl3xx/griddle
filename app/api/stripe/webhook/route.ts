@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getStripe, STRIPE_WEBHOOK_SECRET } from '@/lib/stripe';
-import { recordFiatUnlock } from '@/lib/db/queries';
+import { getPremiumRowByWallet, recordFiatUnlock } from '@/lib/db/queries';
 import { setSessionPremium } from '@/lib/session-premium';
 import { recordFunnelEvent } from '@/lib/funnel/record';
 import { isValidSessionId } from '@/lib/session';
@@ -101,6 +101,44 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   try {
     if (wallet) {
+      // Short-circuit duplicate payments BEFORE any on-chain work.
+      // If the wallet already has a premium_users row (prior crypto
+      // unlock, admin grant, or earlier fiat), `recordFiatUnlock`'s
+      // `onConflictDoNothing` would drop the new DB insert — but if we
+      // had already opened the on-chain escrow, that $WORD would be
+      // pulled from the stockpile and locked with no DB trace, and
+      // the sync cron would have no row to advance when `EscrowBurned`
+      // fires. Log loudly, skip both on-chain + DB writes, and let
+      // ops manually refund the Stripe charge out-of-band.
+      const existing = await getPremiumRowByWallet(wallet);
+      if (existing) {
+        console.warn(
+          '[stripe/webhook] wallet already premium — skipping on-chain escrow + DB write',
+          {
+            wallet,
+            existingSource: existing.source,
+            existingUnlockedAt: existing.unlockedAt,
+            stripeSessionId: session.id,
+          },
+        );
+        // Funnel event still fires below (we did receive payment) but
+        // with a distinguishing reason so ops can query the double-pay
+        // rate and refund these out-of-band.
+        try {
+          await recordFunnelEvent(
+            { name: 'checkout_completed', method: 'fiat' },
+            { sessionId, wallet, idempotencyKey: event.id },
+          );
+        } catch (err) {
+          console.warn('[stripe/webhook] funnel telemetry emit failed', err);
+        }
+        return NextResponse.json({
+          received: true,
+          sessionId: session.id,
+          note: 'wallet already premium — no escrow opened, manual refund required',
+        });
+      }
+
       // Attempt to open the on-chain escrow. Any failure gets logged
       // + enqueued, but the DB row still lands so the user sees
       // premium on their next page load and the admin Transactions
