@@ -3597,7 +3597,7 @@ export async function getRevenueBreakdown(windowDays?: number): Promise<RevenueB
  * to match the MTD-prorated op-cost side.
  */
 export async function getMtdGrossRevenue(): Promise<number> {
-  const rows = await db.execute<{ total: number }>(sql`
+  const rows = await db.execute<{ total: number | string }>(sql`
     SELECT coalesce(sum(
       case
         when source = 'crypto'
@@ -3610,11 +3610,14 @@ export async function getMtdGrossRevenue(): Promise<number> {
     FROM premium_users
     WHERE unlocked_at >= date_trunc('month', now())
   `).then((r) => Array.isArray(r) ? r : r.rows);
-  return rows[0]?.total ?? 0;
+  // Explicit Number() coercion — see getRevenueSeries for the same
+  // defense; the client math (e.g. `data.mtdGross - opCostMtd`)
+  // would silently string-concatenate if a string slipped through.
+  return Number(rows[0]?.total ?? 0);
 }
 
 export async function getRevenueSeries(days: number): Promise<Array<{ day: string; crypto: number; fiat: number }>> {
-  const rows = await db.execute<{ day: string; crypto: number; fiat: number }>(sql`
+  const rows = await db.execute<{ day: string; crypto: number | string; fiat: number | string }>(sql`
     SELECT
       to_char(date_trunc('day', unlocked_at), 'YYYY-MM-DD') AS day,
       sum(
@@ -3632,7 +3635,16 @@ export async function getRevenueSeries(days: number): Promise<Array<{ day: strin
     GROUP BY 1
     ORDER BY 1 ASC
   `).then((r) => Array.isArray(r) ? r : r.rows);
-  return rows;
+  // Drizzle's Neon driver returns Postgres `float` as a JS number in
+  // practice, but `sum(numeric)::float` can round-trip as a string
+  // on some driver versions. Coerce explicitly so the Recharts
+  // `StackedBar` always sees numbers (string dataKeys break the
+  // bar rendering silently).
+  return rows.map((r) => ({
+    day: r.day,
+    crypto: Number(r.crypto ?? 0),
+    fiat: Number(r.fiat ?? 0),
+  }));
 }
 
 // ── Anon sessions + user dossier ────────────────────────────────────

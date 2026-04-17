@@ -3,11 +3,10 @@
 import {
   CartesianGrid,
   Label,
-  Line,
-  LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Scatter,
-  ComposedChart,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -31,9 +30,11 @@ interface ScatterCalibrationProps {
 
 /**
  * Heuristic difficulty score × observed solve time. Each dot is one
- * puzzle; the line is the OLS fit. Outliers (large |residual|) are
- * where the heuristic diverges from reality — those puzzles are the
- * signal for refining the formula's coefficients.
+ * puzzle; the straight line is the OLS fit rendered as a
+ * `ReferenceLine` segment so it has no dependency on a separate data
+ * series or ComposedChart-level axis coupling. Outliers (large
+ * |residual|) are where the heuristic diverges from reality and are
+ * the signal for refining the formula's coefficients.
  */
 export function ScatterCalibration({ points, slope, intercept, height = 300 }: ScatterCalibrationProps) {
   if (points.length < 2) {
@@ -43,18 +44,15 @@ export function ScatterCalibration({ points, slope, intercept, height = 300 }: S
       </p>
     );
   }
-  // Line endpoints at the x-range extremes.
   const xs = points.map((p) => p.heuristic);
   const xMin = Math.min(...xs);
   const xMax = Math.max(...xs);
-  const trendLine = [
-    { heuristic: xMin, fit: slope * xMin + intercept },
-    { heuristic: xMax, fit: slope * xMax + intercept },
-  ];
+  const yAtXMin = slope * xMin + intercept;
+  const yAtXMax = slope * xMax + intercept;
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <ComposedChart margin={{ top: 12, right: 16, left: 0, bottom: 24 }}>
+      <ScatterChart margin={{ top: 12, right: 16, left: 0, bottom: 24 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
         <XAxis
           type="number"
@@ -91,16 +89,16 @@ export function ScatterCalibration({ points, slope, intercept, height = 300 }: S
           labelFormatter={() => ''}
         />
         <Scatter data={points} fill="#8b5cf6" />
-        <Line
-          data={trendLine}
-          dataKey="fit"
+        <ReferenceLine
+          segment={[
+            { x: xMin, y: yAtXMin },
+            { x: xMax, y: yAtXMax },
+          ]}
           stroke="#f59e0b"
           strokeWidth={2}
-          dot={false}
-          isAnimationActive={false}
-          legendType="none"
+          ifOverflow="extendDomain"
         />
-      </ComposedChart>
+      </ScatterChart>
     </ResponsiveContainer>
   );
 }

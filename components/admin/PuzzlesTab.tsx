@@ -257,7 +257,10 @@ export function PuzzlesTab() {
 function formatSignedMs(ms: number): string {
   if (ms === 0) return formatMs(0); // '0ms' reads better than '+0ms'
   const sign = ms > 0 ? '+' : '-';
-  return `${sign}${formatMs(ms)}`;
+  // Explicit Math.abs so we don't silently depend on formatMsCompact
+  // stripping the sign internally — if that implementation detail ever
+  // flips, this call site still emits a single correct prefix.
+  return `${sign}${formatMs(Math.abs(ms))}`;
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
