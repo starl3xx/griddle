@@ -334,6 +334,16 @@ export function useGriddle({
   const triggerSolve = useCallback(
     (finalPath: number[]) => {
       if (solved) return;
+      // Post-solve lock: the puzzle is already banked. Completing the
+      // 9-letter word again on a Reset-replay shouldn't re-open the
+      // SolveModal, re-POST to /api/solve, or overwrite the frozen
+      // `finalSolveMs` with a later duration — first-solve-wins is
+      // authoritative, and on anonymous sessions the server can't
+      // dedupe so replays would insert fresh solves rows each time.
+      // Upstream, GameClient passes `locked=true` once finalSolveMs
+      // is set (SSR-hydrated from the prior solve OR set by the
+      // live solve path), which also gates the crumb detector above.
+      if (locked) return;
       if (finalPath.length !== 9) return;
       if (!isValidPath(finalPath)) return;
 
@@ -398,7 +408,7 @@ export function useGriddle({
           inFlightAttemptRef.current = null;
         });
     },
-    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake],
+    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake, locked],
   );
 
   const typeLetter = useCallback(
