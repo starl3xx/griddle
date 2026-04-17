@@ -33,14 +33,21 @@ export async function POST(): Promise<NextResponse> {
   }
 
   // Resolve migration file against process cwd (Next.js runs from
-  // project root).
+  // project root). Vercel bundling requires the drizzle/*.sql glob
+  // in next.config.js `outputFileTracingIncludes` — otherwise @vercel/nft
+  // won't ship this file with the serverless function and the read
+  // below 500s in production.
   const migrationPath = join(process.cwd(), 'drizzle', '0019_premium_payment_telemetry.sql');
   let sql: string;
   try {
     sql = readFileSync(migrationPath, 'utf8');
   } catch (err) {
     return NextResponse.json(
-      { error: `could not read ${migrationPath}: ${(err as Error).message}` },
+      {
+        error: `could not read ${migrationPath}: ${(err as Error).message}`,
+        hint: 'If this is on Vercel, confirm next.config.js has ' +
+              'outputFileTracingIncludes: { "/api/admin/deploy/migrate-db": ["./drizzle/*.sql"] }',
+      },
       { status: 500 },
     );
   }
