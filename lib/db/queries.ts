@@ -2349,6 +2349,52 @@ export async function getLifetimeSolveCount(
   return rows[0]?.count ?? 0;
 }
 
+/**
+ * First successful solve by this identity for this puzzle, or null.
+ * Used by POST /api/solve to enforce first-solve-wins — a user who
+ * has already cracked the puzzle sees their original time, not the
+ * time of any replay attempt.
+ *
+ * Matches on profile_id OR wallet (lowercased), mirroring
+ * solveBelongsTo but scoped to a single puzzle and always filtered
+ * to solved=true. Session-only anonymous rows are not covered
+ * because they carry no cross-device identity to dedupe against —
+ * the caller must gate on (profileId || wallet) before invoking.
+ */
+export async function getFirstSuccessfulSolveForPuzzle(
+  identity: StatsIdentity,
+  puzzleId: number,
+): Promise<{
+  serverSolveMs: number | null;
+  flag: 'ineligible' | 'suspicious' | null;
+} | null> {
+  const profileId = identity.profileId ?? null;
+  const wallet = identity.wallet?.toLowerCase() ?? null;
+  if (profileId == null && wallet == null) return null;
+
+  const result = await db.execute<{
+    server_solve_ms: number | null;
+    flag: 'ineligible' | 'suspicious' | null;
+  }>(sql`
+    SELECT server_solve_ms, flag
+    FROM solves
+    WHERE puzzle_id = ${puzzleId}
+      AND solved = true
+      AND (
+        ${profileId != null ? sql`profile_id = ${profileId}` : sql`false`}
+        OR ${wallet != null ? sql`wallet = ${wallet}` : sql`false`}
+      )
+    ORDER BY created_at ASC
+    LIMIT 1
+  `);
+  const rows = Array.isArray(result) ? result : (result.rows ?? []);
+  if (rows.length === 0) return null;
+  return {
+    serverSolveMs: rows[0].server_solve_ms,
+    flag: rows[0].flag,
+  };
+}
+
 // ─── Premium Stats ─────────────────────────────────────────────────
 
 export interface PremiumStats {

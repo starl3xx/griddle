@@ -7,6 +7,7 @@ import {
   getPuzzleWordByDayNumber,
   updateStreakForSolve,
   getLifetimeSolveCount,
+  getFirstSuccessfulSolveForPuzzle,
 } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { getSessionWallet } from '@/lib/wallet-session';
@@ -189,6 +190,30 @@ export async function POST(
 
   const claimed = body.claimedWord.toLowerCase();
   const solved = claimed === puzzle.word;
+
+  // First-solve-wins. If this identity already has a successful solve
+  // for this puzzle, the replay is a no-op: don't insert a new row,
+  // don't re-award wordmarks, and echo back the original serverSolveMs
+  // and flag so the client modal shows the authoritative first time
+  // (not the replay time). Only applies to identified users; anonymous
+  // session-only solves fall through to the normal insert path because
+  // they carry no cross-device identity to dedupe against.
+  const identifiable = wallet != null || profileId != null;
+  if (solved && identifiable) {
+    const prior = await getFirstSuccessfulSolveForPuzzle(
+      { profileId, wallet },
+      puzzle.id,
+    );
+    if (prior != null) {
+      return NextResponse.json({
+        solved: true,
+        serverSolveMs: prior.serverSolveMs,
+        flag: prior.flag,
+        word: puzzle.word,
+        earnedWordmarks: [],
+      });
+    }
+  }
 
   // Authoritative server-side timing. Null if the session submitted
   // without first loading the puzzle (possible via direct POST) — in

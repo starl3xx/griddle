@@ -339,11 +339,6 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persistedCrumbs]);
 
-  const handlePlayAgain = useCallback(() => {
-    setSolveResult(null);
-    actions.reset();
-  }, [actions]);
-
   // Hard-reset the grid when the active puzzle changes (archive
   // navigation). Uses fullReset instead of reset so foundWords and
   // wordmark counters from the previous puzzle don't leak across.
@@ -1021,7 +1016,6 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
           unassisted={solveResult.unassisted}
           earnedWordmarks={solveResult.earnedWordmarks}
           inMiniApp={inMiniApp}
-          onPlayAgain={handlePlayAgain}
           onClose={() => setSolveResult(null)}
         />
       )}
