@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Crown, Backspace, ArrowCounterClockwise, Info } from '@phosphor-icons/react';
+import { formatLongDate } from '@/lib/format';
 import { useDarkMode } from '@/lib/useDarkMode';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
@@ -925,7 +926,7 @@ export default function GameClient({
         pfpUrl={pfpUrl}
       />
 
-      <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
+      <main className="flex-1 flex flex-col items-center px-4 pt-4 pb-6 gap-6">
         <header className="text-center">
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100 inline-block">
             Griddl<span className="relative inline-block">
@@ -955,27 +956,36 @@ export default function GameClient({
               )}
             </span>
           </h1>
+          {/* Subtitle = puzzle number + long human date. Previously we
+              flipped between "find the 9-letter word" (today) and the
+              raw ISO date (archive) — the rule-restatement was noise
+              on every load, and the ISO date was ugly. Showing the
+              date always pairs naturally with archive play and lets
+              the dedicated "How to play" link carry the rules. */}
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
-            #{activePuzzle.dayNumber.toString().padStart(3, '0')}
-            {isArchive ? ` · ${activePuzzle.date}` : ' · find the 9-letter word'}
+            #{activePuzzle.dayNumber.toString().padStart(3, '0')} · {formatLongDate(activePuzzle.date)}
           </p>
-          {isArchive && (
+          {/* Today shows "How to play"; archive swaps it for a quick
+              return link. Mutually exclusive on purpose — stacking
+              both on archive reads as two competing CTAs. */}
+          {isArchive ? (
             <button
               type="button"
               onClick={returnToToday}
-              className="text-xs font-semibold text-brand hover:text-brand/80 mt-1 transition-colors"
+              className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-brand hover:text-brand-600 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
             >
-              ← Back to today’s puzzle
+              ← Back to today
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={openTutorial}
+              className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-brand hover:text-brand-600 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
+            >
+              How to play
+              <Info className="w-3 h-3" weight="bold" aria-hidden />
             </button>
           )}
-          <button
-            type="button"
-            onClick={openTutorial}
-            className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-brand hover:text-brand-600 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
-          >
-            How to play
-            <Info className="w-3 h-3" weight="bold" aria-hidden />
-          </button>
         </header>
 
         {/* Visible solve timer. Mounted only while the player is

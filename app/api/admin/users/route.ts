@@ -38,6 +38,9 @@ export async function GET(req: Request): Promise<NextResponse> {
         id: profiles.id,
         handle: profiles.handle,
         wallet: profiles.wallet,
+        email: profiles.email,
+        emailVerifiedAt: profiles.emailVerifiedAt,
+        avatarUrl: profiles.avatarUrl,
         premiumSource: profiles.premiumSource,
         // Also select the actual source from premium_users (not just unlockedAt)
         premiumUsersSource: premiumUsers.source,
@@ -63,6 +66,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       id: r.id,
       handle: r.handle,
       wallet: r.wallet,
+      email: r.email,
+      emailVerifiedAt: r.emailVerifiedAt,
+      avatarUrl: r.avatarUrl,
       premium: !!(r.premiumSource || r.premiumUnlockedAt),
       // Use the actual source column from premium_users, not a fabricated string
       premiumSource: r.premiumSource ?? r.premiumUsersSource ?? null,

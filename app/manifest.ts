@@ -19,7 +19,20 @@ import { SITE_NAME, SITE_SHORT_NAME, SITE_DESCRIPTION } from '@/lib/site';
  * can’t consume the SVGs.
  */
 export default function manifest(): MetadataRoute.Manifest {
-  return {
+  // `url_handlers` tells supporting browsers (Chromium on Android /
+  // desktop) to route in-scope links to the installed PWA when the
+  // user taps one outside the app — including the magic-link
+  // verify URL opened from an email client. Unsupported platforms
+  // (iOS Safari) ignore the field; PWA users on iOS fall back to
+  // pasting the 6-digit code into Settings.
+  //
+  // Next.js's `MetadataRoute.Manifest` type doesn't include this
+  // field yet, so we assemble the manifest as a plain object and
+  // cast at the return — the emitted JSON is still a valid Web
+  // App Manifest per the W3C spec regardless of the Next typing.
+  const manifestObj: MetadataRoute.Manifest & {
+    url_handlers?: { origin: string }[];
+  } = {
     name: SITE_NAME,
     short_name: SITE_SHORT_NAME,
     description: SITE_DESCRIPTION,
@@ -43,5 +56,7 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: 'maskable',
       },
     ],
+    url_handlers: [{ origin: 'https://griddle.fun' }],
   };
+  return manifestObj;
 }

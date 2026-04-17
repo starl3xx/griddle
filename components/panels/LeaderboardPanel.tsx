@@ -3,6 +3,11 @@
 import { useEffect, useState } from 'react';
 import { Crown, CaretLeft, CaretRight, CircleNotch } from '@phosphor-icons/react';
 import { formatMs, formatPlayerName } from '@/lib/format';
+import {
+  WORDMARK_BY_ID,
+  WORDMARK_THEMES,
+  isWordmarkId,
+} from '@/lib/wordmarks/catalog';
 import { Avatar } from '../Avatar';
 import { PremiumBenefitsList } from '../PremiumBenefitsList';
 
@@ -14,6 +19,13 @@ interface LeaderboardEntry {
   avatarUrl: string | null;
   serverSolveMs: number;
   unassisted: boolean;
+  /**
+   * Up to 3 wordmark ids to render as overlapping circular badges next
+   * to the player's name. Pre-filtered server-side via
+   * `getLeaderboardWordmarks` (speed/streak group collapse + top-3
+   * Z-index selection), so the client just renders them in order.
+   */
+  topWordmarks: string[];
 }
 
 interface LeaderboardResponse {
@@ -159,15 +171,22 @@ export function LeaderboardPanel({
                   #{e.rank}
                 </span>
                 <Avatar pfpUrl={e.avatarUrl} size="xs" />
-                <span
-                  className={`flex-1 text-sm truncate ${
-                    e.handle
-                      ? 'font-semibold text-gray-900 dark:text-gray-100'
-                      : 'font-mono text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  {formatPlayerName(e)}
-                </span>
+                {/* Name + wordmark badges share a flex-1 shrinkable
+                    container so the name truncates instead of pushing
+                    the badges off-row on tight widths. min-w-0 is
+                    mandatory to let `truncate` actually clip. */}
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <span
+                    className={`text-sm truncate ${
+                      e.handle
+                        ? 'font-semibold text-gray-900 dark:text-gray-100'
+                        : 'font-mono text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {formatPlayerName(e)}
+                  </span>
+                  <WordmarkBadges ids={e.topWordmarks} />
+                </div>
                 {e.unassisted && (
                   <span
                     className="text-accent inline-flex items-center"
@@ -189,3 +208,35 @@ export function LeaderboardPanel({
   );
 }
 
+/**
+ * Overlapping circular badge row for a leaderboard entry's top
+ * wordmarks. Matches LHAW's leaderboard pattern — each badge is the
+ * wordmark's emoji over the themed tonal fill, ringed in the list-
+ * background color so adjacent badges read as separate discs instead
+ * of a blurred strip.
+ *
+ * Filters unknown ids through `isWordmarkId` so a stale wire payload
+ * can't pull an `undefined` catalog entry. Empty-after-filter → render
+ * nothing rather than an empty strip with leftover gap.
+ */
+function WordmarkBadges({ ids }: { ids: readonly string[] }) {
+  const valid = ids.filter(isWordmarkId);
+  if (valid.length === 0) return null;
+  return (
+    <div className="flex -space-x-1.5 flex-shrink-0" aria-hidden>
+      {valid.map((id) => {
+        const w = WORDMARK_BY_ID[id];
+        const theme = WORDMARK_THEMES[id];
+        return (
+          <span
+            key={id}
+            title={`${w.name} · ${w.description}`}
+            className={`w-5 h-5 rounded-full ${theme.bg} ring-2 ring-white dark:ring-gray-800 flex items-center justify-center text-[10px] leading-none`}
+          >
+            {w.emoji}
+          </span>
+        );
+      })}
+    </div>
+  );
+}

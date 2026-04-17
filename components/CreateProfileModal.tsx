@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Envelope, ArrowRight, CircleNotch } from '@phosphor-icons/react';
+import { OtpCodeInput } from './OtpCodeInput';
 
 interface CreateProfileModalProps {
   onClose: () => void;
@@ -112,7 +113,29 @@ export function CreateProfileModal({
         onClick={(e) => e.stopPropagation()}
       >
         {step === 'check-email' ? (
-          <CheckEmailState email={email.trim()} onClose={onClose} />
+          <CheckEmailState
+            email={email.trim()}
+            username={username.trim()}
+            onClose={onClose}
+            onVerifiedWithCode={async () => {
+              // OTP verify already bound the session → profile. Apply
+              // any pending username and let the parent refresh + open
+              // Settings via onProfileCreated (same end state as the
+              // magic-link redirect path).
+              const pending = username.trim();
+              try {
+                if (pending) {
+                  await fetch('/api/profile', {
+                    method: 'PATCH',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ handle: pending }),
+                  });
+                }
+              } catch { /* best-effort — PATCH is a nice-to-have */ }
+              try { localStorage.removeItem('griddle:pending-username'); } catch { /* noop */ }
+              onProfileCreated();
+            }}
+          />
         ) : (
           <>
             <div className="flex items-center gap-3 mb-5">
@@ -213,19 +236,46 @@ export function CreateProfileModal({
   );
 }
 
-function CheckEmailState({ email, onClose }: { email: string; onClose: () => void }) {
+function CheckEmailState({
+  email,
+  username,
+  onClose,
+  onVerifiedWithCode,
+}: {
+  email: string;
+  /** Passed through so the OtpCodeInput can apply pending-username on verify. */
+  username: string;
+  onClose: () => void;
+  onVerifiedWithCode: () => void | Promise<void>;
+}) {
+  // `username` is read by the parent's onVerifiedWithCode via closure;
+  // referencing it here keeps the lint rule happy and documents the
+  // dependency.
+  void username;
   return (
-    <div className="text-center py-4">
-      <div className="w-12 h-12 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand flex items-center justify-center mx-auto mb-4">
-        <Envelope className="w-6 h-6" weight="bold" aria-hidden />
+    <div className="py-4">
+      <div className="text-center mb-5">
+        <div className="w-12 h-12 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand flex items-center justify-center mx-auto mb-4">
+          <Envelope className="w-6 h-6" weight="bold" aria-hidden />
+        </div>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 mb-1">
+          Check your email
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed max-w-xs mx-auto">
+          We sent a sign-in link to <strong>{email}</strong>. Tap it, or enter the 6-digit code below.
+        </p>
       </div>
-      <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 mb-1">
-        Check your email
-      </h2>
-      <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed max-w-xs mx-auto">
-        We sent a sign-in link to <strong>{email}</strong>. Click it to create your profile — it expires in 15 minutes.
-      </p>
-      <button type="button" onClick={onClose} className="mt-5 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+
+      {/* OTP input — the PWA escape hatch. Email clients open the
+          magic link in the default browser, not the installed PWA, so
+          PWA users sign in by pasting the emailed code here instead. */}
+      <OtpCodeInput
+        email={email}
+        onVerified={onVerifiedWithCode}
+        prompt="Signing in from the PWA? Enter the code"
+      />
+
+      <button type="button" onClick={onClose} className="block mx-auto mt-5 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
         Close
       </button>
     </div>

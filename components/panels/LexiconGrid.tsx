@@ -72,7 +72,13 @@ export function LexiconGrid({ enabled }: LexiconGridProps) {
           {loading && <span className="ml-2 text-gray-400 font-normal">loading…</span>}
         </p>
       </div>
-      <ul className="grid grid-cols-3 gap-y-4 gap-x-2" role="list">
+      {/* 2-col on mobile, 3-col at sm+. The cells now carry a title AND
+          a one-line earn description, so forcing 3-col on narrow screens
+          squeezed the description into unreadable two-line wraps. Icon
+          shrinks from w-14 to w-10 to hand weight to the title copy —
+          the grid reads as labeled achievement cards, not a sticker
+          grid, matching the LHAW Lexicon treatment. */}
+      <ul className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-4" role="list">
         {WORDMARK_CATALOG.map((w) => {
           const isEarned = earned.has(w.id);
           const theme = WORDMARK_THEMES[w.id];
@@ -80,10 +86,9 @@ export function LexiconGrid({ enabled }: LexiconGridProps) {
             <li
               key={w.id}
               className="flex flex-col items-center text-center"
-              title={w.description}
             >
               <div
-                className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-colors duration-fast ring-2 ${
+                className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-colors duration-fast ring-2 ${
                   isEarned
                     ? `${theme.bg} ${theme.ring}`
                     : 'bg-gray-100 dark:bg-gray-700/60 ring-transparent opacity-50'
@@ -93,13 +98,22 @@ export function LexiconGrid({ enabled }: LexiconGridProps) {
                 <span className={isEarned ? '' : 'grayscale'}>{w.emoji}</span>
               </div>
               <span
-                className={`mt-1.5 text-[11px] font-bold ${
+                className={`mt-2 text-sm font-bold leading-tight ${
                   isEarned
                     ? 'text-gray-900 dark:text-gray-100'
                     : 'text-gray-400 dark:text-gray-500'
                 }`}
               >
                 {w.name}
+              </span>
+              <span
+                className={`mt-0.5 text-[10px] font-medium leading-snug ${
+                  isEarned
+                    ? 'text-gray-600 dark:text-gray-400'
+                    : 'text-gray-400 dark:text-gray-500'
+                }`}
+              >
+                {w.description}
               </span>
             </li>
           );

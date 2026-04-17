@@ -17,6 +17,7 @@ import {
 } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
 import { FaqAccordion } from './FaqAccordion';
+import { OtpCodeInput } from './OtpCodeInput';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { validateUsername } from '@/lib/username';
 
@@ -399,12 +400,29 @@ export function SettingsModal({
     : 0;
 
   return (
+    // Outer overlay respects the device safe-area insets so the modal
+    // isn’t hidden behind iPhone notches, home indicators, or mobile-
+    // browser chrome. Using `max()` means we still get the nominal 1rem
+    // gutter on devices without insets, and the inset only kicks in
+    // when it’s larger than the base gutter.
+    //
+    // `100dvh` (dynamic viewport) replaces 100vh for the height cap so
+    // iOS Safari's URL-bar show/hide cycle doesn't make the modal taller
+    // than the visible area. `92vh` on Safari with the URL bar showing
+    // was producing exactly the "content clipped at the edges" the bug
+    // report described. `svh` fallback covers older engines.
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fade-in"
+      style={{
+        paddingTop: 'max(1rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(1rem, env(safe-area-inset-left))',
+        paddingRight: 'max(1rem, env(safe-area-inset-right))',
+      }}
       onClick={onClose}
     >
       <div
-        className="modal-sheet animate-slide-up max-h-[92vh] overflow-y-auto"
+        className="modal-sheet animate-slide-up max-h-[92svh] supports-[height:100dvh]:max-h-[92dvh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -447,9 +465,9 @@ export function SettingsModal({
             <button type="button" onClick={onConnect} className="btn-secondary w-full">
               Connect wallet
             </button>
-            <button type="button" onClick={onUpgrade} className="btn-secondary w-full inline-flex items-center justify-center gap-2">
-              <Crown className="w-4 h-4 text-accent" weight="fill" aria-hidden />
-              Upgrade to Premium <span className="font-medium text-gray-500">(card or crypto)</span>
+            <button type="button" onClick={onUpgrade} className="btn-accent w-full inline-flex items-center justify-center gap-2">
+              <Crown className="w-4 h-4" weight="fill" aria-hidden />
+              Upgrade to Premium <span className="font-medium text-white/80">(card or crypto)</span>
             </button>
           </div>
         )}
@@ -507,7 +525,6 @@ export function SettingsModal({
               premiumLocked={!premium}
               fileInputRef={avatarFileInputRef}
               onFilePick={handleAvatarFilePick}
-              onUpgrade={onUpgrade}
               onClear={() => {
                 setAvatarUrlDraft('');
                 setAvatarUploadError(null);
@@ -575,9 +592,19 @@ export function SettingsModal({
             {hasIdentity && !profile?.email && (
               <div className="space-y-2">
                 {emailSentTo ? (
-                  <p className="text-[12px] text-gray-600 dark:text-gray-400 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md px-3 py-2">
-                    Sign-in link sent to <strong>{emailSentTo}</strong>. Click it to attach the email to this profile — we’ll merge them automatically.
-                  </p>
+                  <>
+                    <p className="text-[12px] text-gray-600 dark:text-gray-400 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-md px-3 py-2">
+                      Sign-in link sent to <strong>{emailSentTo}</strong>. Tap it, or paste the 6-digit code from the email below — handy when you’re using the installed PWA and the link would otherwise open in a browser.
+                    </p>
+                    <OtpCodeInput
+                      email={emailSentTo}
+                      prompt="Got the code? Enter it here"
+                      onVerified={() => {
+                        setEmailSentTo(null);
+                        onProfileChanged();
+                      }}
+                    />
+                  </>
                 ) : (
                   <>
                     <input
@@ -760,6 +787,12 @@ export function SettingsModal({
  * which runs the resize-and-upload helper and writes the result into
  * `avatarUrlDraft` — so the existing Save / Complete profile button
  * persists the new URL alongside any other field edits.
+ *
+ * When `premiumLocked` is true, the button is fully disabled (not
+ * tappable) — the gate is enforced at the control level, not via a
+ * click-through to the upgrade modal. Users still see the "Premium"
+ * badge + hint copy so the gate is legible, and the Premium section
+ * further down in Settings carries the upgrade CTA.
  */
 function AvatarUploadRow({
   avatarUrl,
@@ -768,7 +801,6 @@ function AvatarUploadRow({
   premiumLocked,
   fileInputRef,
   onFilePick,
-  onUpgrade,
   onClear,
   hint,
 }: {
@@ -779,17 +811,12 @@ function AvatarUploadRow({
   premiumLocked: boolean;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFilePick: (file: File) => void | Promise<void>;
-  /** Called when a locked user clicks the Upload button — opens the gate. */
-  onUpgrade: () => void;
   onClear: () => void;
   hint?: string;
 }) {
   const hasAvatar = avatarUrl.trim().length > 0;
+  const uploadDisabled = uploading || premiumLocked;
   const handleUploadClick = () => {
-    if (premiumLocked) {
-      onUpgrade();
-      return;
-    }
     fileInputRef.current?.click();
   };
   return (
@@ -824,9 +851,10 @@ function AvatarUploadRow({
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={uploading}
+              disabled={uploadDisabled}
               onClick={handleUploadClick}
-              className={`text-xs py-2 px-3 inline-flex items-center gap-1.5 ${premiumLocked ? 'btn-secondary opacity-70' : 'btn-secondary'}`}
+              aria-disabled={uploadDisabled}
+              className="btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5"
             >
               {uploading ? (
                 <CircleNotch className="w-3.5 h-3.5 animate-spin" weight="bold" aria-hidden />

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createMagicLink, deleteMagicLink } from '@/lib/db/queries';
 import { sendMagicLink, isEmailConfigured } from '@/lib/resend';
+import { createOtp } from '@/lib/auth/otp';
 
 /**
  * POST /api/auth/request
@@ -39,7 +40,19 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: result.error }, { status });
   }
 
-  const { success, error } = await sendMagicLink(email, result.token);
+  // Companion 6-digit OTP for PWA users — see lib/auth/otp.ts. Created
+  // after the magic link so rate-limit accounting stays on the magic_
+  // links table and a 429 from there short-circuits before we burn KV
+  // writes. A KV outage here is non-fatal: without the code the user
+  // falls back to the link, which is the old behavior.
+  let otpCode: string | undefined;
+  try {
+    otpCode = await createOtp(email);
+  } catch (err) {
+    console.warn('[auth/request] createOtp failed, continuing without code:', err);
+  }
+
+  const { success, error } = await sendMagicLink(email, result.token, otpCode);
   if (!success) {
     console.error('[auth/request] sendMagicLink failed:', error);
     // Roll back the just-inserted token row so a failed email send

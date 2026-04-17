@@ -17,6 +17,7 @@ import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight } from '@/lib/format';
 import { kv } from '@/lib/kv';
 import { slugifyUsername, validateUsername } from '@/lib/username';
+import { getLeaderboardWordmarks } from '@/lib/wordmarks/leaderboard';
 
 /**
  * Server-side puzzle/solve queries shared between the server component
@@ -213,6 +214,14 @@ export interface LeaderboardEntry {
   avatarUrl: string | null;
   serverSolveMs: number;
   unassisted: boolean;
+  /**
+   * Top wordmarks (ids) to render as overlapping circular badges next
+   * to the player's name. At most 3, filtered through
+   * `getLeaderboardWordmarks` so speed/streak groups don't dominate
+   * the row. Empty array when the player has earned none (or is
+   * anonymous / has no wordmarks rows yet).
+   */
+  topWordmarks: string[];
 }
 
 /**
@@ -292,18 +301,49 @@ export async function getDailyLeaderboard(
   `);
 
   const resolved = Array.isArray(rows) ? rows : (rows.rows ?? []);
-  return resolved.map((r, i) => ({
-    rank: i + 1,
-    playerKey: String(r.player_key),
-    handle: r.handle ?? null,
-    // Prefer the canonical profile.wallet when set — it's the
-    // lowercased / normalized version; fall back to the solve row's
-    // wallet (handles pre-backfill rows where the profile join missed).
-    wallet: (r.profile_wallet ?? r.row_wallet)?.toLowerCase() ?? null,
-    avatarUrl: r.avatar_url ?? null,
-    serverSolveMs: Number(r.server_solve_ms),
-    unassisted: Boolean(r.unassisted),
-  }));
+  if (resolved.length === 0) return [];
+
+  // Batch-fetch every wordmark row for the current leaderboard's
+  // player_keys, then group them into a lookup. Single round-trip for
+  // up to `limit` players, beats N+1 per-row fetches. The generated
+  // `wordmarks.player_key` column matches the leaderboard's computed
+  // player_key exactly so we can filter on it directly without any
+  // profile-id ↔ wallet translation.
+  const playerKeys = resolved.map((r) => String(r.player_key));
+  const wordmarkRows = await db.execute<{
+    player_key: string;
+    wordmark_id: string;
+  }>(sql`
+    SELECT player_key, wordmark_id
+    FROM wordmarks
+    WHERE player_key = ANY(${playerKeys}::varchar[])
+  `);
+  const wordmarksByPlayer = new Map<string, string[]>();
+  const wordmarkResolved = Array.isArray(wordmarkRows) ? wordmarkRows : (wordmarkRows.rows ?? []);
+  for (const row of wordmarkResolved) {
+    const key = String(row.player_key);
+    const arr = wordmarksByPlayer.get(key) ?? [];
+    arr.push(String(row.wordmark_id));
+    wordmarksByPlayer.set(key, arr);
+  }
+
+  return resolved.map((r, i) => {
+    const playerKey = String(r.player_key);
+    const allWordmarks = wordmarksByPlayer.get(playerKey) ?? [];
+    return {
+      rank: i + 1,
+      playerKey,
+      handle: r.handle ?? null,
+      // Prefer the canonical profile.wallet when set — it's the
+      // lowercased / normalized version; fall back to the solve row's
+      // wallet (handles pre-backfill rows where the profile join missed).
+      wallet: (r.profile_wallet ?? r.row_wallet)?.toLowerCase() ?? null,
+      avatarUrl: r.avatar_url ?? null,
+      serverSolveMs: Number(r.server_solve_ms),
+      unassisted: Boolean(r.unassisted),
+      topWordmarks: getLeaderboardWordmarks(allWordmarks),
+    };
+  });
 }
 
 /**
@@ -577,6 +617,37 @@ export async function getArchiveList(limit = 60): Promise<ArchiveEntry[]> {
     .orderBy(sql`${puzzles.dayNumber} DESC`)
     .limit(limit);
   return rows.map((r) => ({ dayNumber: r.dayNumber, date: r.date }));
+}
+
+/**
+ * Day numbers the given identity has solved (eligible only). Used by
+ * the archive calendar to mark "solved" cells. Resolution order
+ * matches the other identity-keyed reads — profile → wallet → session.
+ *
+ * Excludes `ineligible` flags; `suspicious` still counts (same rule as
+ * the leaderboard) so a borderline flag doesn't silently hide a solve
+ * from the solver's own archive view.
+ *
+ * Returns an empty array for fully-anonymous callers (no identity
+ * fields) so callers never have to branch on null before rendering.
+ */
+export async function getMySolvedDayNumbers(identity: StatsIdentity): Promise<number[]> {
+  if (identity.profileId == null && !identity.wallet && !identity.sessionId) {
+    return [];
+  }
+  const rows = await db
+    .select({ dayNumber: puzzles.dayNumber })
+    .from(solves)
+    .innerJoin(puzzles, eq(solves.puzzleId, puzzles.id))
+    .where(
+      and(
+        eq(solves.solved, true),
+        solveBelongsTo(identity),
+        sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
+      ),
+    )
+    .groupBy(puzzles.dayNumber);
+  return rows.map((r) => r.dayNumber);
 }
 
 /**
@@ -1173,6 +1244,109 @@ export async function getRecentPremiumGrants(limit = 50): Promise<PremiumGrantRo
 
   merged.sort((a, b) => b.unlockedAt.getTime() - a.unlockedAt.getTime());
   return merged.slice(0, limit);
+}
+
+/**
+ * Revoke a previously-granted premium entitlement. Clears both storage
+ * paths so a wallet+handle profile can't hold onto premium via the
+ * half we forgot. Idempotent — a second call when nothing is set
+ * resolves to a no-op.
+ */
+export async function revokePremiumForProfile(profileId: number): Promise<void> {
+  // Fetch the profile so we know the wallet (if any) to clean up
+  // premium_users alongside profiles.premium_source.
+  const [profile] = await db
+    .select({ wallet: profiles.wallet })
+    .from(profiles)
+    .where(eq(profiles.id, profileId))
+    .limit(1);
+  if (!profile) return;
+
+  await Promise.all([
+    db
+      .update(profiles)
+      .set({ premiumSource: null, grantedBy: null, reason: null })
+      .where(eq(profiles.id, profileId)),
+    profile.wallet
+      ? db.delete(premiumUsers).where(eq(premiumUsers.wallet, profile.wallet))
+      : Promise.resolve(),
+  ]);
+}
+
+/**
+ * Admin-initiated profile edit. Optional fields — omit to leave
+ * untouched, pass `null` to clear. Returns `false` when the handle or
+ * email would collide with another profile (unique constraint), true
+ * on success. Caller is responsible for admin auth; this function
+ * does NOT check the allowlist.
+ */
+export interface UpdateAdminProfileInput {
+  id: number;
+  handle?: string | null;
+  email?: string | null;
+}
+
+export async function updateAdminProfile(
+  input: UpdateAdminProfileInput,
+): Promise<{ ok: true } | { ok: false; reason: 'conflict' | 'not_found' }> {
+  const patch: Record<string, string | null | Date> = {};
+  if (input.handle !== undefined) {
+    patch.handle = input.handle ? input.handle.trim().toLowerCase() : null;
+  }
+  if (input.email !== undefined) {
+    patch.email = input.email ? input.email.trim().toLowerCase() : null;
+  }
+  if (Object.keys(patch).length === 0) return { ok: true };
+  patch.updatedAt = new Date();
+
+  try {
+    const result = await db
+      .update(profiles)
+      .set(patch)
+      .where(eq(profiles.id, input.id))
+      .returning({ id: profiles.id });
+    if (result.length === 0) return { ok: false, reason: 'not_found' };
+    return { ok: true };
+  } catch (err) {
+    // Postgres unique-violation SQLSTATE 23505 → a handle or email that
+    // another profile already owns. Translate to a structured result so
+    // the route can return 409 without leaking driver internals.
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('23505')) return { ok: false, reason: 'conflict' };
+    throw err;
+  }
+}
+
+/**
+ * Admin-initiated profile delete. Preserves solves and wordmark rows
+ * by nulling their `profile_id` references (so cumulative totals on
+ * the leaderboard don't vanish — anonymous solves still count toward
+ * the daily board) before removing the profile itself. Also clears
+ * the matching `premium_users` row when the profile carried a wallet.
+ *
+ * Returns `false` if no row exists for the id — safe to call twice.
+ */
+export async function deleteAdminProfile(profileId: number): Promise<boolean> {
+  const [profile] = await db
+    .select({ wallet: profiles.wallet })
+    .from(profiles)
+    .where(eq(profiles.id, profileId))
+    .limit(1);
+  if (!profile) return false;
+
+  // Detach attributed rows first. Without this the FK constraint on
+  // solves.profile_id / wordmarks.profile_id would block the delete.
+  await db.execute(sql`
+    UPDATE solves SET profile_id = NULL WHERE profile_id = ${profileId}
+  `);
+  await db.execute(sql`
+    UPDATE wordmarks SET profile_id = NULL WHERE profile_id = ${profileId}
+  `);
+  if (profile.wallet) {
+    await db.delete(premiumUsers).where(eq(premiumUsers.wallet, profile.wallet));
+  }
+  await db.delete(profiles).where(eq(profiles.id, profileId));
+  return true;
 }
 
 /**
