@@ -1736,6 +1736,28 @@ export async function mergeProfiles(
   // COALESCEs inside the CTE can't observe a stale version of one row
   // while the DELETE/UPDATE commit another. Neon-http still can't start
   // a transaction, but one statement is an implicit one.
+  // NOTE on CTE ordering:
+  //
+  // The UPDATE's `FROM pair, deleted` is load-bearing — `deleted`
+  // carries a RETURNING clause and is referenced here specifically
+  // so Postgres serializes the DELETE before the UPDATE. Sibling
+  // data-modifying CTEs without a dependency run concurrently under
+  // the same MVCC snapshot; our `profiles_email_lower_idx` unique
+  // constraint is checked row-by-row as the UPDATE rewrites indexed
+  // columns, so a concurrent UPDATE could race ahead of the DELETE
+  // and see the old newer-row entry still occupying the email slot.
+  // That produced a 23505 unique_violation every time we tried to
+  // merge a wallet-only profile with a freshly-verified email-only
+  // profile (starl3xx + starl3xx.mail@gmail.com in the wild) — the
+  // email-only row persisted as an orphan and the calling route
+  // bubbled the error up as "session binding failed".
+  //
+  // By joining `deleted` into the UPDATE's FROM, we force the UPDATE
+  // to read from `deleted`'s RETURNING stream, which in turn forces
+  // `deleted` to complete before the UPDATE pass starts writing
+  // indexed columns. The cross join with a single-row `pair` × a
+  // single-row `deleted` still produces exactly one input row; the
+  // UPDATE targets the older profile as before.
   const rows = await db.execute<{ older_id: number }>(sql`
     WITH pair AS (
       SELECT
@@ -1780,6 +1802,7 @@ export async function mergeProfiles(
     deleted AS (
       DELETE FROM profiles
       WHERE id = (SELECT newer_id FROM pair)
+      RETURNING id AS deleted_id
     ),
     updated AS (
       UPDATE profiles p SET
@@ -1796,7 +1819,7 @@ export async function mergeProfiles(
         reason             = pair.reason,
         stripe_session_id  = pair.stripe_session_id,
         updated_at         = now()
-      FROM pair
+      FROM pair, deleted
       WHERE p.id = pair.older_id
       RETURNING p.id AS older_id
     )
