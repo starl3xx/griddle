@@ -56,11 +56,11 @@ export function OtpCodeInput({ email, onVerified, prompt }: OtpCodeInputProps) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? 'Invalid or expired code.');
       }
-      // Await in case the parent's callback does async work (PATCH
-      // the pending username, refetch profile, etc.) before closing
-      // the modal. Without awaiting, the spinner would stop the
-      // moment the fetch resolved and any rejection inside the
-      // callback would become an unhandled promise rejection.
+      // Await in case the parent's callback does async work (refetch
+      // profile, merge sessions, etc.) before closing the modal.
+      // Without awaiting, the spinner would stop the moment the
+      // fetch resolved and any rejection inside the callback would
+      // become an unhandled promise rejection.
       await onVerified();
       // Success: the parent usually unmounts this component via its
       // own state flip. If it didn't (callback succeeded but left

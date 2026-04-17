@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Envelope, ArrowRight, CircleNotch } from '@phosphor-icons/react';
+import { Envelope, CircleNotch } from '@phosphor-icons/react';
 import { OtpCodeInput } from './OtpCodeInput';
 
 interface CreateProfileModalProps {
@@ -11,18 +11,25 @@ interface CreateProfileModalProps {
   onProfileCreated: () => void;
 }
 
-type Step = 'form' | 'check-email' | 'done';
+type Step = 'form' | 'check-email';
 
 /**
- * Create-profile flow for anonymous users. Three paths:
+ * Sign-in modal for anonymous users. Two paths:
  *
- *   1. **Email (primary)** — enter email → magic link sent → user clicks
- *      link → profile created, session bound → onProfileCreated fires.
- *   2. **Handle-only** — enter a display name, skip email. Creates a
- *      session-bound profile with no email (recoverable only on this device
- *      until a wallet or email is added later).
- *   3. **Wallet** — defers to the parent's connect flow (wallet-linked
+ *   1. **Email (primary)** — enter email → magic link + OTP code emailed
+ *      → user clicks link OR pastes code → profile created, session
+ *      bound → onProfileCreated fires.
+ *   2. **Wallet** — defers to the parent's connect flow (wallet-linked
  *      profiles use the existing wallet-session KV binding).
+ *
+ * Username is NOT collected here. Asking for it pre-verify caused two
+ * bugs: (a) magic-link clicks land in a different browser context from
+ * where the user typed (iOS Mail → Safari vs. installed PWA), so any
+ * localStorage-based handoff loses the name, and (b) silent PATCH
+ * failures post-OTP-verify left users with an empty handle and no
+ * error. SettingsModal prompts for the username right after verify
+ * completes, so the user types it exactly once on the device where
+ * the session just got bound.
  */
 export function CreateProfileModal({
   onClose,
@@ -31,21 +38,19 @@ export function CreateProfileModal({
 }: CreateProfileModalProps) {
   const [step, setStep] = useState<Step>('form');
   const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     setError(null);
     const trimmedEmail = email.trim();
-    const trimmedName = username.trim();
 
-    if (!trimmedEmail && !trimmedName) {
-      setError('Enter an email or a username to get started.');
+    if (!trimmedEmail) {
+      setError('Enter your email to get started.');
       return;
     }
 
-    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       setError('Enter a valid email address.');
       return;
     }
@@ -53,49 +58,16 @@ export function CreateProfileModal({
     setSubmitting(true);
 
     try {
-      if (trimmedEmail) {
-        // Email path — send magic link. If the user also typed a display
-        // name, stash it in localStorage so GameClient can PATCH it onto
-        // the profile after the verify redirect lands. Persisting via
-        // localStorage (rather than piping through the magic_links row)
-        // keeps us schema-stable at the cost of losing the name if the
-        // link is opened in a different browser — acceptable edge case.
-        //
-        // Always write (or clear) the pending-name key unconditionally so
-        // a user who enters a name, abandons, and later retries with just
-        // an email doesn't silently inherit the stale name from their
-        // first attempt.
-        try {
-          if (trimmedName) {
-            localStorage.setItem('griddle:pending-username', trimmedName);
-          } else {
-            localStorage.removeItem('griddle:pending-username');
-          }
-        } catch { /* private mode / quota — silently drop */ }
-        const res = await fetch('/api/auth/request', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ email: trimmedEmail }),
-        });
-        if (!res.ok) {
-          const d = (await res.json()) as { error?: string };
-          throw new Error(d.error ?? 'Failed to send email');
-        }
-        setStep('check-email');
-      } else {
-        // Handle-only path — create profile without email
-        const res = await fetch('/api/profile/create', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ username: trimmedName }),
-        });
-        if (!res.ok) {
-          const d = (await res.json()) as { error?: string };
-          throw new Error(d.error ?? 'Failed to create profile');
-        }
-        setStep('done');
-        onProfileCreated();
+      const res = await fetch('/api/auth/request', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail }),
+      });
+      if (!res.ok) {
+        const d = (await res.json()) as { error?: string };
+        throw new Error(d.error ?? 'Failed to send email');
       }
+      setStep('check-email');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -116,24 +88,7 @@ export function CreateProfileModal({
           <CheckEmailState
             email={email.trim()}
             onClose={onClose}
-            onVerifiedWithCode={async () => {
-              // OTP verify already bound the session → profile. Apply
-              // any pending username and let the parent refresh + open
-              // Settings via onProfileCreated (same end state as the
-              // magic-link redirect path).
-              const pending = username.trim();
-              try {
-                if (pending) {
-                  await fetch('/api/profile', {
-                    method: 'PATCH',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ handle: pending }),
-                  });
-                }
-              } catch { /* best-effort — PATCH is a nice-to-have */ }
-              try { localStorage.removeItem('griddle:pending-username'); } catch { /* noop */ }
-              onProfileCreated();
-            }}
+            onVerifiedWithCode={onProfileCreated}
           />
         ) : (
           <>
@@ -164,29 +119,19 @@ export function CreateProfileModal({
             <div className="space-y-3">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  Email <span className="text-gray-400 font-medium normal-case tracking-normal">(recommended — sign in anywhere)</span>
+                  Email
                 </label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !submitting) handleSubmit();
+                  }}
                   placeholder="you@example.com"
                   className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
                   autoComplete="email"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  Username <span className="text-gray-400 font-medium normal-case tracking-normal">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                  placeholder="starl3xx"
-                  maxLength={32}
-                  className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
+                  autoFocus
                 />
               </div>
 
@@ -202,12 +147,10 @@ export function CreateProfileModal({
               >
                 {submitting ? (
                   <CircleNotch className="w-4 h-4 animate-spin" weight="bold" aria-hidden />
-                ) : email.trim() ? (
-                  <Envelope className="w-4 h-4" weight="bold" aria-hidden />
                 ) : (
-                  <ArrowRight className="w-4 h-4" weight="bold" aria-hidden />
+                  <Envelope className="w-4 h-4" weight="bold" aria-hidden />
                 )}
-                {email.trim() ? 'Send sign-in link' : 'Create profile'}
+                Send sign-in link
               </button>
 
               <div className="flex items-center gap-2 my-1">
@@ -226,7 +169,7 @@ export function CreateProfileModal({
             </div>
 
             <p className="text-[11px] text-gray-400 dark:text-gray-500 text-center mt-4">
-              No subscription. Your data stays yours.
+              You’ll pick a username after signing in.
             </p>
           </>
         )}
@@ -242,11 +185,7 @@ function CheckEmailState({
 }: {
   email: string;
   onClose: () => void;
-  /**
-   * Fires after a successful OTP verify. Parent's callback closes
-   * over the pending username directly (not through a prop on this
-   * component), so we only need to surface the verify result here.
-   */
+  /** Fires after a successful `/api/auth/verify-code` round-trip. */
   onVerifiedWithCode: () => void | Promise<void>;
 }) {
   return (

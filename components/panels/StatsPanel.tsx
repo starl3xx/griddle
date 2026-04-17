@@ -25,7 +25,7 @@ interface StatsPanelProps {
   pfpUrl: string | null;
   /** User's display name from the bound profile (or Farcaster fallback). */
   username: string | null;
-  /** Fires when an anonymous user clicks "Create profile". */
+  /** Fires when an anonymous user taps the Sign in CTA. */
   onCreateProfile: () => void;
   /** Opens the premium gate modal. */
   onUpgrade: () => void;
@@ -43,9 +43,8 @@ interface StatsPanelProps {
  * Three states based on identity + premium:
  *
  *   1. **Anonymous** — no wallet, no session profile. Shows a single
- *      CTA: "Create a free profile to track your streaks and fastest
- *      times." No connect-wallet or unlock-premium buttons — those
- *      live in Settings so Stats stays focused on the dashboard.
+ *      Sign-in CTA. No connect-wallet or unlock-premium buttons —
+ *      those live in Settings so Stats stays focused on the dashboard.
  *   2. **Account (free)** — profile exists, no premium. Shows stats
  *      grid + a post-profile upsell strip.
  *   3. **Premium** — full stats grid + Wordmarks placeholder.
@@ -159,10 +158,10 @@ function AnonymousCta({ onCreateProfile }: { onCreateProfile: () => void }) {
   return (
     <div className="py-4 space-y-3">
       <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
-        Create a free profile to track your streaks and fastest times.
+        Sign in to track your streaks, fastest times, and carry your progress across devices.
       </p>
       <button type="button" onClick={onCreateProfile} className="btn-primary w-full">
-        Create profile
+        Sign in
       </button>
     </div>
   );

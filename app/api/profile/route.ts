@@ -134,10 +134,10 @@ export async function PATCH(req: Request): Promise<NextResponse> {
         { status: 400 },
       );
     }
-    // Premium gate only on CHANGES — not on initial sets. The email
-    // sign-up flow stashes a pending username in localStorage and
-    // PATCHes it after the magic-link verify lands; that user has no
-    // profile handle yet and shouldn't need Premium just to complete
+    // Premium gate only on CHANGES — not on initial sets. After a
+    // magic-link or OTP verify, the freshly-created profile has a
+    // null handle; the user then picks a username in SettingsModal
+    // and PATCHes it here. They shouldn't need Premium to complete
     // onboarding. We detect "initial set" by checking whether the
     // current profile row already has a handle. If it does, this is
     // a rename → require Premium. If it doesn't, this is first-time

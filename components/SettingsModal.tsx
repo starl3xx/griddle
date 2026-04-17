@@ -105,9 +105,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  *   - Premium preferences (streak protection, unassisted mode) — only
  *     when premium is unlocked AND the user has a wallet (the
  *     user_settings table keys on wallet).
- *   - Anonymous state: Create profile / Connect wallet / Unlock with
- *     card or crypto — the three onboarding CTAs, moved here from
- *     StatsModal so Stats stays read-only.
+ *   - Anonymous state: Sign in / Connect wallet / Unlock with card or
+ *     crypto — the three onboarding CTAs, moved here from StatsModal
+ *     so Stats stays read-only.
  */
 export function SettingsModal({
   open,
@@ -540,6 +540,7 @@ export function SettingsModal({
                 setAvatarUrlDraft('');
                 setAvatarUploadError(null);
               }}
+              onUpgrade={onUpgrade}
               hint={
                 !premium
                   ? 'Custom photos are a Premium feature'
@@ -825,20 +826,23 @@ function AvatarUploadRow({
   fileInputRef,
   onFilePick,
   onClear,
+  onUpgrade,
   hint,
 }: {
   avatarUrl: string;
   uploading: boolean;
   error: string | null;
-  /** When true, the upload button is disabled and a Premium badge is shown. */
+  /** When true, the upload button is swapped for an Upgrade CTA that fires `onUpgrade`. */
   premiumLocked: boolean;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFilePick: (file: File) => void | Promise<void>;
   onClear: () => void;
+  /** Opens the PremiumGateModal. Used when `premiumLocked` and the user taps the CTA. */
+  onUpgrade: () => void;
   hint?: string;
 }) {
   const hasAvatar = avatarUrl.trim().length > 0;
-  const uploadDisabled = uploading || premiumLocked;
+  const uploadDisabled = uploading;
   const handleUploadClick = () => {
     fileInputRef.current?.click();
   };
@@ -872,20 +876,35 @@ function AvatarUploadRow({
         </div>
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={uploadDisabled}
-              onClick={handleUploadClick}
-              aria-disabled={uploadDisabled}
-              className="btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5"
-            >
-              {uploading ? (
-                <CircleNotch className="w-3.5 h-3.5 animate-spin" weight="bold" aria-hidden />
-              ) : (
-                <Camera className="w-3.5 h-3.5" weight="bold" aria-hidden />
-              )}
-              {hasAvatar ? 'Change photo' : 'Upload photo'}
-            </button>
+            {premiumLocked ? (
+              // Non-premium: real CTA that opens the upgrade modal.
+              // Previously this rendered a `disabled` upload button,
+              // which looked actionable but did nothing when tapped —
+              // testers reported it as a broken control.
+              <button
+                type="button"
+                onClick={onUpgrade}
+                className="btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5"
+              >
+                <Crown className="w-3.5 h-3.5 text-accent" weight="fill" aria-hidden />
+                Upgrade to add a photo
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={uploadDisabled}
+                onClick={handleUploadClick}
+                aria-disabled={uploadDisabled}
+                className="btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5"
+              >
+                {uploading ? (
+                  <CircleNotch className="w-3.5 h-3.5 animate-spin" weight="bold" aria-hidden />
+                ) : (
+                  <Camera className="w-3.5 h-3.5" weight="bold" aria-hidden />
+                )}
+                {hasAvatar ? 'Change photo' : 'Upload photo'}
+              </button>
+            )}
             {hasAvatar && !uploading && !premiumLocked && (
               <button
                 type="button"
