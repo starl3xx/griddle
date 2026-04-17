@@ -138,7 +138,7 @@ export function SolveModal({
           {word}
         </p>
 
-        <div className="mt-4 inline-flex items-baseline gap-2">
+        <div className="mt-4 flex items-baseline justify-center gap-2">
           <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">
             Time
           </span>
@@ -161,7 +161,7 @@ export function SolveModal({
             already holds every wordmark solves and sees nothing new
             here — correct and intentional. */}
         {earnedBadges.length > 0 && (
-          <div className="mt-4 inline-flex flex-wrap items-center justify-center gap-1.5 animate-fade-in">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 animate-fade-in">
             <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
               Earned
             </span>
