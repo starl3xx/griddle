@@ -14,6 +14,7 @@ import {
   Check,
   Gear,
   Camera,
+  Timer,
 } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
 import { FaqAccordion } from './FaqAccordion';
@@ -62,6 +63,14 @@ interface SettingsModalProps {
   premium: boolean;
   dark: boolean;
   onToggleDark: () => void;
+  /**
+   * Zen mode — when true, GameClient hides the in-game timer pill.
+   * Available to all users (no premium gate): solve timing is still
+   * recorded server-side for the leaderboard, this just stops
+   * showing the clock on screen.
+   */
+  zen: boolean;
+  onToggleZen: () => void;
   /** Called when profile state mutates so the parent can re-fetch. */
   onProfileChanged: () => void;
   /** Called when unassisted mode is toggled so the game grid updates. */
@@ -107,6 +116,8 @@ export function SettingsModal({
   premium,
   dark,
   onToggleDark,
+  zen,
+  onToggleZen,
   onProfileChanged,
   onUnassistedChanged,
   onClose,
@@ -662,7 +673,7 @@ export function SettingsModal({
           </Section>
         )}
 
-        {/* Preferences — dark mode always, premium settings conditionally */}
+        {/* Preferences — dark mode + zen mode always, premium settings conditionally */}
         <Section title="Preferences">
           <ToggleRow
             icon={dark
@@ -673,6 +684,18 @@ export function SettingsModal({
             checked={dark}
             disabled={false}
             onChange={onToggleDark}
+          />
+          <ToggleRow
+            icon={<Timer className="w-4 h-4" weight="bold" />}
+            label="Zen mode"
+            description={
+              zen
+                ? 'Timer hidden — just you and the grid'
+                : 'Hide the timer while you play (Zen mode)'
+            }
+            checked={zen}
+            disabled={false}
+            onChange={onToggleZen}
           />
 
           {/* Premium preferences — always rendered so non-premium
