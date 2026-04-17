@@ -82,9 +82,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     // is reused as the confirmation landing for both the redirect case
     // and the hosted fallback below — one success page, one polling
     // path, less divergence.
+    // Stripe API version 2026-03-25.dahlia renamed ui_mode values:
+    // 'embedded' → 'embedded_page', 'hosted' → 'hosted_page'. We stay
+    // on 'embedded_page' here; the default (hosted_page) is what the
+    // fallback branch below relies on.
     const session = await getStripe().checkout.sessions.create({
       ...sharedParams,
-      ui_mode: 'embedded',
+      ui_mode: 'embedded_page',
       redirect_on_completion: 'if_required',
       return_url: `${SITE_URL}/premium/success?session_id={CHECKOUT_SESSION_ID}${wallet ? `&wallet=${wallet}` : ''}`,
     });

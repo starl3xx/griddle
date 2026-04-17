@@ -894,16 +894,18 @@ export default function GameClient({
     setShowCryptoFlow(true);
   }, []);
 
-  /**
-   * POST to Stripe checkout and redirect. No wallet required —
-   * premium binds to the session in Upstash and migrates to a wallet
-   * row on first connect. Passing the wallet when available lets the
-   * webhook skip the migration step.
-   */
-  const handleUnlockFiat = useCallback(async () => {
+  const handleUpgradeClickedFiat = useCallback(() => {
     trackEvent({ name: 'upgrade_clicked', method: 'fiat' });
-    // Track whether we've already fired a specific-reason failure so
-    // the generic exception handler doesn't double-count in the funnel.
+  }, []);
+
+  /**
+   * Hosted Stripe Checkout redirect. Only called by PremiumGateModal
+   * when `forceHostedFiat` is true — today that means the Farcaster
+   * mini app Frame, where cross-origin iframe payment flows are
+   * blocked. The embedded path is the default for every other context
+   * and is driven by PremiumCheckoutEmbed inside the modal itself.
+   */
+  const handleUnlockFiatHosted = useCallback(async () => {
     let failedReasonEmitted = false;
     const emitFailure = (reason: string) => {
       if (failedReasonEmitted) return;
@@ -914,7 +916,7 @@ export default function GameClient({
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ wallet: sessionWallet ?? undefined }),
+        body: JSON.stringify({ wallet: sessionWallet ?? undefined, mode: 'hosted' }),
       });
       if (!res.ok) {
         const body = await res.text();
@@ -926,9 +928,6 @@ export default function GameClient({
         emitFailure('no_url');
         throw new Error('Checkout did not return a URL');
       }
-      // checkout_started fires right before the redirect — the fiat
-      // checkout_completed is emitted server-side from the Stripe
-      // webhook so it's not gated on the user returning to the app.
       trackEvent({ name: 'checkout_started', method: 'fiat' });
       window.location.href = data.url;
     } catch (err) {
@@ -936,6 +935,26 @@ export default function GameClient({
       throw err;
     }
   }, [sessionWallet]);
+
+  const handleFiatCheckoutStarted = useCallback(() => {
+    trackEvent({ name: 'checkout_started', method: 'fiat' });
+  }, []);
+
+  /**
+   * Fires after the embedded Stripe flow reports payment complete AND
+   * the modal's short poll has confirmed premium via the existing
+   * read endpoints. The webhook owns the DB/KV writes; this handler
+   * just flips local UI state + closes the modal. `checkout_completed`
+   * is emitted server-side from the webhook (accurate) so it's not
+   * wired here.
+   */
+  const handleFiatCheckoutComplete = useCallback(() => {
+    setPremium(true);
+    setPremiumGate(null);
+    if (sessionWallet) {
+      void refreshPremium(sessionWallet);
+    }
+  }, [sessionWallet, refreshPremium]);
 
   const handleCryptoUnlocked = useCallback(
     (wallet: string) => {
@@ -1240,9 +1259,13 @@ export default function GameClient({
         <PremiumGateModal
           feature={premiumGate}
           sessionWallet={sessionWallet}
+          forceHostedFiat={inMiniApp}
           onClose={() => setPremiumGate(null)}
           onUnlockCrypto={handleUnlockCrypto}
-          onUnlockFiat={handleUnlockFiat}
+          onUnlockFiat={handleUnlockFiatHosted}
+          onUpgradeClickedFiat={handleUpgradeClickedFiat}
+          onFiatCheckoutStarted={handleFiatCheckoutStarted}
+          onFiatCheckoutComplete={handleFiatCheckoutComplete}
         />
       )}
 
