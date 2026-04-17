@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { getPuzzleByDay, recordPuzzleLoad } from '@/lib/db/queries';
+import {
+  getPuzzleByDay,
+  getPuzzleStartedAt,
+  recordPuzzleLoad,
+} from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 
 /**
@@ -42,9 +46,15 @@ export async function GET(
 
   await recordPuzzleLoad(sessionId, puzzle.id);
 
+  // Include any existing started_at so a player returning to an archive
+  // puzzle they've already started (or solved) skips the Start gate and
+  // the timer resumes from their original stamp.
+  const startedAt = await getPuzzleStartedAt(sessionId, puzzle.dayNumber);
+
   return NextResponse.json({
     dayNumber: puzzle.dayNumber,
     date: puzzle.date,
     grid: puzzle.grid,
+    startedAt: startedAt != null ? startedAt.toISOString() : null,
   });
 }

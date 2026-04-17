@@ -1327,6 +1327,104 @@ export async function getPuzzleLoadedAt(
   return new Date(rows[0].loadedAt);
 }
 
+/**
+ * Solve-timing read. Returns both the load time and the Start time for
+ * this session's puzzle row. The solve route prefers started_at and
+ * falls back to loaded_at when it's null (direct POST, or a row that
+ * pre-dates the Start gate).
+ */
+export async function getPuzzleLoadAndStart(
+  sessionId: string,
+  dayNumber: number,
+): Promise<{ loadedAt: Date; startedAt: Date | null } | null> {
+  const rows = await db
+    .select({
+      loadedAt: puzzleLoads.loadedAt,
+      startedAt: puzzleLoads.startedAt,
+    })
+    .from(puzzleLoads)
+    .innerJoin(puzzles, eq(puzzleLoads.puzzleId, puzzles.id))
+    .where(and(eq(puzzleLoads.sessionId, sessionId), eq(puzzles.dayNumber, dayNumber)))
+    .limit(1);
+  if (rows.length === 0) return null;
+  return {
+    loadedAt: new Date(rows[0].loadedAt),
+    startedAt: rows[0].startedAt ? new Date(rows[0].startedAt) : null,
+  };
+}
+
+/**
+ * Read the current `started_at` (if any) for a (session, puzzle) pair,
+ * addressed by dayNumber. Used by SSR + archive puzzle loads to decide
+ * whether to show the Start gate or render the puzzle as already-in-
+ * progress (timer running from the stored start).
+ */
+export async function getPuzzleStartedAt(
+  sessionId: string,
+  dayNumber: number,
+): Promise<Date | null> {
+  const rows = await db
+    .select({ startedAt: puzzleLoads.startedAt })
+    .from(puzzleLoads)
+    .innerJoin(puzzles, eq(puzzleLoads.puzzleId, puzzles.id))
+    .where(and(eq(puzzleLoads.sessionId, sessionId), eq(puzzles.dayNumber, dayNumber)))
+    .limit(1);
+  if (rows.length === 0 || rows[0].startedAt == null) return null;
+  return new Date(rows[0].startedAt);
+}
+
+/**
+ * First-Start-wins. Stamps started_at = NOW() on the puzzle_loads row
+ * for this (session, puzzle) pair iff started_at is still NULL. Returns
+ * the authoritative started_at after the write (either the fresh
+ * stamp, or the pre-existing one on a replay).
+ *
+ * Upserts the row with started_at pre-populated when no puzzle_loads
+ * row exists yet. That covers a direct /api/puzzle/start POST that
+ * bypassed the SSR page — still rare, but the game shouldn't silently
+ * write no row and leave solve timing broken if it happens.
+ */
+export async function markPuzzleStarted(
+  sessionId: string,
+  puzzleId: number,
+): Promise<Date> {
+  // UPDATE first — the common path (row already exists from
+  // recordPuzzleLoad). COALESCE keeps started_at immutable after the
+  // first stamp: subsequent calls read back the original value.
+  const updated = await db
+    .update(puzzleLoads)
+    .set({ startedAt: sql`COALESCE(${puzzleLoads.startedAt}, NOW())` })
+    .where(
+      and(
+        eq(puzzleLoads.sessionId, sessionId),
+        eq(puzzleLoads.puzzleId, puzzleId),
+      ),
+    )
+    .returning({ startedAt: puzzleLoads.startedAt });
+
+  if (updated.length > 0 && updated[0].startedAt != null) {
+    return new Date(updated[0].startedAt);
+  }
+
+  // No row existed — insert one with started_at populated. Use
+  // onConflictDoUpdate with the same COALESCE guard so a parallel
+  // recordPuzzleLoad (which sets started_at=null) inserting first
+  // doesn't steal the Start stamp.
+  const inserted = await db
+    .insert(puzzleLoads)
+    .values({ sessionId, puzzleId, startedAt: sql`NOW()` })
+    .onConflictDoUpdate({
+      target: [puzzleLoads.sessionId, puzzleLoads.puzzleId],
+      set: { startedAt: sql`COALESCE(${puzzleLoads.startedAt}, NOW())` },
+    })
+    .returning({ startedAt: puzzleLoads.startedAt });
+
+  if (inserted.length === 0 || inserted[0].startedAt == null) {
+    throw new Error('markPuzzleStarted: failed to persist started_at');
+  }
+  return new Date(inserted[0].startedAt);
+}
+
 // ─── Magic link auth ─────────────────────────────────────────────────────────
 
 import { createHash, randomBytes } from 'crypto';
