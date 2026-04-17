@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { solves, profiles } from '@/lib/db/schema';
+import { solves, profiles, puzzleCrumbs } from '@/lib/db/schema';
 import { getSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
-import { setSessionWallet, clearSessionWallet } from '@/lib/wallet-session';
+import {
+  setSessionWalletOrThrow,
+  clearSessionWallet,
+} from '@/lib/wallet-session';
 import { getSessionProfile, setSessionProfileOrThrow } from '@/lib/session-profile';
 import { mergeProfiles } from '@/lib/db/queries';
 
@@ -53,16 +56,30 @@ export async function POST(req: Request): Promise<NextResponse> {
   const sessionId = await getSessionId();
   const normalized = body.wallet.toLowerCase();
 
-  // Two writes, one purpose: (1) backfill historical anonymous solves
-  // for this session, (2) bind the session to this wallet so FUTURE
-  // solves on /api/solve get attributed automatically.
-  const [result] = await Promise.all([
+  // Three writes, one purpose: (1) backfill historical anonymous
+  // solves for this session, (2) backfill historical anonymous
+  // crumbs the same way (otherwise `getCrumbsForSession`'s wallet-
+  // match widening can't see crumbs saved before the wallet was
+  // known), (3) bind the session to this wallet so FUTURE solves +
+  // crumbs on /api/solve and /api/crumbs get attributed automatically.
+  //
+  // `setSessionWalletOrThrow` is the fail-loud variant — a silent
+  // KV failure here leaves the session with a bound profile but no
+  // wallet binding, which produces the orphan-row pattern we saw
+  // with starl3xx earlier (solves with profile_id=1 but wallet=null
+  // even though the user was fully wallet-authenticated).
+  const [result, crumbBackfill] = await Promise.all([
     db
       .update(solves)
       .set({ wallet: normalized })
       .where(and(eq(solves.sessionId, sessionId), isNull(solves.wallet)))
       .returning({ id: solves.id }),
-    setSessionWallet(sessionId, normalized),
+    db
+      .update(puzzleCrumbs)
+      .set({ wallet: normalized })
+      .where(and(eq(puzzleCrumbs.sessionId, sessionId), isNull(puzzleCrumbs.wallet)))
+      .returning({ id: puzzleCrumbs.id }),
+    setSessionWalletOrThrow(sessionId, normalized),
   ]);
 
   // Reconcile profile identity. Four cases based on whether the session
@@ -130,6 +147,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   return NextResponse.json({
     wallet: normalized,
     linked: result.length,
+    crumbsLinked: crumbBackfill.length,
   });
 }
 

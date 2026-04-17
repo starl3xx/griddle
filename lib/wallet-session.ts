@@ -36,6 +36,24 @@ export async function setSessionWallet(sessionId: string, wallet: string): Promi
   }
 }
 
+/**
+ * Same as `setSessionWallet`, but propagates the KV error instead of
+ * swallowing it. Use from paths where a failed binding is silently
+ * catastrophic — e.g. /api/wallet/link, where if this fails the
+ * session's subsequent solves / crumbs are attributed session-only
+ * (no wallet) and the user ends up with orphan rows that never tie
+ * back to their wallet on any future surface.
+ *
+ * Mirrors `setSessionProfileOrThrow`'s fail-loud contract for the
+ * same reason.
+ */
+export async function setSessionWalletOrThrow(
+  sessionId: string,
+  wallet: string,
+): Promise<void> {
+  await kv.set(KEY(sessionId), wallet.toLowerCase(), { ex: ONE_YEAR_SECONDS });
+}
+
 export async function clearSessionWallet(sessionId: string): Promise<void> {
   try {
     await kv.del(KEY(sessionId));
