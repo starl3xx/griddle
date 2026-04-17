@@ -7,6 +7,7 @@ import { verifyOtp } from '@/lib/auth/otp';
 import { getSessionId } from '@/lib/session';
 import { setSessionProfileOrThrow } from '@/lib/session-profile';
 import { getSessionWallet } from '@/lib/wallet-session';
+import { checkRateLimit, rateLimitResponseInit } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/verify-code
@@ -29,6 +30,19 @@ export const dynamic = 'force-dynamic';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Brute-force cap. 1M code space × 15-min TTL means an unbounded
+// verify endpoint is trivially exhaustible: a 6-digit code has a
+// birthday-bound collision well inside that window. Limiting to
+// 10 attempts per 15 min per email pushes the attacker's expected
+// guesses to hit a single target to ~100K windows, turning the
+// attack from hours to months — low enough to be impractical given
+// that the magic-link send path is already limited to 5/hour, so an
+// attacker can't simply spam fresh codes to widen the target set.
+// The window matches the OTP TTL so the limit fully resets alongside
+// the codes it gates.
+const OTP_VERIFY_LIMIT = 10;
+const OTP_VERIFY_WINDOW_SEC = 15 * 60;
+
 interface Body {
   email?: string;
   code?: string;
@@ -49,6 +63,22 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   if (!/^[0-9]{6}$/.test(code)) {
     return NextResponse.json({ error: 'enter the 6-digit code' }, { status: 400 });
+  }
+
+  // Rate limit BEFORE consuming the OTP so a successful guess in the
+  // last allowed attempt window still counts against future attempts.
+  // Keyed by email so an attacker brute-forcing a specific target
+  // can't escape the cap by rotating source IPs.
+  const rl = await checkRateLimit(
+    `otp-verify:${email}`,
+    OTP_VERIFY_LIMIT,
+    OTP_VERIFY_WINDOW_SEC,
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many verification attempts. Try again shortly.' },
+      rateLimitResponseInit(rl),
+    );
   }
 
   const ok = await verifyOtp(email, code);

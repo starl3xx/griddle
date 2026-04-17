@@ -4,12 +4,8 @@ import { Crown } from '@phosphor-icons/react/dist/ssr';
 import { getDailyLeaderboard } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatMs, formatPlayerName } from '@/lib/format';
-import {
-  WORDMARK_BY_ID,
-  WORDMARK_THEMES,
-  isWordmarkId,
-} from '@/lib/wordmarks/catalog';
 import { Avatar } from '@/components/Avatar';
+import { WordmarkBadges } from '@/components/WordmarkBadges';
 
 /**
  * Daily leaderboard page. Server component — fetches directly via
@@ -96,24 +92,3 @@ export default async function LeaderboardPage({
   );
 }
 
-function WordmarkBadges({ ids }: { ids: readonly string[] }) {
-  const valid = ids.filter(isWordmarkId);
-  if (valid.length === 0) return null;
-  return (
-    <div className="flex -space-x-1.5 flex-shrink-0" aria-hidden>
-      {valid.map((id) => {
-        const w = WORDMARK_BY_ID[id];
-        const theme = WORDMARK_THEMES[id];
-        return (
-          <span
-            key={id}
-            title={`${w.name} · ${w.description}`}
-            className={`w-5 h-5 rounded-full ${theme.bg} ring-2 ring-white flex items-center justify-center text-[10px] leading-none`}
-          >
-            {w.emoji}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
