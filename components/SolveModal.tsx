@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Crown, Medal, ShareNetwork, ArrowCounterClockwise } from '@phosphor-icons/react';
+import { Crown, Medal, ShareNetwork } from '@phosphor-icons/react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
@@ -28,7 +28,6 @@ interface SolveModalProps {
    * user hits Share).
    */
   inMiniApp: boolean;
-  onPlayAgain: () => void;
   onClose: () => void;
 }
 
@@ -40,7 +39,6 @@ export function SolveModal({
   unassisted = false,
   earnedWordmarks = [],
   inMiniApp,
-  onPlayAgain,
   onClose,
 }: SolveModalProps) {
   // Narrow the raw id list to typed catalog entries. Unknown ids
@@ -178,25 +176,15 @@ export function SolveModal({
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row gap-2 mt-6">
-          <button
-            type="button"
-            onClick={handleShare}
-            className="btn-accent flex-1 relative inline-flex items-center justify-center gap-2"
-            aria-live="polite"
-          >
-            <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
-            {shareLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onPlayAgain}
-            className="btn-secondary flex-1 inline-flex items-center justify-center gap-2"
-          >
-            <ArrowCounterClockwise className="w-4 h-4" weight="bold" aria-hidden />
-            Play again
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleShare}
+          className="btn-accent mt-6 w-full relative inline-flex items-center justify-center gap-2"
+          aria-live="polite"
+        >
+          <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
+          {shareLabel}
+        </button>
 
         <a
           href={`/leaderboard/${dayNumber}`}
