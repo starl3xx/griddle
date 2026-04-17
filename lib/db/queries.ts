@@ -3942,10 +3942,10 @@ export async function getFunnelDropOff(window: '24h' | '7d' | '30d' | 'all' = '7
 
   return CANONICAL_FUNNEL.map((stage, i) => {
     const sessions = byName.get(stage) ?? 0;
-    const dropFromPrev = i === 0 ? null : prevCount > 0 ? sessions / prevCount : 0;
+    const retainedFromPrev = i === 0 ? null : prevCount > 0 ? sessions / prevCount : 0;
     const retainedFromStart = firstCount > 0 ? sessions / firstCount : 0;
     prevCount = sessions;
-    return { stage, sessions, dropFromPrev, retainedFromStart };
+    return { stage, sessions, retainedFromPrev, retainedFromStart };
   });
 }
 

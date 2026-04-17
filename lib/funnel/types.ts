@@ -45,16 +45,17 @@ export interface FunnelStats {
 
 /**
  * The canonical anon → premium funnel, ordered. Each row carries its
- * count plus drop-off from previous stage and from the initial stage —
+ * count plus retention from previous stage and from the initial stage —
  * the two numbers an operator actually reads when diagnosing where the
- * funnel leaks.
+ * funnel leaks. Both are RETENTION rates (fraction retained, 0–1), not
+ * drop rates. The UI inverts for display when needed.
  */
 export interface FunnelDropOffRow {
   stage: string;
   sessions: number;
-  /** 0-1; null for the first stage (no previous). */
-  dropFromPrev: number | null;
-  /** 0-1; always 1.0 for the first stage. */
+  /** Retention from previous stage, 0-1. Null for the first stage. */
+  retainedFromPrev: number | null;
+  /** Retention from stage-0, 0-1. Always 1.0 for the first stage. */
   retainedFromStart: number;
 }
 

@@ -163,7 +163,10 @@ export function FunnelTab() {
               const drop = dropOffMap.get(stage.name);
               const sessions = row?.sessions ?? 0;
               const retainedFromStart = drop?.retainedFromStart ?? 0;
-              const dropFromPrev = drop?.dropFromPrev ?? null;
+              // `retainedFromPrev` is the fraction of the previous
+              // stage that reached this one — higher is better, so
+              // <30% retained is red, 30-60% orange, 60%+ green.
+              const retainedFromPrev = drop?.retainedFromPrev ?? null;
               const buckets = breakdownByEvent.get(stage.name) ?? [];
               return (
                 <div key={stage.name} className="space-y-1">
@@ -171,16 +174,16 @@ export function FunnelTab() {
                     <span className="font-semibold text-gray-900">{stage.label}</span>
                     <span className="flex items-center gap-2 tabular-nums">
                       <span className="text-gray-600">{sessions.toLocaleString()} sessions</span>
-                      {dropFromPrev !== null && (
+                      {retainedFromPrev !== null && (
                         <span
                           className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                            dropFromPrev < 0.3 ? 'bg-red-100 text-red-700'
-                            : dropFromPrev < 0.6 ? 'bg-orange-100 text-orange-700'
+                            retainedFromPrev < 0.3 ? 'bg-red-100 text-red-700'
+                            : retainedFromPrev < 0.6 ? 'bg-orange-100 text-orange-700'
                             : 'bg-emerald-100 text-emerald-700'
                           }`}
                           title="% of previous stage that made it to this stage"
                         >
-                          {(dropFromPrev * 100).toFixed(0)}% from prev
+                          {(retainedFromPrev * 100).toFixed(0)}% retained
                         </span>
                       )}
                       <span className="font-bold text-brand">
