@@ -21,6 +21,17 @@ import { getGriddlePremiumAddress } from './addresses';
 export const ESCROW_RETRY_KEY = 'griddle:escrow-retries';
 
 /**
+ * USD value of $WORD escrowed on the fiat path. Stripe charges $6,
+ * but only $5 worth of $WORD is pulled from the stockpile and
+ * eventually burned — matching the crypto path's UNLOCK_USD so the
+ * deflationary signal is identical across payment methods. The $1
+ * Stripe-vs-escrow delta covers processing fees (~$0.45) and a
+ * treasury margin that replenishes the stockpile. Burning $6 worth
+ * here instead would net-drain the stockpile by ~$0.45 per sale.
+ */
+export const FIAT_ESCROW_USD = 5;
+
+/**
  * Escrow-manager signer for the fiat path. Reads
  * `ESCROW_MANAGER_PRIVATE_KEY` server-side only (NEVER expose in a
  * `NEXT_PUBLIC_*` var) and wraps it in a viem WalletClient bound to

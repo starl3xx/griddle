@@ -7,7 +7,9 @@ import {
   openEscrowForFiatSession,
   externalIdForStripe,
   ESCROW_RETRY_KEY,
+  FIAT_ESCROW_USD,
 } from '@/lib/contracts/escrowSigner';
+import { quoteWordForUsd } from '@/lib/contracts/quoteWord';
 import { getPremiumRowByWallet } from '@/lib/db/queries';
 import { kv } from '@/lib/kv';
 import { db } from '@/lib/db/client';
@@ -151,8 +153,10 @@ export async function GET(req: Request): Promise<NextResponse> {
 
     try {
       // The oracle can drift between the original webhook and this retry,
-      // so re-quote $WORD fresh.
-      const wordAmount = await (await import('@/lib/contracts/quoteWord')).quoteWordForUsd(6);
+      // so re-quote $WORD fresh. $5 matches the on-chain escrow size
+      // set by the webhook (see FIAT_ESCROW_USD there) — the Stripe
+      // charge is $6 but only $5 worth of $WORD is burned.
+      const wordAmount = await quoteWordForUsd(FIAT_ESCROW_USD);
       const result = await openEscrowForFiatSession({
         user: entry.wallet,
         wordAmount,

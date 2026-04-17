@@ -9,6 +9,7 @@ import {
   openEscrowForFiatSession,
   externalIdForStripe,
   ESCROW_RETRY_KEY,
+  FIAT_ESCROW_USD,
 } from '@/lib/contracts/escrowSigner';
 import { quoteWordForUsd } from '@/lib/contracts/quoteWord';
 import { kv } from '@/lib/kv';
@@ -45,11 +46,6 @@ import type { Address, Hex } from 'viem';
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-// Fiat unlock is priced at $6 — the extra $1 over crypto covers Stripe
-// fees + small treasury margin. Escrow needs $WORD equivalent at
-// current oracle price (+1% buffer for drift inside the 30-day window).
-const FIAT_USD_AMOUNT = 6;
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!STRIPE_WEBHOOK_SECRET) {
@@ -155,7 +151,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       let wordAmount: bigint | null = null;
       let escrowStatus: 'pending' | null = null;
       try {
-        wordAmount = await quoteWordForUsd(FIAT_USD_AMOUNT);
+        wordAmount = await quoteWordForUsd(FIAT_ESCROW_USD);
         const result = await openEscrowForFiatSession({
           user: wallet,
           wordAmount,

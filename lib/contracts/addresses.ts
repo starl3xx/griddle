@@ -13,15 +13,6 @@ function parse(value: string | undefined): `0x${string}` | null {
 }
 
 /**
- * $WORD token on Base (Clanker v4). Null if the env var is missing —
- * callers should treat that as "crypto checkout not configured" and
- * fall back to the fiat path rather than rendering a broken flow.
- */
-export function getWordTokenAddress(): `0x${string}` | null {
-  return parse(process.env.NEXT_PUBLIC_WORD_TOKEN_ADDRESS);
-}
-
-/**
  * GriddlePremium contract. Null until M5-contracts deploys it on Base mainnet
  * and the env var is set. Crypto-unlock flow checks for non-null
  * before rendering and surfaces a "crypto checkout is not configured"
