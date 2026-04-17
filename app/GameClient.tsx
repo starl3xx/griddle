@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { Crown, Backspace, ArrowCounterClockwise, Info } from '@phosphor-icons/react';
 import { formatLongDate } from '@/lib/format';
 import { useDarkMode } from '@/lib/useDarkMode';
+import { useZenMode } from '@/lib/useZenMode';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
 import { SolveModal } from '@/components/SolveModal';
@@ -132,6 +133,7 @@ export default function GameClient({
   /** The wallet currently bound to this session, or null if none. */
   const [sessionWallet, setSessionWallet] = useState<string | null>(initialSessionWallet);
   const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
+  const { zen, toggle: toggleZen } = useZenMode();
 
   // Active puzzle — defaults to today's. Archive navigation swaps it.
   const [activePuzzle, setActivePuzzle] = useState<InitialPuzzle>(initialPuzzle);
@@ -1016,7 +1018,13 @@ export default function GameClient({
               the timer is visible. */}
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-3">
             <div className="justify-self-end">
-              {startedAt != null && !solveResult && (
+              {/* Zen mode hides the timer pill entirely — solve timing
+                  still records server-side, it just isn't shown. The
+                  grid's [1fr auto 1fr] layout keeps the title
+                  centered whether this cell renders the timer or
+                  stays empty, so toggling zen mid-play doesn't
+                  reflow the wordmark. */}
+              {!zen && startedAt != null && !solveResult && (
                 <GameTimer startedAt={startedAt} frozenMs={finalSolveMs} />
               )}
             </div>
@@ -1206,6 +1214,8 @@ export default function GameClient({
         premium={premium}
         dark={dark}
         onToggleDark={toggleDark}
+        zen={zen}
+        onToggleZen={toggleZen}
         onProfileChanged={() => { void refetchProfile(); }}
         onUnassistedChanged={setUnassistedMode}
         onClose={() => setShowSettings(false)}
