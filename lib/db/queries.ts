@@ -1327,45 +1327,62 @@ export async function updateAdminProfile(
  * Returns `false` if no row exists for the id — safe to call twice.
  */
 export async function deleteAdminProfile(profileId: number): Promise<boolean> {
-  const [profile] = await db
-    .select({ wallet: profiles.wallet })
-    .from(profiles)
-    .where(eq(profiles.id, profileId))
-    .limit(1);
-  if (!profile) return false;
-
-  // Detach attributed rows first. Without this the FK constraints on
-  // solves.profile_id, wordmarks.profile_id, and streaks.profile_id
-  // would block the delete (Postgres raises SQLSTATE 23503 on any row
-  // still referencing the profile).
+  // Single-statement atomic delete via data-modifying CTEs.
+  // Neon-http can't open an interactive transaction (stateless HTTP
+  // driver), but one SQL statement is an implicit server
+  // transaction: all CTEs run against the statement-start MVCC
+  // snapshot and commit or roll back together.
+  //
+  // The previous implementation issued five separate `db.execute`
+  // calls; if the final `DELETE FROM profiles` threw, wordmarks and
+  // streaks had already committed on prior HTTP round-trips and the
+  // profile row survived — a permanent data-integrity split that
+  // admin retry couldn't fix (the foreign children were gone).
   //
   // Per-table strategy differs:
   //   - solves: null out profile_id. Rows stay alive under anonymous
-  //     attribution so the daily leaderboard totals don't shift under
-  //     the other players' feet.
+  //     attribution so the daily leaderboard totals don't shift.
   //   - wordmarks: DELETE outright. A naive null-out would violate
-  //     the `wordmarks_identity_required` CHECK on any handle-only or
-  //     email-auth holder — their rows carry profile_id but no wallet,
-  //     so clearing profile_id leaves nothing to satisfy the "at
-  //     least one identity" constraint AND collapses the generated
-  //     `player_key` column to NULL. Wordmarks are per-owner
-  //     achievements; deleting the user deletes them with him.
+  //     the `wordmarks_identity_required` CHECK on any handle-only
+  //     or email-auth holder — their rows carry profile_id but no
+  //     wallet, so clearing profile_id leaves nothing to satisfy
+  //     the "at least one identity" constraint AND collapses the
+  //     generated `player_key` column to NULL. Wordmarks are
+  //     per-owner achievements; deleting the user deletes them.
   //   - streaks: DELETE outright. Same reasoning — a streak with no
-  //     owner has no meaning and some streak rows are profile-only.
-  await db.execute(sql`
-    UPDATE solves SET profile_id = NULL WHERE profile_id = ${profileId}
+  //     owner has no meaning and some rows are profile-only.
+  //   - premium_users: DELETE the matching wallet row. The subselect
+  //     reads `profiles.wallet` from the shared pre-modification
+  //     snapshot, so it works correctly even though the main query
+  //     deletes the profile row in the same statement.
+  const rows = await db.execute<{ id: number }>(sql`
+    WITH
+      upd_solves AS (
+        UPDATE solves SET profile_id = NULL
+        WHERE profile_id = ${profileId}
+        RETURNING 1
+      ),
+      del_wordmarks AS (
+        DELETE FROM wordmarks
+        WHERE profile_id = ${profileId}
+        RETURNING 1
+      ),
+      del_streaks AS (
+        DELETE FROM streaks
+        WHERE profile_id = ${profileId}
+        RETURNING 1
+      ),
+      del_premium AS (
+        DELETE FROM premium_users
+        WHERE wallet = (SELECT wallet FROM profiles WHERE id = ${profileId})
+        RETURNING 1
+      )
+    DELETE FROM profiles
+    WHERE id = ${profileId}
+    RETURNING id
   `);
-  await db.execute(sql`
-    DELETE FROM wordmarks WHERE profile_id = ${profileId}
-  `);
-  await db.execute(sql`
-    DELETE FROM streaks WHERE profile_id = ${profileId}
-  `);
-  if (profile.wallet) {
-    await db.delete(premiumUsers).where(eq(premiumUsers.wallet, profile.wallet));
-  }
-  await db.delete(profiles).where(eq(profiles.id, profileId));
-  return true;
+  const resolved = Array.isArray(rows) ? rows : (rows.rows ?? []);
+  return resolved.length > 0;
 }
 
 /**
