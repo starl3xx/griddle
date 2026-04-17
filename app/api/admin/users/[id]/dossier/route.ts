@@ -22,16 +22,19 @@ export async function GET(
   const admin = await requireAdminWallet();
   if (!admin) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
+  // Next.js has already URL-decoded the path segment when populating
+  // `params.id`, so a second decodeURIComponent would incorrectly
+  // un-encode any literal `%` sequences the client meant to keep
+  // (e.g. session ids that include percent-encoded characters).
   const { id: raw } = await params;
-  const decoded = decodeURIComponent(raw);
 
   let dossier = null;
-  if (decoded.startsWith('session:')) {
-    const sessionId = decoded.slice('session:'.length);
+  if (raw.startsWith('session:')) {
+    const sessionId = raw.slice('session:'.length);
     if (!sessionId) return NextResponse.json({ error: 'invalid session id' }, { status: 400 });
     dossier = await getUserDossier({ sessionId });
   } else {
-    const profileId = parseInt(decoded, 10);
+    const profileId = parseInt(raw, 10);
     if (!Number.isFinite(profileId) || profileId <= 0) {
       return NextResponse.json({ error: 'invalid id' }, { status: 400 });
     }

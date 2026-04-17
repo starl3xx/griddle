@@ -125,16 +125,19 @@ export function PulseTab() {
     ? (data.activity.mau - data.activity.prevMau) / data.activity.prevMau
     : null;
 
-  // MTD gross realized: what's already booked this month. We
-  // approximate MTD via the last-30-day window since `revenue` here
-  // is that window's breakdown. A stricter month-to-date column is
-  // a follow-up if this proves misleading in practice.
-  //
-  // Op costs: prorate the monthly total by days-elapsed / days-in-
-  // current-month. Using a hardcoded 30 under-reports Feb and makes
-  // the 31st of long months > 100% of the monthly spend.
-  const mtdGross = data.revenue.totalRealizedUsd;
+  // MTD windows have to match on both sides of the net calculation.
+  // The API's `revenue` breakdown is a rolling 30-day window, so we
+  // can't use it here — subtracting MTD op-costs from 30d revenue
+  // systematically overstates profitability (day 1 of a month = 30d
+  // gross - 1d costs). Instead, sum the current calendar month's
+  // slice of `revenueSeries` for the gross, and prorate op-costs by
+  // days-elapsed / days-in-month. Both sides are now 1-to-N days of
+  // the current month, apples to apples.
   const now = new Date();
+  const monthPrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-`;
+  const mtdGross = data.revenueSeries
+    .filter((d) => d.day.startsWith(monthPrefix))
+    .reduce((a, d) => a + (d.crypto ?? 0) + (d.fiat ?? 0), 0);
   const daysElapsed = now.getUTCDate();
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
   const opCostMtd = (data.opCostsMonthlyTotal * daysElapsed) / daysInMonth;
@@ -216,27 +219,29 @@ export function PulseTab() {
         </div>
       </section>
 
-      {/* Row 3 — Revenue */}
+      {/* Row 3 — Revenue (month-to-date for math consistency; Fiat
+          pending is a rolling 30-day balance since it's an "owed,
+          not yet booked" status not a time-window figure). */}
       <section className="space-y-2">
-        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Revenue · last 30d</h3>
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Revenue · month-to-date</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <SparklineCard
             icon={<Coins className="h-4 w-4" weight="bold" />}
-            label="Gross realized"
+            label="Gross MTD"
             value={`$${mtdGross.toFixed(0)}`}
-            sub={`${data.revenue.crypto.count} crypto + ${data.revenue.fiatBurned.count} fiat`}
+            sub="realized revenue this month"
             tone="accent"
           />
           <SparklineCard
             icon={<Crown className="h-4 w-4" weight="bold" />}
             label="Fiat pending"
             value={`$${data.revenue.fiatPending.usd.toFixed(0)}`}
-            sub={`${data.revenue.fiatPending.count} in escrow`}
+            sub={`${data.revenue.fiatPending.count} in escrow · rolling 30d`}
             tone={data.revenue.fiatPending.count > 0 ? 'warning' : 'ok'}
           />
           <SparklineCard
             icon={<Receipt className="h-4 w-4" weight="bold" />}
-            label="Op costs · MTD"
+            label="Op costs MTD"
             value={`$${opCostMtd.toFixed(0)}`}
             sub={`$${data.opCostsMonthlyTotal.toFixed(0)}/mo prorated`}
           />

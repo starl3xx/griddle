@@ -59,23 +59,19 @@ export async function GET(req: Request): Promise<NextResponse> {
     anonOffset = startOffset;
     anonTake = limit;
   } else {
-    // 'all' — registered first, then anon. Compute the slice of each
-    // that falls inside this page's [startOffset, startOffset+limit)
-    // window.
-    const regSliceStart = Math.min(startOffset, registeredTotal);
-    const regSliceEnd   = Math.min(startOffset + limit, registeredTotal);
-    regOffset = regSliceStart;
-    regTake   = Math.max(0, regSliceEnd - regSliceStart);
+    // 'all' — logically one list: registered rows 0..registeredTotal-1
+    // followed by anon rows 0..anonTotal-1. Compute what portion of
+    // this page's window [startOffset, startOffset+limit) falls in
+    // each half and query each half at its own offset.
+    const regEnd   = Math.min(startOffset + limit, registeredTotal);
+    regOffset = Math.min(startOffset, registeredTotal);
+    regTake   = Math.max(0, regEnd - regOffset);
 
-    const anonStartGlobal = Math.max(0, startOffset + regTake - registeredTotal + regSliceStart - startOffset);
-    // Simpler: anon rows start immediately after registered. Treat
-    // `registeredTotal` as the boundary in the combined list.
-    const combinedCursor = startOffset + regTake; // global index after consuming the registered slice
-    anonOffset = Math.max(0, combinedCursor - registeredTotal);
-    anonTake   = Math.max(0, limit - regTake);
-    // Silence the unused-binding linter — the derivation above
-    // preserves the intuitive form for future readers.
-    void anonStartGlobal;
+    // Whatever part of the window is past the registered total spills
+    // into anon, starting at the corresponding anon offset.
+    const spillStart = Math.max(startOffset, registeredTotal);
+    anonOffset = spillStart - registeredTotal;
+    anonTake   = Math.max(0, (startOffset + limit) - spillStart);
   }
 
   const registeredRows = regTake > 0
