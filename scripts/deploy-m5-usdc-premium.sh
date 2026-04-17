@@ -16,7 +16,7 @@
 # stdout, written to disk, or committed to git.
 #
 # ──────────────────────────────────────────────────────────────────
-# Prerequisites (env vars — source your .env.local or equivalent):
+# Prerequisites (env vars):
 #
 #   PRIVATE_KEY                    — deployer key (becomes owner)
 #   BASE_RPC_URL                   — Alchemy / Coinbase Base RPC
@@ -29,8 +29,15 @@
 #   OWNER                          — defaults to deployer
 #   JACKPOT_MANAGER_ADDRESS        — defaults to 0xfcb0...edB5 (LHAW on Base)
 #
-# Run:
-#   bash scripts/deploy-m5-usdc-premium.sh
+# Load options (in order of preference):
+#   a) Pre-export vars in your shell, then run:
+#        bash scripts/deploy-m5-usdc-premium.sh
+#   b) Pass an env file — the script parses it with `bun`, NOT shell
+#      `source`, so values containing '&', '|', '$', etc. work fine
+#      without quoting:
+#        bash scripts/deploy-m5-usdc-premium.sh --env-file .env.local
+#   c) `.env.local` in the repo root is auto-loaded if it exists and
+#      no --env-file is given.
 #
 # ──────────────────────────────────────────────────────────────────
 
@@ -56,11 +63,26 @@ require_env() {
   done
 }
 
+# ──────────────── arg parsing ────────────────
+ENV_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --env-file)
+      ENV_FILE="$2"
+      shift 2
+      ;;
+    --help|-h)
+      sed -n '1,/^set -euo pipefail/p' "${BASH_SOURCE[0]}" | head -n -1
+      exit 0
+      ;;
+    *)
+      fatal "unknown arg: $1"
+      ;;
+  esac
+done
+
 # ──────────────── preflight ────────────────
 step "Preflight"
-require_env PRIVATE_KEY BASE_RPC_URL BASESCAN_API_KEY \
-            ESCROW_MANAGER_ADDRESS ESCROW_MANAGER_PRIVATE_KEY \
-            DATABASE_URL_UNPOOLED
 
 for cmd in forge cast jq bun psql; do
   command -v "$cmd" >/dev/null || fatal "missing CLI: $cmd"
@@ -69,6 +91,50 @@ done
 # Repo root — resolves whether script runs from root or scripts/.
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO"
+
+# Default: auto-load ./.env.local if it exists and no --env-file passed.
+if [ -z "$ENV_FILE" ] && [ -f .env.local ]; then
+  ENV_FILE=".env.local"
+fi
+
+# Safe env loader: parse the file via bun (NOT shell `source`) so
+# values containing '&', '|', '$', '#', quotes, etc. load cleanly.
+# Uses Bun.file + manual line parsing — same semantics as dotenv.
+if [ -n "$ENV_FILE" ]; then
+  [ -f "$ENV_FILE" ] || fatal "env file not found: $ENV_FILE"
+  while IFS='=' read -r key; do
+    # `key` is the full line "KEY=val"; re-split on the first '='
+    :
+  done <<<""
+  # Export each KEY=VALUE pair. bun emits null-terminated
+  # "key\0value\0" so we don't need to escape shell metachars.
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    export "$key=$value"
+  done < <(
+    bun --silent -e '
+      import { readFileSync } from "node:fs";
+      const f = process.argv[1];
+      const txt = readFileSync(f, "utf8");
+      for (const raw of txt.split(/\r?\n/)) {
+        const line = raw.replace(/\s+$/, "");
+        if (!line || line.startsWith("#")) continue;
+        const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+        if (!m) continue;
+        let v = m[2];
+        if ((v.startsWith(`"`) && v.endsWith(`"`)) || (v.startsWith(`'`) && v.endsWith(`'`))) {
+          v = v.slice(1, -1);
+        }
+        // null-delimited key then value
+        process.stdout.write(m[1] + "\0" + v + "\0");
+      }
+    ' "$ENV_FILE"
+  )
+  ok "loaded env from $ENV_FILE"
+fi
+
+require_env PRIVATE_KEY BASE_RPC_URL BASESCAN_API_KEY \
+            ESCROW_MANAGER_ADDRESS ESCROW_MANAGER_PRIVATE_KEY \
+            DATABASE_URL_UNPOOLED
 
 # Confirm we're on a branch that has the fork-test artifacts.
 if [ ! -f scripts/swap-recipe/compute-recipe.ts ]; then
