@@ -8,15 +8,33 @@
 export const griddlePremiumAbi = [
   {
     type: 'function',
-    name: 'unlockWithPermit',
+    name: 'unlockWithUsdc',
     stateMutability: 'nonpayable',
     inputs: [
-      { name: 'tokenAmount', type: 'uint256' },
-      { name: 'deadline', type: 'uint256' },
+      { name: 'permitDeadline', type: 'uint256' },
       { name: 'v', type: 'uint8' },
       { name: 'r', type: 'bytes32' },
       { name: 's', type: 'bytes32' },
+      { name: 'minWordOut', type: 'uint256' },
     ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'unlockForUser',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'user', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'externalId', type: 'bytes32' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'burnEscrowed',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'externalId', type: 'bytes32' }],
     outputs: [],
   },
   {
@@ -42,18 +60,57 @@ export const griddlePremiumAbi = [
   },
   {
     type: 'function',
-    name: 'SLIPPAGE_PCT',
+    name: 'USDC_UNLOCK_AMOUNT',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'SWAP_SLIPPAGE_PCT',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
     type: 'event',
-    name: 'UnlockedWithBurn',
+    name: 'UnlockedWithUsdcSwap',
     inputs: [
       { name: 'user', type: 'address', indexed: true },
-      { name: 'tokensBurned', type: 'uint256', indexed: false },
+      { name: 'usdcIn', type: 'uint256', indexed: false },
+      { name: 'wordBurned', type: 'uint256', indexed: false },
       { name: 'oraclePrice', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'EscrowOpened',
+    inputs: [
+      { name: 'externalId', type: 'bytes32', indexed: true },
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'EscrowBurned',
+    inputs: [
+      { name: 'externalId', type: 'bytes32', indexed: true },
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'EscrowRefunded',
+    inputs: [
+      { name: 'externalId', type: 'bytes32', indexed: true },
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'to', type: 'address', indexed: false },
     ],
     anonymous: false,
   },
@@ -73,5 +130,40 @@ export const wordOracleAbi = [
       { name: 'price', type: 'uint256' },
       { name: 'updatedAt', type: 'uint256' },
     ],
+  },
+] as const;
+
+/**
+ * USDC ABI fragment — permit domain + nonces for the ERC-2612 signature
+ * the crypto flow uses.
+ */
+export const usdcAbi = [
+  {
+    type: 'function',
+    name: 'name',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'version',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'nonces',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;

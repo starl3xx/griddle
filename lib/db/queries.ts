@@ -14,7 +14,7 @@ import {
   puzzleCrumbs,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
-import { secondsUntilUtcMidnight } from '@/lib/format';
+import { secondsUntilUtcMidnight, formatUsdc6 } from '@/lib/format';
 import { kv } from '@/lib/kv';
 import { slugifyUsername, validateUsername } from '@/lib/username';
 import { getLeaderboardWordmarks } from '@/lib/wordmarks/leaderboard';
@@ -1392,25 +1392,44 @@ export async function deleteAdminProfile(profileId: number): Promise<boolean> {
  * on wallet  -  a replayed verify re-runs the same upsert with the same
  * txHash and ends up at identical state.
  */
-export async function recordCryptoUnlock(
-  wallet: string,
-  txHash: string,
-): Promise<void> {
-  const normalized = wallet.toLowerCase();
+export interface RecordCryptoUnlockInput {
+  wallet: string;
+  txHash: string;
+  /** USDC pulled on-chain (6-decimal units). Serialized to the
+   *  numeric(20,6) column as a decimal string. */
+  usdcAmount: bigint;
+  /** $WORD wei burned in the same tx. Serialized as a decimal string. */
+  wordBurned: bigint;
+}
+
+export async function recordCryptoUnlock(input: RecordCryptoUnlockInput): Promise<void> {
+  const normalized = input.wallet.toLowerCase();
+  // USDC is 6-decimal, so convert the integer unit count back to a
+  // dollar-precision decimal string for the numeric(20, 6) column.
+  // Explicit string representation avoids JS number precision loss.
+  const usdcDecimal = formatUsdc6(input.usdcAmount);
+  const wordBurnedStr = input.wordBurned.toString();
   await db
     .insert(premiumUsers)
     .values({
       wallet: normalized,
-      txHash,
+      txHash: input.txHash,
       source: 'crypto',
       grantedBy: null,
       reason: null,
       stripeSessionId: null,
+      usdcAmount: usdcDecimal,
+      wordBurned: wordBurnedStr,
+      // Crypto burns immediately — no escrow lifecycle to track.
+      escrowStatus: null,
+      escrowOpenTx: null,
+      escrowBurnTx: null,
+      externalId: null,
     })
     .onConflictDoUpdate({
       target: premiumUsers.wallet,
       set: {
-        txHash,
+        txHash: input.txHash,
         source: 'crypto',
         grantedBy: null,
         reason: null,
@@ -1421,6 +1440,12 @@ export async function recordCryptoUnlock(
         // still references a Stripe session). Matches the existing
         // txHash / grantedBy / reason clearing pattern above.
         stripeSessionId: null,
+        usdcAmount: usdcDecimal,
+        wordBurned: wordBurnedStr,
+        escrowStatus: null,
+        escrowOpenTx: null,
+        escrowBurnTx: null,
+        externalId: null,
         unlockedAt: new Date(),
       },
     });
@@ -1454,6 +1479,18 @@ export interface RecordFiatUnlockInput {
   stripeSessionId: string;
   wallet?: string | null;
   handle?: string | null;
+  /** Populated when the webhook successfully opened the on-chain
+   *  escrow via `unlockForUser`. Null when the call failed + was
+   *  enqueued for retry; the sync cron will backfill it. */
+  escrowOpenTx?: string | null;
+  /** keccak256(stripeSessionId) — same key the contract uses. */
+  externalId?: string | null;
+  /** $WORD wei pulled into escrow. Stringified; DB column is
+   *  numeric(40,0). */
+  wordAmount?: bigint | null;
+  /** 'pending' | 'burned' | 'refunded'. Defaults to 'pending' at
+   *  write time. */
+  escrowStatus?: 'pending' | 'burned' | 'refunded' | null;
 }
 
 export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<void> {
@@ -1489,6 +1526,14 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
         grantedBy: null,
         reason: null,
         stripeSessionId: null,
+        // Escrow telemetry — present whenever the on-chain
+        // unlockForUser succeeded. Null if the webhook couldn't reach
+        // the chain and left the retry queue to handle it.
+        escrowStatus: input.escrowStatus ?? null,
+        escrowOpenTx: input.escrowOpenTx ?? null,
+        escrowBurnTx: null,
+        externalId: input.externalId ?? null,
+        wordBurned: input.wordAmount ? input.wordAmount.toString() : null,
       })
       .onConflictDoNothing();
   }

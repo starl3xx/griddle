@@ -93,3 +93,33 @@ export function formatPlayerName({
   if (wallet) return `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
   return 'Anonymous';
 }
+
+/**
+ * Convert a USDC unit count (6-decimal integer) into its dollar
+ * decimal string — e.g. `5_000_000n` → `"5.000000"`. Used when writing
+ * to Postgres `numeric(20, 6)` columns so we avoid JS number precision
+ * loss and stay below bigint-only paths.
+ */
+export function formatUsdc6(amount: bigint): string {
+  const whole = amount / 1_000_000n;
+  const frac = amount % 1_000_000n;
+  const fracStr = frac.toString().padStart(6, '0');
+  return `${whole.toString()}.${fracStr}`;
+}
+
+/**
+ * Parse a `numeric(20, 6)` USDC string back into a 6-decimal bigint.
+ * Tolerates missing decimal portion. Returns `null` for unparseable
+ * input instead of throwing, so UI code can render "—" without a
+ * server round-trip.
+ */
+export function parseUsdc6(value: string | null | undefined): bigint | null {
+  if (!value) return null;
+  const [whole, frac = ''] = value.split('.');
+  const fracPadded = frac.padEnd(6, '0').slice(0, 6);
+  try {
+    return BigInt(whole) * 1_000_000n + BigInt(fracPadded);
+  } catch {
+    return null;
+  }
+}

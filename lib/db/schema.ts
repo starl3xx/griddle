@@ -13,6 +13,7 @@ import {
   timestamp,
   char,
   jsonb,
+  numeric,
   primaryKey,
   index,
   uniqueIndex,
@@ -106,14 +107,30 @@ export const solves = pgTable(
 /**
  * Premium unlock ledger, keyed on the wallet address that paid (or
  * was granted). `source` distinguishes:
- *   - 'crypto'      — EIP-2612 permit+burn via GriddlePremium.unlockWithPermit
- *   - 'fiat'        — Apple Pay / card via Stripe → swap → escrow-then-burn
+ *   - 'crypto'      — $5 USDC permit → Universal Router swap → $WORD burn
+ *                     via GriddlePremium.unlockWithUsdc (single tx)
+ *   - 'fiat'        — Apple Pay / card via Stripe → escrow (staged $WORD)
+ *                     → burn after dispute window
  *   - 'admin_grant' — comped manually by an operator from /admin (no burn, no tx)
  *
- * `txHash` is nullable because admin grants have no onchain footprint
- * and the fiat path's burn happens asynchronously after the dispute
- * window, so the hash isn't known at unlock time. `grantedBy` + `reason`
- * carry the audit trail for admin grants; they're null for paid unlocks.
+ * Payment telemetry columns:
+ *   - `usdcAmount`    — USDC pulled on the crypto path. Null on fiat / grant.
+ *   - `wordBurned`    — $WORD wei burned for the unlock. Crypto: set at
+ *                       unlock. Fiat: null until the escrow-burn cron
+ *                       observes the on-chain `EscrowBurned` event.
+ *   - `escrowStatus`  — 'pending' | 'burned' | 'refunded' for fiat rows;
+ *                       null for crypto / grant (nothing to track).
+ *   - `escrowOpenTx`  — tx hash of `unlockForUser` on the fiat path.
+ *   - `escrowBurnTx`  — tx hash of `burnEscrowed` or `refundEscrow` once
+ *                       the cron observes it.
+ *   - `externalId`    — keccak256(stripeSessionId) used as the contract
+ *                       idempotency key. Lets admin joins map an on-chain
+ *                       event back to the DB row without a reverse scan.
+ *
+ * `txHash` stays for crypto unlocks (pointing at the UsdcSwap tx) and
+ * remains null for fiat rows (which use `escrowOpenTx` / `escrowBurnTx`
+ * instead). `grantedBy` + `reason` carry the audit trail for admin
+ * grants and are null for paid unlocks.
  */
 export const premiumUsers = pgTable(
   'premium_users',
@@ -131,11 +148,21 @@ export const premiumUsers = pgTable(
      * Null on crypto and admin_grant rows.
      */
     stripeSessionId: varchar('stripe_session_id', { length: 128 }),
+    // Payment telemetry (see docblock above).
+    usdcAmount: numeric('usdc_amount', { precision: 20, scale: 6 }),
+    wordBurned: numeric('word_burned', { precision: 40, scale: 0 }),
+    escrowStatus: varchar('escrow_status', { length: 12 }),
+    escrowOpenTx: varchar('escrow_open_tx', { length: 66 }),
+    escrowBurnTx: varchar('escrow_burn_tx', { length: 66 }),
+    externalId: varchar('external_id', { length: 66 }),
   },
   (t) => ({
     stripeSessionIdx: uniqueIndex('premium_users_stripe_session_idx')
       .on(t.stripeSessionId)
       .where(sql`${t.stripeSessionId} is not null`),
+    externalIdIdx: uniqueIndex('premium_users_external_id_idx')
+      .on(t.externalId)
+      .where(sql`${t.externalId} is not null`),
   }),
 );
 

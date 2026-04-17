@@ -3,11 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useAccount, usePublicClient, useSignTypedData, useWriteContract } from 'wagmi';
 import { Crown, CircleNotch } from '@phosphor-icons/react';
-import { griddlePremiumAbi, wordOracleAbi } from '@/lib/contracts/griddlePremiumAbi';
-import { wordTokenAbi } from '@/lib/contracts/wordTokenAbi';
+import { griddlePremiumAbi, usdcAbi, wordOracleAbi } from '@/lib/contracts/griddlePremiumAbi';
 import {
   getGriddlePremiumAddress,
-  getWordTokenAddress,
+  getUsdcAddress,
   CHAIN_ID,
 } from '@/lib/contracts/addresses';
 import { trackEvent } from '@/lib/funnel/client';
@@ -21,32 +20,33 @@ interface PremiumCryptoFlowProps {
 
 type Phase =
   | 'idle' // waiting for user to click Unlock
-  | 'quoting' // fetching oracle price + token amount
-  | 'signing' // waiting for permit signature
+  | 'quoting' // fetching oracle price to floor minWordOut
+  | 'signing' // waiting for USDC permit signature
   | 'submitting' // waiting for on-chain tx broadcast
   | 'verifying' // waiting for server to verify the tx
   | 'done' // unlock confirmed
   | 'error';
 
 /**
- * The real crypto unlock flow. Lives inside WalletProvider so it can use
- * wagmi hooks (`useAccount`, `useSignTypedData`, `useWriteContract`).
- * Lazy-imported via `LazyPremiumCryptoFlow` so the wagmi bundle only
- * loads when the user actually clicks "Pay with crypto".
+ * Crypto unlock flow (M5-usdc-premium). The user pays $5 USDC — the
+ * contract atomically swaps USDC → $WORD via Uniswap Universal Router
+ * and burns the $WORD in the same transaction. The player never needs
+ * to hold $WORD directly.
  *
  * Steps:
- *   1. Quote — read WordOracle.getWordUsdPrice() + UNLOCK_USD + SLIPPAGE_PCT
- *      from the contract to compute the target $WORD amount. We send the
- *      midpoint so the contract's symmetric ±15% band is centered on it.
- *   2. Sign permit — ERC-2612 EIP-712 signTypedData over the $WORD
- *      permit domain. The signature authorizes GriddlePremium to pull
- *      exactly `tokenAmount` $WORD for one hour.
- *   3. Submit — call `unlockWithPermit(tokenAmount, deadline, v, r, s)`.
- *      Contract verifies the permit, burns the tokens, flips isPremium.
+ *   1. Quote — read WordOracle.getWordUsdPrice() client-side and floor
+ *      `minWordOut` at 95% of the oracle-derived expected $WORD. The
+ *      contract enforces the same 5% floor on-chain so the client only
+ *      needs to stay inside it.
+ *   2. Sign USDC permit — ERC-2612 EIP-712 signature over native Base
+ *      USDC's domain (`name: "USD Coin"`, `version: "2"`). Authorizes
+ *      GriddlePremium to pull exactly $5 USDC for one hour.
+ *   3. Submit — call `unlockWithUsdc(deadline, v, r, s, minWordOut)`.
+ *      Contract pulls USDC, swaps to $WORD, burns the proceeds, flips
+ *      isPremium.
  *   4. Verify — POST the tx hash to /api/premium/verify. The server
- *      reads the receipt, parses the UnlockedWithBurn event, and
- *      upserts the premium_users row. On success it echoes back the
- *      wallet that paid, which we hand to `onUnlocked`.
+ *      reads the receipt, parses the UnlockedWithUsdcSwap event, and
+ *      upserts the premium_users row with `usdc_amount` + `word_burned`.
  */
 export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowProps) {
   const { address, isConnected } = useAccount();
@@ -58,8 +58,8 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const premiumAddress = getGriddlePremiumAddress();
-  const wordAddress = getWordTokenAddress();
-  const contractsReady = !!premiumAddress && !!wordAddress;
+  const usdcAddress = getUsdcAddress();
+  const contractsReady = !!premiumAddress;
 
   const handleUnlock = async () => {
     setErrorMessage(null);
@@ -69,30 +69,22 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       setPhase('error');
       return;
     }
-    if (!premiumAddress || !wordAddress || !publicClient) {
+    if (!premiumAddress || !publicClient) {
       setErrorMessage('Crypto checkout is not configured yet.');
       setPhase('error');
       return;
     }
 
-    // Track the current phase in a local variable so the catch block
-    // can read it synchronously. `phase` from useState is closed over
-    // at render time and `setPhase` schedules updates for the next
-    // render — the catch block on the first attempt would otherwise
-    // always see 'idle', collapsing every failure into reason='unknown'.
-    // Assignments are inlined (not hidden behind a helper) so TypeScript
-    // can see every write and not narrow the type to the initial literal.
+    // Phase mirror that the catch can read synchronously — setPhase is
+    // async and `phase` from useState would be stale on the first throw.
     let currentPhase: Phase = 'idle';
 
     try {
-      // --- Step 1: quote --------------------------------------------------
+      // --- Step 1: quote + floor minWordOut ------------------------------
       currentPhase = 'quoting';
       setPhase('quoting');
 
-      // SLIPPAGE_PCT is not fetched — the client sends the oracle midpoint
-      // and the contract's symmetric ±15% band handles drift without us
-      // needing to know the exact tolerance value here.
-      const [oracleAddress, unlockUsd] = await Promise.all([
+      const [oracleAddress, unlockUsd, usdcAmount] = await Promise.all([
         publicClient.readContract({
           address: premiumAddress,
           abi: griddlePremiumAbi,
@@ -102,6 +94,11 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
           address: premiumAddress,
           abi: griddlePremiumAbi,
           functionName: 'UNLOCK_USD',
+        }),
+        publicClient.readContract({
+          address: premiumAddress,
+          abi: griddlePremiumAbi,
+          functionName: 'USDC_UNLOCK_AMOUNT',
         }),
       ]);
 
@@ -115,40 +112,36 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         throw new Error('Oracle returned zero price. Try again in a moment.');
       }
 
-      // Mirror the contract's math so the amount we sign maps 1:1 to
-      // what `unlockWithPermit` expects:
-      //     expected   = (UNLOCK_USD * 1e18) / price
-      //     minTokens  = expected * (100 - SLIPPAGE_PCT) / 100
-      //     maxTokens  = expected * (100 + SLIPPAGE_PCT) / 100
-      // We send the midpoint — the contract's symmetric band gives us
-      // ±15% headroom on either side, so a small oracle drift between
-      // quote and submit doesn't revert the tx.
+      // Mirror the contract's floor:
+      //     expected   = (UNLOCK_USD * 1e18) / price      (18-dec $WORD wei)
+      //     minWordOut = expected * 95 / 100              (5% slippage floor)
+      // Client can send any value >= minWordOut; contract reverts otherwise.
       const expected = (unlockUsd * 10n ** 18n) / price;
-      const tokenAmount = expected;
+      const minWordOut = (expected * 95n) / 100n;
 
-      // --- Step 2: sign permit -------------------------------------------
+      // --- Step 2: sign USDC permit --------------------------------------
       currentPhase = 'signing';
       setPhase('signing');
 
       const [nonce, tokenName, tokenVersion] = await Promise.all([
         publicClient.readContract({
-          address: wordAddress,
-          abi: wordTokenAbi,
+          address: usdcAddress,
+          abi: usdcAbi,
           functionName: 'nonces',
           args: [address],
         }),
         publicClient.readContract({
-          address: wordAddress,
-          abi: wordTokenAbi,
+          address: usdcAddress,
+          abi: usdcAbi,
           functionName: 'name',
         }),
         publicClient
           .readContract({
-            address: wordAddress,
-            abi: wordTokenAbi,
+            address: usdcAddress,
+            abi: usdcAbi,
             functionName: 'version',
           })
-          .catch(() => '1'), // some ERC-2612 tokens omit version() and default to '1'
+          .catch(() => '2'), // native Base USDC's EIP-712 domain version is "2"
       ]);
 
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
@@ -158,7 +151,7 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
           name: tokenName,
           version: tokenVersion,
           chainId: CHAIN_ID,
-          verifyingContract: wordAddress,
+          verifyingContract: usdcAddress,
         },
         types: {
           Permit: [
@@ -173,7 +166,7 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         message: {
           owner: address,
           spender: premiumAddress,
-          value: tokenAmount,
+          value: usdcAmount,
           nonce,
           deadline,
         },
@@ -184,31 +177,23 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       const s = (`0x${sig.slice(64, 128)}`) as `0x${string}`;
       const v = parseInt(sig.slice(128, 130), 16);
 
-      // --- Step 3: submit tx ---------------------------------------------
+      // --- Step 3: submit tx --------------------------------------------
       currentPhase = 'submitting';
       setPhase('submitting');
 
-      // checkout_started fires here (after the permit is signed, just
-      // before the on-chain write) so the crypto path has a meaningful
-      // intermediate stage — clicking "Pay with crypto" no longer maps
-      // 1:1 to started, which matched fiat and skewed the funnel.
       trackEvent({ name: 'checkout_started', method: 'crypto' });
 
       const txHash = await writeContractAsync({
         address: premiumAddress,
         abi: griddlePremiumAbi,
-        functionName: 'unlockWithPermit',
-        args: [tokenAmount, deadline, v, r, s],
+        functionName: 'unlockWithUsdc',
+        args: [deadline, v, r, s, minWordOut],
       });
 
-      // --- Step 4: verify server-side ------------------------------------
+      // --- Step 4: verify server-side -----------------------------------
       currentPhase = 'verifying';
       setPhase('verifying');
 
-      // Server-verify independently reads the receipt and parses the
-      // UnlockedWithBurn event before granting premium. Retry once on
-      // "tx not yet indexed" (404) — a quick sequencer can beat our
-      // provider to the receipt by a few seconds.
       let verifyResult: Response | null = null;
       for (let attempt = 0; attempt < 4; attempt++) {
         verifyResult = await fetch('/api/premium/verify', {
@@ -232,13 +217,6 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unlock failed';
       setErrorMessage(message);
-      // Bucket the failure into a reason tag matching the telemetry
-      // endpoint's [a-z0-9_]{1,32} pattern. `currentPhase` is the
-      // local mirror of setPhase — reading `phase` directly here would
-      // see the stale closure value ('idle') because state updates
-      // scheduled inside handleUnlock don't land until next render.
-      // User rejection is detected by the wagmi/viem-standard error
-      // name so cancellations don't inflate the sign_failed bucket.
       const isUserReject =
         err instanceof Error &&
         (err.name === 'UserRejectedRequestError' || /rejected|denied|user rejected/i.test(err.message));
@@ -253,12 +231,6 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
     }
   };
 
-  // Auto-start the flow on mount / connect. If the wallet isn't connected
-  // or the contracts aren't configured, handleUnlock's own guards set
-  // phase='error' with a helpful message and surface the Close button —
-  // without this effect invoking it, the component would hang on
-  // "Preparing…" forever with no way to dismiss (since the Close button
-  // only renders on error state).
   useEffect(() => {
     if (phase === 'idle') {
       handleUnlock();
@@ -273,9 +245,9 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       case 'quoting':
         return 'Getting today’s $WORD price…';
       case 'signing':
-        return 'Sign the permit in your wallet';
+        return 'Sign the $5 USDC permit in your wallet';
       case 'submitting':
-        return 'Burning $WORD on-chain…';
+        return 'Swapping USDC → $WORD and burning…';
       case 'verifying':
         return 'Confirming the burn…';
       case 'done':

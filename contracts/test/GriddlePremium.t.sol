@@ -2,15 +2,22 @@
 pragma solidity 0.8.24;
 
 import { Test } from "forge-std/Test.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { GriddlePremium } from "../src/GriddlePremium.sol";
 import { IWordToken } from "../src/interfaces/IWordToken.sol";
 import { MockWord } from "./mocks/MockWord.sol";
+import { MockUsdc } from "./mocks/MockUsdc.sol";
 import { MockOracle } from "./mocks/MockOracle.sol";
+import { MockPermit2 } from "./mocks/MockPermit2.sol";
+import { MockUniversalRouter } from "./mocks/MockUniversalRouter.sol";
 
 contract GriddlePremiumTest is Test {
     GriddlePremium internal premium;
     MockWord internal word;
+    MockUsdc internal usdc;
     MockOracle internal oracle;
+    MockPermit2 internal permit2;
+    MockUniversalRouter internal router;
 
     address internal owner = makeAddr("owner");
     address internal escrowManager = makeAddr("escrowManager");
@@ -23,95 +30,200 @@ contract GriddlePremiumTest is Test {
     // Oracle price: $0.0001 per $WORD → to hit $5 you need 50,000 $WORD.
     uint256 internal constant PRICE = 1e14;
     uint256 internal constant EXPECTED_AMOUNT = 50_000e18;
+    uint256 internal constant USDC_5 = 5_000_000; // $5 at 6 decimals.
 
     function setUp() public {
         playerPk = 0xA11CE;
         player = vm.addr(playerPk);
 
         word = new MockWord();
+        usdc = new MockUsdc();
         oracle = new MockOracle(PRICE);
-        premium = new GriddlePremium(address(word), address(oracle), escrowManager, owner);
+        permit2 = new MockPermit2();
+        router = new MockUniversalRouter(address(permit2), address(usdc), address(word));
 
-        word.mint(player, 1_000_000e18);
+        premium = new GriddlePremium(
+            address(word),
+            address(usdc),
+            address(router),
+            address(permit2),
+            address(oracle),
+            escrowManager,
+            owner
+        );
+
+        // Mint balances.
+        usdc.mint(player, 1_000_000e6);
         word.mint(escrowManager, 1_000_000e18);
 
+        // Escrow manager pre-approves $WORD allowance for the fiat path.
         vm.prank(escrowManager);
         word.approve(address(premium), type(uint256).max);
+
+        // Owner configures the swap recipe. For the mock UR the
+        // commands blob is a single dummy byte and `inputs[0]` holds
+        // the USDC-in amount.
+        bytes memory commands = hex"00";
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(USDC_5);
+
+        vm.prank(owner);
+        premium.setSwapConfig(commands, inputs);
     }
 
-    // --- Crypto path: unlockWithPermit ------------------------------------
+    // --- Crypto path: unlockWithUsdc --------------------------------------
 
-    function test_unlockWithPermit_happyPath() public {
-        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) = _signPermit(
-            playerPk, address(premium), EXPECTED_AMOUNT
-        );
+    function test_unlockWithUsdc_happyPath() public {
+        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
 
         uint256 supplyBefore = word.totalSupply();
-        uint256 playerBefore = word.balanceOf(player);
+        uint256 playerUsdcBefore = usdc.balanceOf(player);
+
+        uint256 minWordOut = (EXPECTED_AMOUNT * 95) / 100;
 
         vm.prank(player);
-        premium.unlockWithPermit(EXPECTED_AMOUNT, deadline, v, r, s);
+        premium.unlockWithUsdc(deadline, v, r, s, minWordOut);
 
         assertTrue(premium.isPremium(player), "premium flag not set");
-        assertEq(word.totalSupply(), supplyBefore - EXPECTED_AMOUNT, "supply not burned");
-        assertEq(word.balanceOf(player), playerBefore - EXPECTED_AMOUNT, "balance not debited");
+        assertEq(usdc.balanceOf(player), playerUsdcBefore - USDC_5, "USDC not pulled");
+
+        // Mock router mints $WORD at 10,000 per $1 → $5 = 50,000e18,
+        // which is burned in the same tx.
+        assertEq(
+            word.totalSupply(),
+            supplyBefore,
+            "supply delta should be zero: minted-then-burned"
+        );
+        assertEq(word.balanceOf(address(premium)), 0, "contract should hold no $WORD after burn");
     }
 
-    function test_unlockWithPermit_staleOracleReverts() public {
-        // Warp past MAX_ORACLE_AGE (5 min) without touching oracle updatedAt.
+    function test_unlockWithUsdc_staleOracleReverts() public {
         vm.warp(block.timestamp + 10 minutes);
-
-        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) = _signPermit(
-            playerPk, address(premium), EXPECTED_AMOUNT
-        );
+        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
 
         vm.expectRevert(GriddlePremium.StaleOraclePrice.selector);
         vm.prank(player);
-        premium.unlockWithPermit(EXPECTED_AMOUNT, deadline, v, r, s);
+        premium.unlockWithUsdc(deadline, v, r, s, (EXPECTED_AMOUNT * 95) / 100);
     }
 
-    function test_unlockWithPermit_zeroPriceReverts() public {
+    function test_unlockWithUsdc_zeroPriceReverts() public {
         oracle.setPrice(0);
-        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) = _signPermit(
-            playerPk, address(premium), EXPECTED_AMOUNT
-        );
+        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
 
         vm.expectRevert(GriddlePremium.OracleZeroPrice.selector);
         vm.prank(player);
-        premium.unlockWithPermit(EXPECTED_AMOUNT, deadline, v, r, s);
+        premium.unlockWithUsdc(deadline, v, r, s, (EXPECTED_AMOUNT * 95) / 100);
     }
 
-    function test_unlockWithPermit_amountTooLowReverts() public {
-        // min = expected * 0.85 = 42,500e18. Use 40,000e18 to be below.
-        uint256 badAmount = 40_000e18;
+    function test_unlockWithUsdc_minBelowFloorReverts() public {
+        // Floor = expected * 0.95 = 47,500e18. 40,000e18 is below.
+        uint256 tooLow = 40_000e18;
         (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
-            _signPermit(playerPk, address(premium), badAmount);
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
 
-        vm.expectRevert(GriddlePremium.TokenAmountOutOfBand.selector);
+        vm.expectRevert(GriddlePremium.MinWordOutTooLow.selector);
         vm.prank(player);
-        premium.unlockWithPermit(badAmount, deadline, v, r, s);
+        premium.unlockWithUsdc(deadline, v, r, s, tooLow);
     }
 
-    function test_unlockWithPermit_amountTooHighReverts() public {
-        // max = expected * 1.15 = 57,500e18. Use 60,000e18 to be above.
-        uint256 badAmount = 60_000e18;
-        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
-            _signPermit(playerPk, address(premium), badAmount);
+    function test_unlockWithUsdc_routerDeliversTooLittleReverts() public {
+        // Router delivers only 1% of expected → minWordOut check trips.
+        router.setWordPerUsdc(1e14);
 
-        vm.expectRevert(GriddlePremium.TokenAmountOutOfBand.selector);
+        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
+
+        uint256 minWordOut = (EXPECTED_AMOUNT * 95) / 100;
+
+        vm.expectRevert(GriddlePremium.SwapProducedInsufficientWord.selector);
         vm.prank(player);
-        premium.unlockWithPermit(badAmount, deadline, v, r, s);
+        premium.unlockWithUsdc(deadline, v, r, s, minWordOut);
     }
 
-    function test_unlockWithPermit_withinSlippageBand() public {
-        // min = 42_500e18; test at exactly min.
-        uint256 minAmount = 42_500e18;
+    function test_unlockWithUsdc_routerSwallowsOutputReverts() public {
+        router.setSwallowOutput(true);
+
         (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
-            _signPermit(playerPk, address(premium), minAmount);
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
+
+        vm.expectRevert(GriddlePremium.SwapProducedInsufficientWord.selector);
+        vm.prank(player);
+        premium.unlockWithUsdc(deadline, v, r, s, (EXPECTED_AMOUNT * 95) / 100);
+    }
+
+    function test_unlockWithUsdc_routerRevertPropagates() public {
+        router.setShouldRevert(true);
+
+        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
+
+        vm.expectRevert(bytes("UR_FORCED_REVERT"));
+        vm.prank(player);
+        premium.unlockWithUsdc(deadline, v, r, s, (EXPECTED_AMOUNT * 95) / 100);
+    }
+
+    function test_unlockWithUsdc_swapConfigUnset_reverts() public {
+        // Deploy fresh instance without setSwapConfig so the recipe is empty.
+        GriddlePremium fresh = new GriddlePremium(
+            address(word),
+            address(usdc),
+            address(router),
+            address(permit2),
+            address(oracle),
+            escrowManager,
+            owner
+        );
+
+        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            _signUsdcPermit(playerPk, address(fresh), USDC_5);
+
+        vm.expectRevert(GriddlePremium.SwapConfigNotSet.selector);
+        vm.prank(player);
+        fresh.unlockWithUsdc(deadline, v, r, s, (EXPECTED_AMOUNT * 95) / 100);
+    }
+
+    function test_unlockWithUsdc_permitReplayReverts() public {
+        (uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            _signUsdcPermit(playerPk, address(premium), USDC_5);
 
         vm.prank(player);
-        premium.unlockWithPermit(minAmount, deadline, v, r, s);
-        assertTrue(premium.isPremium(player));
+        premium.unlockWithUsdc(deadline, v, r, s, (EXPECTED_AMOUNT * 95) / 100);
+
+        // Replaying the same permit: USDC's nonce has advanced, signature is invalid.
+        vm.expectRevert();
+        vm.prank(player);
+        premium.unlockWithUsdc(deadline, v, r, s, (EXPECTED_AMOUNT * 95) / 100);
+    }
+
+    function test_setSwapConfig_validationReverts() public {
+        bytes memory emptyCmds;
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(USDC_5);
+
+        vm.prank(owner);
+        vm.expectRevert(GriddlePremium.SwapConfigNotSet.selector);
+        premium.setSwapConfig(emptyCmds, inputs);
+
+        bytes memory cmds = hex"0001";
+        bytes[] memory wrongLen = new bytes[](1);
+        wrongLen[0] = abi.encode(USDC_5);
+
+        vm.prank(owner);
+        vm.expectRevert(GriddlePremium.SwapInputsMismatch.selector);
+        premium.setSwapConfig(cmds, wrongLen);
+    }
+
+    function test_setSwapConfig_nonOwnerReverts() public {
+        bytes memory cmds = hex"00";
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(USDC_5);
+
+        vm.prank(stranger);
+        vm.expectRevert();
+        premium.setSwapConfig(cmds, inputs);
     }
 
     // --- Fiat path: unlockForUser + burnEscrowed --------------------------
@@ -255,9 +367,86 @@ contract GriddlePremiumTest is Test {
         premium.setOracle(address(0));
     }
 
+    // --- Sweep / rescue ---------------------------------------------------
+
+    function test_sweepStrandedWord_respectsPendingEscrow() public {
+        bytes32 externalId = keccak256("stripe_session_sweep_1");
+        uint256 escrowed = 5_000e18;
+        vm.prank(escrowManager);
+        premium.unlockForUser(player, escrowed, externalId);
+
+        // Donate extra $WORD directly to the contract (griefing-style).
+        uint256 donation = 2_000e18;
+        word.mint(address(premium), donation);
+
+        vm.prank(owner);
+        premium.sweepStrandedWord(treasury);
+
+        assertEq(word.balanceOf(treasury), donation, "only donation should land at treasury");
+        assertEq(
+            word.balanceOf(address(premium)),
+            escrowed,
+            "escrow amount must remain in contract"
+        );
+    }
+
+    function test_sweepStrandedWord_revertsWhenNothingStranded() public {
+        bytes32 externalId = keccak256("stripe_session_sweep_2");
+        vm.prank(escrowManager);
+        premium.unlockForUser(player, 1_000e18, externalId);
+
+        vm.prank(owner);
+        vm.expectRevert(GriddlePremium.NothingToSweep.selector);
+        premium.sweepStrandedWord(treasury);
+    }
+
+    function test_sweepStrandedWord_nonOwnerReverts() public {
+        word.mint(address(premium), 1_000e18);
+        vm.prank(stranger);
+        vm.expectRevert();
+        premium.sweepStrandedWord(treasury);
+    }
+
+    function test_sweepStrandedUsdc_sweepsAny() public {
+        // Send USDC straight to contract (simulates stuck balance).
+        usdc.mint(address(premium), 12_000_000);
+
+        vm.prank(owner);
+        premium.sweepStrandedUsdc(treasury);
+
+        assertEq(usdc.balanceOf(treasury), 12_000_000);
+        assertEq(usdc.balanceOf(address(premium)), 0);
+    }
+
+    function test_sweepStrandedUsdc_revertsWhenEmpty() public {
+        vm.prank(owner);
+        vm.expectRevert(GriddlePremium.NothingToSweep.selector);
+        premium.sweepStrandedUsdc(treasury);
+    }
+
+    function test_totalPendingEscrow_updatesOnEachLifecycle() public {
+        bytes32 id1 = keccak256("A");
+        bytes32 id2 = keccak256("B");
+
+        vm.startPrank(escrowManager);
+        premium.unlockForUser(player, 1_000e18, id1);
+        premium.unlockForUser(player, 2_000e18, id2);
+        vm.stopPrank();
+
+        assertEq(premium.totalPendingEscrow(), 3_000e18);
+
+        vm.warp(block.timestamp + 31 days);
+        premium.burnEscrowed(id1);
+        assertEq(premium.totalPendingEscrow(), 2_000e18);
+
+        vm.prank(owner);
+        premium.refundEscrow(id2, treasury);
+        assertEq(premium.totalPendingEscrow(), 0);
+    }
+
     // --- Helpers ----------------------------------------------------------
 
-    function _signPermit(uint256 pk, address spender, uint256 amount)
+    function _signUsdcPermit(uint256 pk, address spender, uint256 amount)
         internal
         view
         returns (uint256 deadline, uint8 v, bytes32 r, bytes32 s)
@@ -269,11 +458,11 @@ contract GriddlePremiumTest is Test {
         );
         bytes32 structHash = keccak256(
             abi.encode(
-                PERMIT_TYPEHASH, ownerAddr, spender, amount, word.nonces(ownerAddr), deadline
+                PERMIT_TYPEHASH, ownerAddr, spender, amount, usdc.nonces(ownerAddr), deadline
             )
         );
         bytes32 digest =
-            keccak256(abi.encodePacked("\x19\x01", word.DOMAIN_SEPARATOR(), structHash));
+            keccak256(abi.encodePacked("\x19\x01", usdc.DOMAIN_SEPARATOR(), structHash));
         (v, r, s) = vm.sign(pk, digest);
     }
 }
