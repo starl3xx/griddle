@@ -10,6 +10,8 @@ import { SolveModal } from '@/components/SolveModal';
 import { TutorialModal } from '@/components/TutorialModal';
 import { HomeTiles } from '@/components/HomeTiles';
 import { FoundWords } from '@/components/FoundWords';
+import { GameTimer } from '@/components/GameTimer';
+import { StartGate } from '@/components/StartGate';
 import { BrowseModal, type BrowseTab } from '@/components/BrowseModal';
 import { CreateProfileModal } from '@/components/CreateProfileModal';
 import { PremiumGateModal } from '@/components/PremiumGateModal';
@@ -66,6 +68,14 @@ interface GameClientProps {
    * whole attempt with the assisted UI before the async fetch lands.
    */
   initialUnassistedMode: boolean;
+  /**
+   * `puzzle_loads.started_at` for this session + today's puzzle,
+   * serialized as ISO8601. Non-null means the player already pressed
+   * Start on an earlier visit — skip the Start gate, resume the timer
+   * from the stored stamp. Null for a first visit or a session that
+   * hasn't started this puzzle yet.
+   */
+  initialStartedAt: string | null;
 }
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
@@ -77,7 +87,12 @@ const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
  * keyboard input, telemetry, and the /api/solve round-trip all live
  * on this side of the server/client boundary.
  */
-export default function GameClient({ initialPuzzle, initialSessionWallet, initialUnassistedMode }: GameClientProps) {
+export default function GameClient({
+  initialPuzzle,
+  initialSessionWallet,
+  initialUnassistedMode,
+  initialStartedAt,
+}: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
 
   // Refs so handleWalletConnect (empty deps array) always reads the
@@ -101,22 +116,72 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
   const [activePuzzle, setActivePuzzle] = useState<InitialPuzzle>(initialPuzzle);
   const isArchive = activePuzzle.dayNumber !== initialPuzzle.dayNumber;
 
+  // ── Start gate ────────────────────────────────────────────────────
+  // `startedAt` is the epoch-ms timestamp of the player's Start press
+  // for the CURRENT active puzzle. Null means the Start gate is still
+  // showing — the grid is blurred, input is disabled, and the timer
+  // hasn't begun.
+  //
+  // Seeded from `initialStartedAt` (server-side read of
+  // puzzle_loads.started_at during SSR) so a refreshed / resumed
+  // session skips the gate and the visible timer picks up where it
+  // left off.
+  const [startedAt, setStartedAt] = useState<number | null>(
+    initialStartedAt != null ? new Date(initialStartedAt).getTime() : null,
+  );
+  const [startPending, setStartPending] = useState(false);
+
+  // Memoized epoch ms for today's puzzle so effects can restore the
+  // Start state when the player returns from an archive puzzle
+  // without re-parsing the ISO string each time.
+  const todayStartedAtMs = initialStartedAt != null ? new Date(initialStartedAt).getTime() : null;
+
   const loadArchivePuzzle = useCallback(async (dayNumber: number) => {
     if (dayNumber === initialPuzzle.dayNumber) {
       setActivePuzzle(initialPuzzle);
+      setStartedAt(todayStartedAtMs);
       return;
     }
     try {
       const res = await fetch(`/api/puzzle/${dayNumber}`);
       if (!res.ok) return;
-      const data = (await res.json()) as InitialPuzzle;
-      setActivePuzzle(data);
+      const data = (await res.json()) as InitialPuzzle & { startedAt: string | null };
+      setActivePuzzle({ dayNumber: data.dayNumber, date: data.date, grid: data.grid });
+      setStartedAt(data.startedAt != null ? new Date(data.startedAt).getTime() : null);
     } catch {/* best-effort */}
-  }, [initialPuzzle]);
+  }, [initialPuzzle, todayStartedAtMs]);
 
   const returnToToday = useCallback(() => {
     setActivePuzzle(initialPuzzle);
-  }, [initialPuzzle]);
+    setStartedAt(todayStartedAtMs);
+  }, [initialPuzzle, todayStartedAtMs]);
+
+  // Start press → POST /api/puzzle/start. On success, seed startedAt
+  // with the server's authoritative timestamp. On failure, fall back
+  // to the client clock so gameplay isn't blocked by a flaky POST —
+  // the solve route will use loaded_at in that case, which is strictly
+  // more generous (slightly inflated time) but keeps the UX moving.
+  const handleStart = useCallback(async () => {
+    if (startPending) return;
+    setStartPending(true);
+    try {
+      const res = await fetch('/api/puzzle/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dayNumber: activePuzzle.dayNumber }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { startedAt: string };
+        setStartedAt(new Date(data.startedAt).getTime());
+        return;
+      }
+    } catch {
+      // fall through
+    } finally {
+      setStartPending(false);
+    }
+    setStartedAt(Date.now());
+  }, [activePuzzle.dayNumber, startPending]);
 
   // ── Persisted crumbs ─────────────────────────────────────────────
   // Fetch any previously saved crumbs whenever the active puzzle
@@ -317,7 +382,10 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
     grid: activePuzzle.grid,
     onSolveAttempt: handleSolveAttempt,
     onSolved: handleSolved,
-    disabled: showTutorial,
+    // Input is inert while the tutorial overlay is up OR the Start
+    // gate hasn't been cleared — no keystrokes should fill the grid
+    // behind a blocking surface.
+    disabled: showTutorial || startedAt == null,
     unassisted: unassistedMode,
     onCrumbFound: handleCrumbFound,
   });
@@ -878,40 +946,70 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
           </button>
         </header>
 
-        <FoundWords words={state.foundWords} />
+        {/* Visible solve timer. Hidden before Start and once the solve
+            modal is open — the modal shows the authoritative server
+            time there. While `state.solved` is flipping to true during
+            the reveal animation, we freeze the timer client-side so
+            the value stops climbing a beat before the modal shows. */}
+        {startedAt != null && !solveResult && (
+          <GameTimer startedAt={startedAt} running={!state.solved} />
+        )}
 
-        <Grid
-          grid={activePuzzle.grid}
-          cellStates={state.cellStates}
-          sequenceByCell={state.sequenceByCell}
-          path={state.path}
-          shakeSignal={state.shakeSignal}
-          solved={state.solved}
-          onCellTap={actions.tapCell}
-          onReorderComplete={handleReorderComplete}
-        />
-
-        <WordSlots letters={state.letters} />
-
-        <div className="flex gap-2 mt-1">
-          <button
-            type="button"
-            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-            onClick={actions.backspace}
-            disabled={state.pendingSolve}
+        {/* Grid + slots + action buttons get blurred behind the Start
+            gate. pointer-events-none on the inner container blocks tap
+            interaction while blurred; useGriddle's `disabled` blocks
+            keyboard input. The overlay lives as a sibling (not inside
+            the blurred div) so the Start button itself stays
+            interactive and crisp. */}
+        <div className="relative w-full flex flex-col items-center gap-6">
+          <div
+            className={
+              startedAt == null
+                ? 'w-full flex flex-col items-center gap-6 blur-md pointer-events-none select-none'
+                : 'w-full flex flex-col items-center gap-6'
+            }
+            aria-hidden={startedAt == null}
           >
-            <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
-            Backspace
-          </button>
-          <button
-            type="button"
-            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-            onClick={actions.reset}
-            disabled={state.pendingSolve}
-          >
-            <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
-            Reset
-          </button>
+            <FoundWords words={state.foundWords} />
+
+            <Grid
+              grid={activePuzzle.grid}
+              cellStates={state.cellStates}
+              sequenceByCell={state.sequenceByCell}
+              path={state.path}
+              shakeSignal={state.shakeSignal}
+              solved={state.solved}
+              onCellTap={actions.tapCell}
+              onReorderComplete={handleReorderComplete}
+            />
+
+            <WordSlots letters={state.letters} />
+
+            <div className="flex gap-2 mt-1">
+              <button
+                type="button"
+                className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+                onClick={actions.backspace}
+                disabled={state.pendingSolve}
+              >
+                <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
+                Backspace
+              </button>
+              <button
+                type="button"
+                className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+                onClick={actions.reset}
+                disabled={state.pendingSolve}
+              >
+                <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
+                Reset
+              </button>
+            </div>
+          </div>
+
+          {startedAt == null && (
+            <StartGate onStart={handleStart} pending={startPending} />
+          )}
         </div>
 
         <HomeTiles onTileClick={handleTileClick} />
