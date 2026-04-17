@@ -34,6 +34,14 @@ interface PatchBody {
   handle?: string | null;
   email?: string | null;
   premium?: boolean;
+  /**
+   * Optional free-form reason (max 200 chars) attached to a premium
+   * grant. Mirrors the Grant tab's reason field so operators can say
+   * why a Users-tab grant was issued ("launch contributor", "support
+   * comp", etc.). Ignored when `premium: false` or when `premium` is
+   * absent.
+   */
+  reason?: string;
 }
 
 function parseId(param: string): number | null {
@@ -118,10 +126,15 @@ export async function PATCH(
       // table used by the game's premium check; fall back to the
       // projected handle. The pre-write guard already ensured at
       // least one anchor exists.
+      // Forward the operator-supplied reason when present; fall back
+      // to 'admin UI' so older clients keep the same audit trail they
+      // had before this PATCH learned about reasons.
+      const trimmedReason = (body.reason ?? '').trim().slice(0, 200);
+      const grantReason = trimmedReason || 'admin UI';
       if (existing.wallet) {
-        await grantPremium({ wallet: existing.wallet, grantedBy: admin, reason: 'admin UI' });
+        await grantPremium({ wallet: existing.wallet, grantedBy: admin, reason: grantReason });
       } else if (projectedHandle) {
-        await grantPremium({ handle: projectedHandle, grantedBy: admin, reason: 'admin UI' });
+        await grantPremium({ handle: projectedHandle, grantedBy: admin, reason: grantReason });
       }
     } else {
       await revokePremiumForProfile(id);

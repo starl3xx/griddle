@@ -3,10 +3,28 @@ import { requireAdminWallet } from '@/lib/admin';
 import { db } from '@/lib/db/client';
 import { profiles, premiumUsers } from '@/lib/db/schema';
 import { ilike, or, eq, sql, desc } from 'drizzle-orm';
+import { getAnonSessions } from '@/lib/db/queries';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * GET /api/admin/users?type=all|registered|anon&q=&page=&limit=
+ *
+ * Unified user listing. `registered` returns `profiles` rows;
+ * `anon` returns session_ids with solves but no profile or wallet;
+ * `all` pages contiguously through registered rows first and then
+ * overflows into anon rows. The anon rows carry a synthetic
+ * `kind: 'anon'` discriminator so the client can render them as
+ * `anon:{sessionId.slice(0,8)}` identities.
+ *
+ * Pagination semantics for `all`: pages 1..ceil(regTotal/limit)
+ * yield registered rows; the last page of registered plus the first
+ * page of anon can share a boundary page when registered total
+ * doesn't divide evenly into `limit`. Each page never returns more
+ * than `limit` rows, and `pages = ceil((reg+anon)/limit)` lines up
+ * with the actual row count.
+ */
 export async function GET(req: Request): Promise<NextResponse> {
   const admin = await requireAdminWallet();
   if (!admin) {
@@ -15,65 +33,160 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get('q') ?? '').trim();
+  const typeParam = searchParams.get('type') ?? 'all';
+  const type: 'all' | 'registered' | 'anon' =
+    typeParam === 'registered' || typeParam === 'anon' ? typeParam : 'all';
 
-  // Guard against NaN from non-numeric params
   const rawPage  = parseInt(searchParams.get('page')  ?? '1',  10);
   const rawLimit = parseInt(searchParams.get('limit') ?? '50', 10);
   const page  = Number.isFinite(rawPage)  ? Math.max(1,   rawPage)        : 1;
   const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(10, rawLimit)) : 50;
-  const offset = (page - 1) * limit;
+  const startOffset = (page - 1) * limit;
 
-  const searchTerm = q ? `%${q}%` : null;
-
-  const where = searchTerm
-    ? or(
-        ilike(profiles.wallet, searchTerm),
-        ilike(profiles.handle, searchTerm),
-      )
-    : undefined;
-
-  const [rows, countResult] = await Promise.all([
-    db
-      .select({
-        id: profiles.id,
-        handle: profiles.handle,
-        wallet: profiles.wallet,
-        email: profiles.email,
-        emailVerifiedAt: profiles.emailVerifiedAt,
-        avatarUrl: profiles.avatarUrl,
-        premiumSource: profiles.premiumSource,
-        // Also select the actual source from premium_users (not just unlockedAt)
-        premiumUsersSource: premiumUsers.source,
-        createdAt: profiles.createdAt,
-        premiumUnlockedAt: premiumUsers.unlockedAt,
-      })
-      .from(profiles)
-      .leftJoin(premiumUsers, eq(profiles.wallet, premiumUsers.wallet))
-      .where(where)
-      .orderBy(desc(profiles.createdAt))
-      .limit(limit)
-      .offset(offset),
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(profiles)
-      .where(where),
+  // Totals first — needed for pagination math whether we return
+  // registered, anon, or both. Run the two count queries in
+  // parallel; they're on different tables and fully independent.
+  const [registeredTotal, anonTotal] = await Promise.all([
+    type === 'anon'       ? Promise.resolve(0) : countRegistered({ q }),
+    type === 'registered' ? Promise.resolve(0) : countAnon({ q }),
   ]);
 
-  const total = Number(countResult[0]?.count ?? 0);
+  // Work out how many rows from each source this page should contain.
+  let regOffset = 0, regTake = 0;
+  let anonOffset = 0, anonTake = 0;
 
-  return NextResponse.json({
-    users: rows.map((r) => ({
-      id: r.id,
-      handle: r.handle,
-      wallet: r.wallet,
-      email: r.email,
-      emailVerifiedAt: r.emailVerifiedAt,
-      avatarUrl: r.avatarUrl,
-      premium: !!(r.premiumSource || r.premiumUnlockedAt),
-      // Use the actual source column from premium_users, not a fabricated string
-      premiumSource: r.premiumSource ?? r.premiumUsersSource ?? null,
-      createdAt: r.createdAt,
+  if (type === 'registered') {
+    regOffset = startOffset;
+    regTake = limit;
+  } else if (type === 'anon') {
+    anonOffset = startOffset;
+    anonTake = limit;
+  } else {
+    // 'all' — logically one list: registered rows 0..registeredTotal-1
+    // followed by anon rows 0..anonTotal-1. Compute what portion of
+    // this page's window [startOffset, startOffset+limit) falls in
+    // each half and query each half at its own offset. `regTake` +
+    // `anonTake` is always <= `limit`, so the page never exceeds
+    // its row budget — traced by hand against the canonical 100+100
+    // at limit=50 case (pages of 50/50/50/50) and the uneven 75+75
+    // case (pages of 50, 25+25, 50 anon).
+    const regEnd   = Math.min(startOffset + limit, registeredTotal);
+    regOffset = Math.min(startOffset, registeredTotal);
+    regTake   = Math.max(0, regEnd - regOffset);
+
+    // Whatever part of the window is past the registered total spills
+    // into anon, starting at the corresponding anon offset. Cap the
+    // take at the remaining anon rows so a request like "page 1,
+    // limit=50" against 5 anon rows doesn't ask the DB for 45 rows
+    // it'll never return.
+    const spillStart = Math.max(startOffset, registeredTotal);
+    anonOffset = spillStart - registeredTotal;
+    const anonRemaining = Math.max(0, anonTotal - anonOffset);
+    anonTake = Math.min(Math.max(0, (startOffset + limit) - spillStart), anonRemaining);
+  }
+
+  // Parallelize the row fetches — they depend on the counts
+  // computed above but are independent of each other.
+  //
+  // Count-phase vs fetch-phase snapshot: the pagination math uses
+  // `registeredTotal` / `anonTotal` from the count phase, and those
+  // same values flow into `counts` in the response — so the page
+  // returned is internally consistent. If a row is inserted or
+  // deleted in the ~ms between the two phases, this page might show
+  // one fewer/extra row than the total would predict, but the next
+  // refresh converges. Acceptable for a single-operator admin
+  // endpoint; not worth wrapping in a REPEATABLE READ transaction.
+  // `anonResult.total` is intentionally ignored for the same reason.
+  const [registeredRows, anonResult] = await Promise.all([
+    regTake > 0
+      ? listRegistered({ q, offset: regOffset, limit: regTake })
+      : Promise.resolve([] as Awaited<ReturnType<typeof listRegistered>>),
+    anonTake > 0
+      ? getAnonSessions({ offset: anonOffset, limit: anonTake, search: q || undefined })
+      : Promise.resolve({ rows: [], total: anonTotal }),
+  ]);
+
+  const users = [
+    ...registeredRows.map((r) => ({ ...r, kind: 'registered' as const })),
+    ...anonResult.rows.map((r) => ({
+      kind: 'anon' as const,
+      sessionId: r.sessionId,
+      solves: r.solves,
+      firstSeen: r.firstSeen,
+      lastActive: r.lastActive,
     })),
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+  ];
+
+  const total = registeredTotal + anonTotal;
+  return NextResponse.json({
+    users,
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    counts: { registered: registeredTotal, anon: anonTotal },
   });
+}
+
+async function listRegistered(opts: { q: string; offset: number; limit: number }) {
+  const searchTerm = opts.q ? `%${opts.q}%` : null;
+  const where = searchTerm
+    ? or(ilike(profiles.wallet, searchTerm), ilike(profiles.handle, searchTerm))
+    : undefined;
+  const rows = await db
+    .select({
+      id: profiles.id,
+      handle: profiles.handle,
+      wallet: profiles.wallet,
+      email: profiles.email,
+      emailVerifiedAt: profiles.emailVerifiedAt,
+      avatarUrl: profiles.avatarUrl,
+      premiumSource: profiles.premiumSource,
+      premiumUsersSource: premiumUsers.source,
+      createdAt: profiles.createdAt,
+      premiumUnlockedAt: premiumUsers.unlockedAt,
+    })
+    .from(profiles)
+    .leftJoin(premiumUsers, eq(profiles.wallet, premiumUsers.wallet))
+    .where(where)
+    .orderBy(desc(profiles.createdAt))
+    .limit(opts.limit)
+    .offset(opts.offset);
+  return rows.map((r) => ({
+    id: r.id,
+    handle: r.handle,
+    wallet: r.wallet,
+    email: r.email,
+    emailVerifiedAt: r.emailVerifiedAt,
+    avatarUrl: r.avatarUrl,
+    premium: !!(r.premiumSource || r.premiumUnlockedAt),
+    premiumSource: r.premiumSource ?? r.premiumUsersSource ?? null,
+    createdAt: r.createdAt,
+  }));
+}
+
+async function countRegistered(opts: { q: string }): Promise<number> {
+  const searchTerm = opts.q ? `%${opts.q}%` : null;
+  const where = searchTerm
+    ? or(ilike(profiles.wallet, searchTerm), ilike(profiles.handle, searchTerm))
+    : undefined;
+  // Mirror `listRegistered`'s LEFT JOIN so the count matches the row
+  // set the list query produces. Today both are equivalent to a bare
+  // `count(*)` on profiles because `premium_users.wallet` is the PK
+  // and `profiles.wallet` has a unique partial index — so the join
+  // is one-to-(0 or 1). The extra join + DISTINCT is defense in
+  // depth for the day one of those constraints changes.
+  const [row] = await db
+    .select({ count: sql<number>`count(distinct ${profiles.id})` })
+    .from(profiles)
+    .leftJoin(premiumUsers, eq(profiles.wallet, premiumUsers.wallet))
+    .where(where);
+  return Number(row?.count ?? 0);
+}
+
+/**
+ * Count-only variant of the anon-session query — lets the route
+ * compute `registeredTotal + anonTotal` without fetching rows when
+ * this page only needs one source.
+ */
+async function countAnon(opts: { q: string }): Promise<number> {
+  const res = await getAnonSessions({ offset: 0, limit: 0, search: opts.q || undefined });
+  return res.total;
 }

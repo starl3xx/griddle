@@ -540,3 +540,22 @@ export const puzzleCrumbs = pgTable(
       .where(sql`${t.wallet} is not null`),
   }),
 );
+
+/**
+ * Admin-managed operational cost ledger. One row per recurring monthly
+ * expense (Resend, Vercel, Neon, etc.). Edited via the `/admin` → Costs
+ * tab; consumed by Pulse's Revenue section to compute net margin.
+ *
+ * `monthly_usd` is flat per month; Pulse prorates by days-elapsed when
+ * showing MTD. `updated_by` is the admin wallet that last touched the
+ * row — lightweight audit trail.
+ */
+export const adminCosts = pgTable('admin_costs', {
+  id: serial('id').primaryKey(),
+  category: varchar('category', { length: 32 }).notNull(),
+  label: varchar('label', { length: 80 }).notNull(),
+  monthlyUsd: numeric('monthly_usd', { precision: 10, scale: 2 }).notNull().default('0'),
+  notes: varchar('notes', { length: 200 }),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedBy: varchar('updated_by', { length: 42 }),
+});

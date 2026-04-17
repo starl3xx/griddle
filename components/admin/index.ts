@@ -1,4 +1,11 @@
 export { PulseTab } from './PulseTab';
+export { FunnelTab } from './FunnelTab';
+export { RetentionTab } from './RetentionTab';
 export { AnomaliesTab } from './AnomaliesTab';
 export { GrantTab } from './GrantTab';
+export { UsersTab } from './UsersTab';
+export { PuzzlesTab } from './PuzzlesTab';
+export { TransactionsTab } from './TransactionsTab';
+export { CostsTab } from './CostsTab';
+export { UserDossierModal } from './UserDossierModal';
 export { AdminDashboard } from './AdminDashboard';

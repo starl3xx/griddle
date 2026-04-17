@@ -12,6 +12,7 @@ import {
   funnelEvents,
   wordmarks,
   puzzleCrumbs,
+  adminCosts,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { secondsUntilUtcMidnight, formatUsdc6 } from '@/lib/format';
@@ -3164,5 +3165,949 @@ export async function saveCrumb(
     })
     .onConflictDoNothing()
     .returning({ id: puzzleCrumbs.id });
+  return result.length > 0;
+}
+
+// ─── Admin dashboard — aggregate queries ────────────────────────────
+//
+// Everything below this line powers the `/admin` surfaces: Pulse
+// (dashboard overview), Puzzles (content ops), Retention (cohort
+// stickiness), Revenue breakdown, user dossier, anon-player listing,
+// and the op-cost ledger. Kept together so it's obvious what needs
+// updating when adding a new admin card/tab.
+
+import type {
+  FunnelDropOffRow,
+  FunnelEntryPointRow,
+  FunnelTimeToStage,
+} from '@/lib/funnel/types';
+import { scoreWord } from '@/lib/puzzles/difficulty-score';
+import {
+  CRYPTO_FALLBACK_USD,
+  FIAT_PRICE_USD,
+} from '@/lib/admin/revenue-assumptions';
+
+// ── DAU / WAU / MAU and trend series ────────────────────────────────
+
+/**
+ * Daily active users over the last N days. DAU = distinct session_ids
+ * with any solve that day. Uses session_id (not wallet or profile)
+ * because every player — anon, wallet-only, profile-only — has one,
+ * so no identity-mode bias slips into the metric.
+ */
+export async function getDailyActiveSeries(days: number): Promise<Array<{ day: string; dau: number; solves: number }>> {
+  const rows = await db.execute<{ day: string; dau: number; solves: number }>(sql`
+    SELECT
+      to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+      count(distinct session_id)::int AS dau,
+      count(*) filter (where solved = true)::int AS solves
+    FROM solves
+    WHERE created_at >= now() - (${days}::int || ' days')::interval
+    GROUP BY 1
+    ORDER BY 1 ASC
+  `);
+  return (Array.isArray(rows) ? rows : rows.rows) as Array<{ day: string; dau: number; solves: number }>;
+}
+
+/** Current DAU/WAU/MAU with prior-period deltas. */
+export async function getDauWauMau(): Promise<{
+  dau: number; prevDau: number;
+  wau: number; prevWau: number;
+  mau: number; prevMau: number;
+}> {
+  const rows = await db.execute<{
+    dau: number; prev_dau: number;
+    wau: number; prev_wau: number;
+    mau: number; prev_mau: number;
+  }>(sql`
+    SELECT
+      count(distinct session_id) filter (where created_at >= now() - interval '1 day')::int AS dau,
+      count(distinct session_id) filter (where created_at >= now() - interval '2 days' and created_at < now() - interval '1 day')::int AS prev_dau,
+      count(distinct session_id) filter (where created_at >= now() - interval '7 days')::int AS wau,
+      count(distinct session_id) filter (where created_at >= now() - interval '14 days' and created_at < now() - interval '7 days')::int AS prev_wau,
+      count(distinct session_id) filter (where created_at >= now() - interval '30 days')::int AS mau,
+      count(distinct session_id) filter (where created_at >= now() - interval '60 days' and created_at < now() - interval '30 days')::int AS prev_mau
+    FROM solves
+    WHERE created_at >= now() - interval '60 days'
+  `);
+  const arr = Array.isArray(rows) ? rows : rows.rows;
+  const r = arr[0] ?? { dau: 0, prev_dau: 0, wau: 0, prev_wau: 0, mau: 0, prev_mau: 0 };
+  return {
+    dau: r.dau, prevDau: r.prev_dau,
+    wau: r.wau, prevWau: r.prev_wau,
+    mau: r.mau, prevMau: r.prev_mau,
+  };
+}
+
+// ── Puzzle health + difficulty ──────────────────────────────────────
+
+export interface TodayPuzzleHealth {
+  puzzleId: number;
+  dayNumber: number;
+  date: string;
+  answer: string;
+  grid: string;
+  heuristicScore: number;
+  tier: string;
+  solves: number;
+  loads: number;
+  starts: number;
+  /** solves / starts, 0-1. Null when starts = 0. */
+  solveRate: number | null;
+  avgServerMs: number | null;
+  avgClientMs: number | null;
+  wordmarksEarned: number;
+  topCrumbs: Array<{ word: string; count: number }>;
+}
+
+/**
+ * Health snapshot for today's puzzle — populates the Puzzles tab's
+ * "Today" card. Joins solves, puzzle_loads, wordmarks, and
+ * puzzle_crumbs. Min-3-solves floor is applied client-side; this
+ * query returns raw numbers so the UI can decide whether to show
+ * averages or a "too few solves" placeholder.
+ */
+export async function getTodaysPuzzleHealth(): Promise<TodayPuzzleHealth | null> {
+  const today = getCurrentDayNumber();
+  const [puzzle] = await db.select().from(puzzles).where(eq(puzzles.dayNumber, today)).limit(1);
+  if (!puzzle) return null;
+
+  const [stats] = await db.execute<{
+    solves: number;
+    avg_server_ms: number | null;
+    avg_client_ms: number | null;
+  }>(sql`
+    SELECT
+      count(*) filter (where solved = true)::int AS solves,
+      avg(server_solve_ms) filter (where solved = true)::int AS avg_server_ms,
+      avg(client_solve_ms) filter (where solved = true)::int AS avg_client_ms
+    FROM solves
+    WHERE puzzle_id = ${puzzle.id}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const [loadStats] = await db.execute<{ loads: number; starts: number }>(sql`
+    SELECT
+      count(*)::int AS loads,
+      count(*) filter (where started_at is not null)::int AS starts
+    FROM puzzle_loads
+    WHERE puzzle_id = ${puzzle.id}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const [wmRow] = await db.execute<{ count: number }>(sql`
+    SELECT count(*)::int AS count FROM wordmarks WHERE puzzle_id = ${puzzle.id}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const crumbRows = await db.execute<{ word: string; count: number }>(sql`
+    SELECT word, count(*)::int AS count
+    FROM puzzle_crumbs
+    WHERE puzzle_id = ${puzzle.id}
+    GROUP BY word
+    ORDER BY count DESC
+    LIMIT 5
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const heuristic = scoreWord(puzzle.word);
+  const solves = stats?.solves ?? 0;
+  const starts = loadStats?.starts ?? 0;
+
+  return {
+    puzzleId: puzzle.id,
+    dayNumber: puzzle.dayNumber,
+    date: String(puzzle.date),
+    answer: puzzle.word,
+    grid: puzzle.grid,
+    heuristicScore: heuristic.score,
+    tier: heuristic.tier,
+    solves,
+    loads: loadStats?.loads ?? 0,
+    starts,
+    solveRate: starts > 0 ? solves / starts : null,
+    avgServerMs: stats?.avg_server_ms ?? null,
+    avgClientMs: stats?.avg_client_ms ?? null,
+    wordmarksEarned: wmRow?.count ?? 0,
+    topCrumbs: crumbRows,
+  };
+}
+
+export interface PuzzleDifficultyRow {
+  puzzleId: number;
+  dayNumber: number;
+  date: string;
+  answer: string;
+  solves: number;
+  avgMs: number;
+  heuristicScore: number;
+  tier: string;
+}
+
+/**
+ * Puzzles ordered by observed difficulty (avg server_solve_ms). Min-n
+ * floor applied in SQL so a single stray solver can't skew the ranking.
+ * `order='hardest'` sorts ms descending; `'easiest'` ascending.
+ */
+export async function getPuzzleDifficulty(opts: {
+  minSolves?: number;
+  limit?: number;
+  order?: 'hardest' | 'easiest';
+}): Promise<PuzzleDifficultyRow[]> {
+  const minSolves = opts.minSolves ?? 10;
+  const limit = opts.limit ?? 20;
+  const order = opts.order ?? 'hardest';
+  const dir = order === 'hardest' ? sql`DESC` : sql`ASC`;
+  const rows = await db.execute<{
+    puzzle_id: number; day_number: number; date: string; word: string;
+    solves: number; avg_ms: number;
+  }>(sql`
+    SELECT
+      p.id AS puzzle_id,
+      p.day_number,
+      to_char(p.date, 'YYYY-MM-DD') AS date,
+      p.word,
+      count(*)::int AS solves,
+      avg(s.server_solve_ms)::int AS avg_ms
+    FROM solves s
+    JOIN puzzles p ON p.id = s.puzzle_id
+    WHERE s.solved = true
+    GROUP BY p.id, p.day_number, p.date, p.word
+    HAVING count(*) >= ${minSolves}
+    ORDER BY avg(s.server_solve_ms) ${dir}
+    LIMIT ${limit}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  return rows.map((r) => {
+    const h = scoreWord(r.word);
+    return {
+      puzzleId: r.puzzle_id,
+      dayNumber: r.day_number,
+      date: r.date,
+      answer: r.word,
+      solves: r.solves,
+      avgMs: r.avg_ms,
+      heuristicScore: h.score,
+      tier: h.tier,
+    };
+  });
+}
+
+export interface PuzzleCalibrationPoint {
+  puzzleId: number;
+  dayNumber: number;
+  answer: string;
+  heuristic: number;
+  observedAvgMs: number;
+  /** Observed − predicted (from OLS regression line). Signed. */
+  residual: number;
+}
+
+export interface PuzzleCalibrationResult {
+  points: PuzzleCalibrationPoint[];
+  /** OLS line: observedMs = slope * heuristic + intercept */
+  slope: number;
+  intercept: number;
+  rSquared: number;
+  /** Standard deviation of residuals, used to flag outliers (|z| > 1). */
+  residualStdDev: number;
+}
+
+/**
+ * Heuristic score × observed solve time, one point per puzzle with
+ * enough solves to be meaningful. Returns raw points PLUS a simple
+ * OLS regression line so the Puzzles tab can draw the trend and
+ * surface outliers — puzzles whose observed difficulty deviates
+ * sharply from what the heuristic predicts are the signal for
+ * refining the formula.
+ */
+export async function getPuzzleCalibration(minSolves = 10): Promise<PuzzleCalibrationResult> {
+  const rows = await db.execute<{
+    puzzle_id: number; day_number: number; word: string; avg_ms: number;
+  }>(sql`
+    SELECT
+      p.id AS puzzle_id,
+      p.day_number,
+      p.word,
+      avg(s.server_solve_ms)::int AS avg_ms
+    FROM solves s
+    JOIN puzzles p ON p.id = s.puzzle_id
+    WHERE s.solved = true
+    GROUP BY p.id, p.day_number, p.word
+    HAVING count(*) >= ${minSolves}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const data = rows.map((r) => ({
+    puzzleId: r.puzzle_id,
+    dayNumber: r.day_number,
+    answer: r.word,
+    heuristic: scoreWord(r.word).score,
+    observedAvgMs: r.avg_ms,
+  }));
+
+  if (data.length < 2) {
+    return { points: data.map((p) => ({ ...p, residual: 0 })), slope: 0, intercept: 0, rSquared: 0, residualStdDev: 0 };
+  }
+
+  // OLS regression: y = slope * x + intercept
+  const n = data.length;
+  const sumX = data.reduce((a, p) => a + p.heuristic, 0);
+  const sumY = data.reduce((a, p) => a + p.observedAvgMs, 0);
+  const sumXY = data.reduce((a, p) => a + p.heuristic * p.observedAvgMs, 0);
+  const sumXX = data.reduce((a, p) => a + p.heuristic * p.heuristic, 0);
+  const meanX = sumX / n;
+  const meanY = sumY / n;
+  const denom = sumXX - n * meanX * meanX;
+  const slope = denom === 0 ? 0 : (sumXY - n * meanX * meanY) / denom;
+  const intercept = meanY - slope * meanX;
+
+  const residuals = data.map((p) => p.observedAvgMs - (slope * p.heuristic + intercept));
+  const ssRes = residuals.reduce((a, r) => a + r * r, 0);
+  const ssTot = data.reduce((a, p) => a + (p.observedAvgMs - meanY) * (p.observedAvgMs - meanY), 0);
+  const rSquared = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  const residualStdDev = Math.sqrt(ssRes / n);
+
+  return {
+    points: data.map((p, i) => ({ ...p, residual: residuals[i] })),
+    slope,
+    intercept,
+    rSquared,
+    residualStdDev,
+  };
+}
+
+export interface UpcomingPuzzleRow {
+  puzzleId: number;
+  dayNumber: number;
+  date: string;
+  answer: string;
+  heuristicScore: number;
+  tier: string;
+}
+
+export async function getUpcomingPuzzles(n = 10): Promise<UpcomingPuzzleRow[]> {
+  const today = getCurrentDayNumber();
+  const rows = await db
+    .select({ id: puzzles.id, day: puzzles.dayNumber, date: puzzles.date, word: puzzles.word })
+    .from(puzzles)
+    .where(sql`${puzzles.dayNumber} > ${today}`)
+    .orderBy(asc(puzzles.dayNumber))
+    .limit(n);
+  return rows.map((r) => {
+    const h = scoreWord(r.word);
+    return {
+      puzzleId: r.id,
+      dayNumber: r.day,
+      date: String(r.date),
+      answer: r.word,
+      heuristicScore: h.score,
+      tier: h.tier,
+    };
+  });
+}
+
+export async function getNeverSolvedPuzzles(): Promise<Array<{ puzzleId: number; dayNumber: number; date: string; answer: string }>> {
+  const today = getCurrentDayNumber();
+  const rows = await db.execute<{ puzzle_id: number; day_number: number; date: string; word: string }>(sql`
+    SELECT p.id AS puzzle_id, p.day_number, to_char(p.date, 'YYYY-MM-DD') AS date, p.word
+    FROM puzzles p
+    LEFT JOIN solves s ON s.puzzle_id = p.id AND s.solved = true
+    WHERE p.day_number <= ${today}
+    GROUP BY p.id, p.day_number, p.date, p.word
+    HAVING count(s.id) = 0
+    ORDER BY p.day_number DESC
+    LIMIT 50
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+  return rows.map((r) => ({
+    puzzleId: r.puzzle_id,
+    dayNumber: r.day_number,
+    date: r.date,
+    answer: r.word,
+  }));
+}
+
+// ── Revenue ─────────────────────────────────────────────────────────
+
+export interface RevenueBreakdown {
+  crypto: { count: number; usd: number };
+  /** Fiat confirmed-burned — the money is realized. */
+  fiatBurned: { count: number; usd: number };
+  /** Fiat paid but escrow still pending — money owed, not yet booked. */
+  fiatPending: { count: number; usd: number };
+  /** Fiat refunded — revenue reversed. */
+  fiatRefunded: { count: number; usd: number };
+  adminGrantCount: number;
+  /** Total realized USD (crypto + fiat burned). Excludes pending + refunded. */
+  totalRealizedUsd: number;
+}
+
+export async function getRevenueBreakdown(windowDays?: number): Promise<RevenueBreakdown> {
+  const timeBound = windowDays
+    ? sql`unlocked_at >= now() - (${windowDays}::int || ' days')::interval`
+    : sql`true`;
+  const rows = await db.execute<{
+    source: string; escrow_status: string | null;
+    count: number; usdc_sum: number | null;
+  }>(sql`
+    SELECT
+      source,
+      escrow_status,
+      count(*)::int AS count,
+      sum(coalesce(usdc_amount, 0))::float AS usdc_sum
+    FROM premium_users
+    WHERE ${timeBound}
+    GROUP BY source, escrow_status
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const breakdown: RevenueBreakdown = {
+    crypto: { count: 0, usd: 0 },
+    fiatBurned: { count: 0, usd: 0 },
+    fiatPending: { count: 0, usd: 0 },
+    fiatRefunded: { count: 0, usd: 0 },
+    adminGrantCount: 0,
+    totalRealizedUsd: 0,
+  };
+
+  for (const r of rows) {
+    if (r.source === 'crypto') {
+      breakdown.crypto.count += r.count;
+      // USDC is ~$1. Fall back to constant for legacy rows with null amount.
+      breakdown.crypto.usd += (r.usdc_sum ?? 0) + (r.usdc_sum ? 0 : r.count * CRYPTO_FALLBACK_USD);
+    } else if (r.source === 'fiat') {
+      const usd = r.count * FIAT_PRICE_USD;
+      if (r.escrow_status === 'burned' || r.escrow_status === null) {
+        breakdown.fiatBurned.count += r.count;
+        breakdown.fiatBurned.usd += usd;
+      } else if (r.escrow_status === 'pending') {
+        breakdown.fiatPending.count += r.count;
+        breakdown.fiatPending.usd += usd;
+      } else if (r.escrow_status === 'refunded') {
+        breakdown.fiatRefunded.count += r.count;
+        breakdown.fiatRefunded.usd += usd;
+      }
+    } else if (r.source === 'admin_grant') {
+      breakdown.adminGrantCount += r.count;
+    }
+  }
+  breakdown.totalRealizedUsd = breakdown.crypto.usd + breakdown.fiatBurned.usd;
+  return breakdown;
+}
+
+/**
+ * Gross realized USD for the current calendar month (month-to-date).
+ * Separate from the rolling 30-day series used by the trend chart
+ * because a 30-day window ending today misses day 1 on the 31st of
+ * long months — the Pulse net-margin math needs an exact MTD figure
+ * to match the MTD-prorated op-cost side.
+ */
+export async function getMtdGrossRevenue(): Promise<number> {
+  const rows = await db.execute<{ total: number | string }>(sql`
+    SELECT coalesce(sum(
+      case
+        when source = 'crypto'
+          then coalesce(usdc_amount, ${CRYPTO_FALLBACK_USD})
+        when source = 'fiat' and (escrow_status is null or escrow_status = 'burned')
+          then ${FIAT_PRICE_USD}
+        else 0
+      end
+    ), 0)::float AS total
+    FROM premium_users
+    WHERE unlocked_at >= date_trunc('month', now())
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+  // Explicit Number() coercion — see getRevenueSeries for the same
+  // defense; the client math (e.g. `data.mtdGross - opCostMtd`)
+  // would silently string-concatenate if a string slipped through.
+  return Number(rows[0]?.total ?? 0);
+}
+
+export async function getRevenueSeries(days: number): Promise<Array<{ day: string; crypto: number; fiat: number }>> {
+  const rows = await db.execute<{ day: string; crypto: number | string; fiat: number | string }>(sql`
+    SELECT
+      to_char(date_trunc('day', unlocked_at), 'YYYY-MM-DD') AS day,
+      sum(
+        case when source = 'crypto'
+             then coalesce(usdc_amount, ${CRYPTO_FALLBACK_USD})
+             else 0 end
+      )::float AS crypto,
+      sum(
+        case when source = 'fiat' and (escrow_status is null or escrow_status = 'burned')
+             then ${FIAT_PRICE_USD}
+             else 0 end
+      )::float AS fiat
+    FROM premium_users
+    WHERE unlocked_at >= now() - (${days}::int || ' days')::interval
+    GROUP BY 1
+    ORDER BY 1 ASC
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+  // Drizzle's Neon driver returns Postgres `float` as a JS number in
+  // practice, but `sum(numeric)::float` can round-trip as a string
+  // on some driver versions. Coerce explicitly so the Recharts
+  // `StackedBar` always sees numbers (string dataKeys break the
+  // bar rendering silently).
+  return rows.map((r) => ({
+    day: r.day,
+    crypto: Number(r.crypto ?? 0),
+    fiat: Number(r.fiat ?? 0),
+  }));
+}
+
+// ── Anon sessions + user dossier ────────────────────────────────────
+
+export interface AnonSessionRow {
+  sessionId: string;
+  solves: number;
+  firstSeen: Date;
+  lastActive: Date;
+}
+
+/**
+ * Sessions that have played but never bound a profile or wallet.
+ * Grouped by session_id from the solves table. Paginated.
+ *
+ * Accepts either `offset` directly OR `page` (for callers that
+ * prefer 1-indexed pagination). The unified Users-tab route uses
+ * offset so that a single `all` page can contiguously span both
+ * registered rows and anon rows without double-counting.
+ */
+export async function getAnonSessions(opts: {
+  page?: number; limit?: number; offset?: number; minSolves?: number; search?: string;
+}): Promise<{ rows: AnonSessionRow[]; total: number }> {
+  const limit = Math.min(100, Math.max(0, opts.limit ?? 50));
+  const offset = opts.offset !== undefined
+    ? Math.max(0, opts.offset)
+    : (Math.max(1, opts.page ?? 1) - 1) * limit;
+  const minSolves = opts.minSolves ?? 1;
+  const searchFilter = opts.search
+    ? sql`AND session_id ILIKE ${`%${opts.search}%`}`
+    : sql``;
+
+  const [totalRow] = await db.execute<{ count: number }>(sql`
+    SELECT count(*)::int AS count FROM (
+      SELECT session_id
+      FROM solves
+      WHERE profile_id IS NULL AND wallet IS NULL
+      ${searchFilter}
+      GROUP BY session_id
+      HAVING count(*) >= ${minSolves}
+    ) t
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const rows = await db.execute<{ session_id: string; solves: number; first_seen: Date; last_active: Date }>(sql`
+    SELECT
+      session_id,
+      count(*) filter (where solved = true)::int AS solves,
+      min(created_at) AS first_seen,
+      max(created_at) AS last_active
+    FROM solves
+    WHERE profile_id IS NULL AND wallet IS NULL
+    ${searchFilter}
+    GROUP BY session_id
+    HAVING count(*) >= ${minSolves}
+    ORDER BY max(created_at) DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  return {
+    rows: rows.map((r) => ({
+      sessionId: r.session_id,
+      solves: r.solves,
+      firstSeen: new Date(r.first_seen),
+      lastActive: new Date(r.last_active),
+    })),
+    total: totalRow?.count ?? 0,
+  };
+}
+
+export interface UserDossier {
+  summary: {
+    identityKind: 'profile' | 'anon';
+    profileId: number | null;
+    sessionId: string | null;
+    handle: string | null;
+    wallet: string | null;
+    email: string | null;
+    emailVerifiedAt: Date | null;
+    createdAt: Date | null;
+    premium: boolean;
+    premiumSource: string | null;
+    premiumReason: string | null;
+    premiumGrantedBy: string | null;
+  };
+  solves: Array<{ puzzleId: number; dayNumber: number; answer: string; serverSolveMs: number | null; flag: string | null; createdAt: Date }>;
+  funnelEvents: Array<{ eventName: string; metadata: Record<string, unknown>; createdAt: Date }>;
+  wordmarks: Array<{ wordmarkId: string; earnedAt: Date; puzzleId: number | null }>;
+  totalSolves: number;
+}
+
+export async function getUserDossier(input: { profileId?: number; sessionId?: string }): Promise<UserDossier | null> {
+  if (!input.profileId && !input.sessionId) return null;
+
+  // Resolve identity either way — by profile or by session.
+  let profileRow: typeof profiles.$inferSelect | null = null;
+  let sessionId = input.sessionId ?? null;
+  let wallet: string | null = null;
+
+  if (input.profileId) {
+    const [p] = await db.select().from(profiles).where(eq(profiles.id, input.profileId)).limit(1);
+    profileRow = p ?? null;
+    wallet = profileRow?.wallet ?? null;
+  }
+
+  // Premium lookup (by wallet if present, else by profile.premiumSource)
+  let premium = false;
+  let premiumSource: string | null = null;
+  let premiumReason: string | null = null;
+  let premiumGrantedBy: string | null = null;
+  if (wallet) {
+    const [pu] = await db.select().from(premiumUsers).where(eq(premiumUsers.wallet, wallet)).limit(1);
+    if (pu) {
+      premium = true;
+      premiumSource = pu.source;
+      premiumReason = pu.reason ?? null;
+      premiumGrantedBy = pu.grantedBy ?? null;
+    }
+  }
+  if (!premium && profileRow?.premiumSource) {
+    premium = true;
+    premiumSource = profileRow.premiumSource;
+    premiumReason = profileRow.reason ?? null;
+    premiumGrantedBy = profileRow.grantedBy ?? null;
+  }
+
+  // Solves history — most-recent 20. Scope by profile_id when we have
+  // one, otherwise by session_id, otherwise by wallet.
+  const solveFilter = input.profileId
+    ? sql`s.profile_id = ${input.profileId}`
+    : sessionId
+      ? sql`s.session_id = ${sessionId}`
+      : wallet
+        ? sql`s.wallet = ${wallet}`
+        : sql`false`;
+
+  const solvesRows = await db.execute<{
+    puzzle_id: number; day_number: number; word: string;
+    server_solve_ms: number | null; flag: string | null; created_at: Date;
+  }>(sql`
+    SELECT s.puzzle_id, p.day_number, p.word,
+           s.server_solve_ms, s.flag, s.created_at
+    FROM solves s
+    JOIN puzzles p ON p.id = s.puzzle_id
+    WHERE ${solveFilter}
+    ORDER BY s.created_at DESC
+    LIMIT 20
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const [totalRow] = await db.execute<{ count: number }>(sql`
+    SELECT count(*)::int AS count FROM solves s WHERE ${solveFilter}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  // Funnel events — scope identically.
+  const feFilter = input.profileId
+    ? sql`profile_id = ${input.profileId}`
+    : sessionId
+      ? sql`session_id = ${sessionId}`
+      : wallet
+        ? sql`wallet = ${wallet}`
+        : sql`false`;
+
+  const feRows = await db.execute<{ event_name: string; metadata: Record<string, unknown>; created_at: Date }>(sql`
+    SELECT event_name, metadata, created_at
+    FROM funnel_events
+    WHERE ${feFilter}
+    ORDER BY created_at DESC
+    LIMIT 20
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  // Wordmarks — only if we have a profile/wallet identity.
+  let wmRows: Array<{ wordmarkId: string; earnedAt: Date; puzzleId: number | null }> = [];
+  if (input.profileId || wallet) {
+    const wmFilter = input.profileId
+      ? sql`profile_id = ${input.profileId}`
+      : sql`wallet = ${wallet}`;
+    const raw = await db.execute<{ wordmark_id: string; earned_at: Date; puzzle_id: number | null }>(sql`
+      SELECT wordmark_id, earned_at, puzzle_id
+      FROM wordmarks
+      WHERE ${wmFilter}
+      ORDER BY earned_at DESC
+      LIMIT 30
+    `).then((r) => Array.isArray(r) ? r : r.rows);
+    wmRows = raw.map((r) => ({ wordmarkId: r.wordmark_id, earnedAt: new Date(r.earned_at), puzzleId: r.puzzle_id }));
+  }
+
+  return {
+    summary: {
+      identityKind: profileRow ? 'profile' : 'anon',
+      profileId: profileRow?.id ?? null,
+      sessionId,
+      handle: profileRow?.handle ?? null,
+      wallet: wallet ?? null,
+      email: profileRow?.email ?? null,
+      emailVerifiedAt: profileRow?.emailVerifiedAt ?? null,
+      createdAt: profileRow?.createdAt ?? null,
+      premium,
+      premiumSource,
+      premiumReason,
+      premiumGrantedBy,
+    },
+    solves: solvesRows.map((r) => ({
+      puzzleId: r.puzzle_id,
+      dayNumber: r.day_number,
+      answer: r.word,
+      serverSolveMs: r.server_solve_ms,
+      flag: r.flag,
+      createdAt: new Date(r.created_at),
+    })),
+    funnelEvents: feRows.map((r) => ({ eventName: r.event_name, metadata: r.metadata, createdAt: new Date(r.created_at) })),
+    wordmarks: wmRows,
+    totalSolves: totalRow?.count ?? 0,
+  };
+}
+
+// ── Retention cohorts ───────────────────────────────────────────────
+
+export interface RetentionRow {
+  cohortWeek: string;
+  size: number;
+  w1Pct: number;
+  w2Pct: number;
+  w4Pct: number;
+  w8Pct: number;
+}
+
+/**
+ * Weekly cohorts keyed on session_id's first-solve date. For each
+ * cohort, the percentage returning in weeks 1, 2, 4, 8 out from that
+ * cohort's first-solve week. Last N weeks, newest first.
+ *
+ * Note: session-based retention is a floor (clearing cookies looks
+ * like a new user); operator UI should surface this caveat.
+ */
+export async function getRetentionCohorts(weeks = 12): Promise<RetentionRow[]> {
+  const rows = await db.execute<{
+    cohort_week: string; size: number;
+    w1: number; w2: number; w4: number; w8: number;
+  }>(sql`
+    WITH firsts AS (
+      SELECT session_id, min(created_at)::date AS first_date
+      FROM solves
+      WHERE created_at >= now() - (${weeks * 7 + 56}::int || ' days')::interval
+      GROUP BY session_id
+    ),
+    cohorts AS (
+      SELECT session_id, date_trunc('week', first_date) AS cohort_week_ts, first_date
+      FROM firsts
+      WHERE first_date >= (now() - (${weeks * 7}::int || ' days')::interval)::date
+    )
+    SELECT
+      to_char(c.cohort_week_ts, 'YYYY-MM-DD') AS cohort_week,
+      count(distinct c.session_id)::int AS size,
+      count(distinct s1.session_id)::int AS w1,
+      count(distinct s2.session_id)::int AS w2,
+      count(distinct s4.session_id)::int AS w4,
+      count(distinct s8.session_id)::int AS w8
+    FROM cohorts c
+    LEFT JOIN solves s1 ON s1.session_id = c.session_id
+      AND s1.created_at >= c.first_date + interval '7 days'
+      AND s1.created_at <  c.first_date + interval '14 days'
+    LEFT JOIN solves s2 ON s2.session_id = c.session_id
+      AND s2.created_at >= c.first_date + interval '14 days'
+      AND s2.created_at <  c.first_date + interval '21 days'
+    LEFT JOIN solves s4 ON s4.session_id = c.session_id
+      AND s4.created_at >= c.first_date + interval '28 days'
+      AND s4.created_at <  c.first_date + interval '35 days'
+    LEFT JOIN solves s8 ON s8.session_id = c.session_id
+      AND s8.created_at >= c.first_date + interval '56 days'
+      AND s8.created_at <  c.first_date + interval '63 days'
+    GROUP BY c.cohort_week_ts
+    ORDER BY c.cohort_week_ts DESC
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  return rows.map((r) => ({
+    cohortWeek: r.cohort_week,
+    size: r.size,
+    w1Pct: r.size > 0 ? r.w1 / r.size : 0,
+    w2Pct: r.size > 0 ? r.w2 / r.size : 0,
+    w4Pct: r.size > 0 ? r.w4 / r.size : 0,
+    w8Pct: r.size > 0 ? r.w8 / r.size : 0,
+  }));
+}
+
+// ── Funnel extensions ───────────────────────────────────────────────
+
+const CANONICAL_FUNNEL = [
+  'stats_opened',
+  'premium_gate_shown',
+  'upgrade_clicked',
+  'checkout_started',
+  'checkout_completed',
+] as const;
+
+export async function getFunnelDropOff(window: '24h' | '7d' | '30d' | 'all' = '7d'): Promise<FunnelDropOffRow[]> {
+  const since = windowIntervalSql(window);
+  const timeBound = since ? sql`created_at >= ${since}` : sql`true`;
+  const rows = await db.execute<{ event_name: string; sessions: number }>(sql`
+    SELECT event_name, count(distinct session_id)::int AS sessions
+    FROM funnel_events
+    WHERE ${timeBound}
+    GROUP BY event_name
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  const byName = new Map(rows.map((r) => [r.event_name, r.sessions] as const));
+  const firstCount = byName.get(CANONICAL_FUNNEL[0]) ?? 0;
+  let prevCount = firstCount;
+
+  return CANONICAL_FUNNEL.map((stage, i) => {
+    const sessions = byName.get(stage) ?? 0;
+    const retainedFromPrev = i === 0 ? null : prevCount > 0 ? sessions / prevCount : 0;
+    const retainedFromStart = firstCount > 0 ? sessions / firstCount : 0;
+    prevCount = sessions;
+    return { stage, sessions, retainedFromPrev, retainedFromStart };
+  });
+}
+
+export async function getFunnelEntryPoints(window: '24h' | '7d' | '30d' | 'all' = '7d'): Promise<FunnelEntryPointRow[]> {
+  const since = windowIntervalSql(window);
+  const timeBound = since ? sql`created_at >= ${since}` : sql`true`;
+
+  const rows = await db.execute<{
+    feature: string; shown: number; clicked: number; started: number; completed: number;
+  }>(sql`
+    WITH gate_sessions AS (
+      SELECT metadata->>'feature' AS feature, session_id
+      FROM funnel_events
+      WHERE event_name = 'premium_gate_shown' AND ${timeBound}
+      GROUP BY metadata->>'feature', session_id
+    )
+    SELECT
+      gs.feature AS feature,
+      count(distinct gs.session_id)::int AS shown,
+      count(distinct fc.session_id)::int AS clicked,
+      count(distinct fs.session_id)::int AS started,
+      count(distinct fd.session_id)::int AS completed
+    FROM gate_sessions gs
+    LEFT JOIN funnel_events fc
+      ON fc.session_id = gs.session_id AND fc.event_name = 'upgrade_clicked'
+    LEFT JOIN funnel_events fs
+      ON fs.session_id = gs.session_id AND fs.event_name = 'checkout_started'
+    LEFT JOIN funnel_events fd
+      ON fd.session_id = gs.session_id AND fd.event_name = 'checkout_completed'
+    GROUP BY gs.feature
+    ORDER BY shown DESC
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+
+  return rows.map((r) => ({
+    feature: r.feature || 'n/a',
+    shown: r.shown,
+    clicked: r.clicked,
+    checkoutStarted: r.started,
+    checkoutCompleted: r.completed,
+    convertedPct: r.shown > 0 ? r.completed / r.shown : 0,
+  }));
+}
+
+/**
+ * Median elapsed time for each stage-to-stage hop. Null means no
+ * session in the window completed that hop.
+ */
+export async function getFunnelTimeToStage(window: '24h' | '7d' | '30d' | 'all' = '7d'): Promise<FunnelTimeToStage> {
+  const since = windowIntervalSql(window);
+  const timeBound = since ? sql`created_at >= ${since}` : sql`true`;
+
+  // Helper: median ms between min(event_a) and min(event_b) per session.
+  async function median(a: string, b: string): Promise<number | null> {
+    const rows = await db.execute<{ median_ms: number | null }>(sql`
+      WITH paired AS (
+        SELECT fa.session_id,
+               extract(epoch FROM (min(fb.created_at) - min(fa.created_at))) * 1000 AS gap_ms
+        FROM funnel_events fa
+        JOIN funnel_events fb ON fb.session_id = fa.session_id AND fb.event_name = ${b} AND fb.created_at >= fa.created_at
+        WHERE fa.event_name = ${a} AND ${timeBound}
+        GROUP BY fa.session_id
+      )
+      SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY gap_ms)::float AS median_ms
+      FROM paired WHERE gap_ms >= 0
+    `).then((r) => Array.isArray(r) ? r : r.rows);
+    return rows[0]?.median_ms ?? null;
+  }
+
+  // "first play" proxy: profile_identified or profile_created (whichever fires first for the session).
+  const firstPlayToProfile = await median('profile_identified', 'profile_created');
+  const profileToGate = await median('profile_created', 'premium_gate_shown');
+  const gateToUpgrade = await median('premium_gate_shown', 'upgrade_clicked');
+  const upgradeToCheckout = await median('upgrade_clicked', 'checkout_completed');
+
+  return { firstPlayToProfile, profileToGate, gateToUpgrade, upgradeToCheckout };
+}
+
+// ── Op-cost ledger (admin_costs table) ──────────────────────────────
+
+export interface OpCostRow {
+  id: number;
+  category: string;
+  label: string;
+  monthlyUsd: number;
+  notes: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+}
+
+export async function getOpCosts(): Promise<OpCostRow[]> {
+  const rows = await db.select().from(adminCosts).orderBy(asc(adminCosts.category), asc(adminCosts.label));
+  return rows.map((r) => ({
+    id: r.id,
+    category: r.category,
+    label: r.label,
+    monthlyUsd: Number(r.monthlyUsd),
+    notes: r.notes,
+    updatedAt: r.updatedAt,
+    updatedBy: r.updatedBy,
+  }));
+}
+
+export interface UpsertOpCostInput {
+  id?: number;
+  category: string;
+  label: string;
+  monthlyUsd: number;
+  notes?: string | null;
+  updatedBy: string;
+}
+
+export async function upsertOpCost(input: UpsertOpCostInput): Promise<OpCostRow> {
+  if (input.id) {
+    const [r] = await db
+      .update(adminCosts)
+      .set({
+        category: input.category,
+        label: input.label,
+        monthlyUsd: String(input.monthlyUsd),
+        notes: input.notes ?? null,
+        updatedAt: new Date(),
+        updatedBy: input.updatedBy,
+      })
+      .where(eq(adminCosts.id, input.id))
+      .returning();
+    if (!r) throw new Error(`op-cost row ${input.id} not found`);
+    return {
+      id: r.id, category: r.category, label: r.label,
+      monthlyUsd: Number(r.monthlyUsd), notes: r.notes,
+      updatedAt: r.updatedAt, updatedBy: r.updatedBy,
+    };
+  }
+  const [r] = await db
+    .insert(adminCosts)
+    .values({
+      category: input.category,
+      label: input.label,
+      monthlyUsd: String(input.monthlyUsd),
+      notes: input.notes ?? null,
+      updatedBy: input.updatedBy,
+    })
+    .returning();
+  return {
+    id: r.id, category: r.category, label: r.label,
+    monthlyUsd: Number(r.monthlyUsd), notes: r.notes,
+    updatedAt: r.updatedAt, updatedBy: r.updatedBy,
+  };
+}
+
+export async function deleteOpCost(id: number): Promise<boolean> {
+  const result = await db.delete(adminCosts).where(eq(adminCosts.id, id)).returning({ id: adminCosts.id });
   return result.length > 0;
 }

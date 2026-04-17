@@ -8,6 +8,22 @@ export function formatMs(ms: number): string {
 }
 
 /**
+ * Compact duration format for admin metrics — `450ms`, `12.3s`,
+ * `2.1m`, `1.0h`. Different from `formatMs` (timer format `M:SS` /
+ * `H:MM:SS`) because dashboard cards read better with an explicit
+ * unit and one decimal of precision than with zero-padded clock
+ * digits. Does NOT clamp negatives — callers that want a signed
+ * display (e.g. calibration residuals) should wrap this.
+ */
+export function formatMsCompact(ms: number): string {
+  const abs = Math.abs(ms);
+  if (abs < 1000) return `${Math.round(abs)}ms`;
+  if (abs < 60_000) return `${(abs / 1000).toFixed(1)}s`;
+  if (abs < 3_600_000) return `${(abs / 60_000).toFixed(1)}m`;
+  return `${(abs / 3_600_000).toFixed(1)}h`;
+}
+
+/**
  * Human solve time. Short solves stay compact (`M:SS`) so the common
  * case — a sub-minute to ~45 min finish — reads tight. Anything past an
  * hour switches to `H:MM:SS` so a 13-hour session doesn't render as
