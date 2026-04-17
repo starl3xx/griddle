@@ -55,7 +55,7 @@ For any 9-letter word with 9 unique letters there are **exactly 12,072** valid g
 - **Novel mechanic** — not another Wordle variant. The non-adjacency rule creates a genuine spatial puzzle on top of the word-hunt, and the game math is mathematically proven
 - **Instant skill expression** — the whole game is keyboard-driven, solves in seconds to a few minutes, and the "find a valid shorter word" flash rewards vocabulary depth
 - **Fully playable anonymously** — no wallet required. Wallet unlocks optional extras (streaks, archive, premium), never the core game
-- **$WORD-powered premium** — $5 worth of $WORD, burned permanently, unlocks the entire archive forever. One-time payment, deflationary
+- **USDC-paid, $WORD-burning premium** — $5 USDC, swapped to $WORD on-chain and burned in the same transaction, unlocks the entire archive forever. One-time payment, deflationary
 - **Anti-bot guardrails** — every solve captures server-side timing + client-side keystroke telemetry. Sub-human-floor solves are flagged ineligible for streaks and leaderboards
 - **Farcaster-native** — works as a standalone mini app inside Farcaster and Base App, with native share → compose-cast integration
 - **Family resemblance** — shares the design system (Söhne, brand blue, animation language) with [Let’s Have A Word](https://github.com/starl3xx/lets-have-a-word) so both games feel in-universe
@@ -385,8 +385,8 @@ All milestones use the pattern **`M<phase>-<slug>`**:
 
 ### Premium pricing
 
-- **$5** — direct $WORD permit-burn from a connected wallet
-- **$6** — Stripe Checkout with Apple Pay enabled (the $1 covers Stripe fees ~$0.45, DEX swap fees + slippage buffer, and a small treasury margin). No wallet required — the unlock binds to the browser session in KV and migrates to a wallet-keyed `premium_users` row on first connect.
+- **$5** — $5 USDC via ERC-2612 permit; contract swaps USDC → $WORD through Uniswap Universal Router and burns in one atomic tx (M5-usdc-premium). User never needs to hold $WORD.
+- **$6** — Stripe Checkout with Apple Pay enabled (the $1 covers Stripe fees ~$0.45 and a small treasury margin that replenishes the pre-staged $WORD escrow stockpile). No wallet required — the unlock binds to the browser session in KV and migrates to a wallet-keyed `premium_users` row on first connect.
 
 Both paths land in the same `premium_users` ledger. Premium status is server-side (DB), not onchain — the contract burn is the deflationary signal, not the access-control mechanism. Both paths use **escrow-then-burn**: tokens go to a hold contract for ~30 days before permanent burn, so a Stripe dispute can recover them back to treasury. The server-side `checkout_completed` funnel event is idempotency-keyed on the Stripe event id (fiat) or the on-chain tx hash (crypto) so retry storms can't double-count conversions.
 

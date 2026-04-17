@@ -30,8 +30,10 @@ interface PremiumGateModalProps {
  * Premium-gate modal. Two unlock paths, both require a connected wallet
  * in M5-premium-checkout:
  *
- *  - **Crypto ($5)**  -  Lazy-loaded PremiumCryptoFlow signs an ERC-2612
- *    permit, calls `unlockWithPermit`, server verifies the burn.
+ *  - **Crypto ($5 USDC)**  -  Lazy-loaded PremiumCryptoFlow signs a
+ *    USDC ERC-2612 permit, calls `unlockWithUsdc` which atomically
+ *    swaps USDC → $WORD via Uniswap Universal Router and burns the
+ *    proceeds; server verifies the burn event.
  *  - **Cash ($6)**  -  Stripe Checkout. Premium binds to the connected
  *    wallet so the game's `refreshPremium` read sees it post-redirect.
  *
@@ -138,11 +140,11 @@ export function PremiumGateModal({
             title={sessionWallet ? undefined : 'Connect a wallet first'}
           >
             <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-              Pay with crypto ($WORD)
+              Pay with crypto (USDC)
             </div>
             <div className="text-xl font-black text-gray-900 dark:text-gray-100 tabular-nums mt-0.5">$5</div>
             <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">
-              {sessionWallet ? 'One tap, onchain' : 'Connect wallet first'}
+              {sessionWallet ? 'Swapped to $WORD and burned' : 'Connect wallet first'}
             </div>
           </button>
 

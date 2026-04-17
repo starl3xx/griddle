@@ -59,7 +59,7 @@ Connecting a wallet unlocks optional extras: streak tracking, personal archive, 
 
 **No.** You have three ways to sign in and unlock Premium:
 
-1. **Connect a wallet** — $5 in $WORD, permit-signed and burned in one transaction
+1. **Connect a wallet** — $5 USDC, one signed permit; the contract atomically swaps USDC → $WORD and burns it
 2. **Apple Pay or card** — $6 via Stripe Checkout, no wallet needed. Your unlock binds to your browser session and automatically migrates to a wallet-keyed record the first time you connect one
 3. **Magic-link email** — drop in your email, click the link we send, and you have a profile immediately. You can pay to upgrade later, or just use it for streak tracking
 
@@ -97,7 +97,7 @@ Token address on Base: [`0x304e649e69979298BD1AEE63e175ADf07885fb4b`](https://ba
 
 In Griddle, $WORD powers:
 
-- **Premium unlock** — a one-time $5-worth $WORD burn unlocks Premium forever
+- **Premium unlock** — one-time $5 USDC (swapped to $WORD and burned on-chain) unlocks Premium forever
 - **Streak milestone rewards** — earn $WORD bonuses at 7, 30, 100, and 365-day streaks
 - **Post-launch** — Farcaster share bounties and other engagement rewards
 
@@ -105,7 +105,7 @@ In Griddle, $WORD powers:
 
 ## What is Premium?
 
-Premium is a one-time unlock. **$5 in $WORD (burned permanently) or $6 via Apple Pay / card.** Not a subscription.
+Premium is a one-time unlock. **$5 USDC (swapped to $WORD and burned permanently) or $6 via Apple Pay / card.** Not a subscription.
 
 **What you get:**
 
@@ -125,9 +125,9 @@ Premium status is recorded in our database, not onchain. The token burn is the d
 
 From the Premium modal you pick a path:
 
-**Crypto ($5).** Your wallet fetches the live $WORD/USD price from our oracle and we show you the exact token amount needed. You sign a single EIP-2612 permit — no gas, no approval, no multi-step flow — and `GriddlePremium.unlockWithPermit` burns the tokens in a single transaction. We read the `UnlockedWithBurn` event from the receipt server-side (we don’t trust the client) before flipping you to Premium. Price tolerance is ±15% and the oracle must be fresh (≤ 5 min old) or the transaction reverts.
+**Crypto ($5 USDC).** You sign a single EIP-2612 permit over $5 of native Base USDC — no gas for the permit, no approval dance, no separate $WORD purchase. `GriddlePremium.unlockWithUsdc` pulls the USDC, routes it through Uniswap’s Universal Router into $WORD, and burns every $WORD the swap produced, all in one atomic transaction. A client-computed `minWordOut` floored by our $WORD/USD oracle protects against MEV slippage. We read the `UnlockedWithUsdcSwap` event from the receipt server-side (we don’t trust the client) before flipping you to Premium.
 
-**Apple Pay / card ($6).** You’re redirected to a Stripe Checkout session with Apple Pay enabled. The $1 premium over the crypto path covers Stripe fees, DEX swap costs, and a small treasury margin. Stripe sends a signed webhook back to us when payment settles, and we flip you to Premium immediately — no wallet needed. If you later connect a wallet, your session-bound unlock automatically migrates to a wallet-keyed record. Fiat unlocks use **escrow-then-burn**: the tokens sit in a hold contract for ~30 days before final burn, so a chargeback can be refunded back to treasury.
+**Apple Pay / card ($6).** You’re redirected to a Stripe Checkout session with Apple Pay enabled. The $1 premium over the crypto path covers Stripe fees (~$0.45) plus a small treasury margin that replenishes our pre-staged $WORD stockpile over time. Stripe sends a signed webhook back to us when payment settles; we open an on-chain escrow against the stockpile and flip you to Premium immediately — no wallet needed. If you later connect a wallet, your session-bound unlock automatically migrates to a wallet-keyed record. Fiat unlocks use **escrow-then-burn**: the $WORD sits in a hold contract for ~30 days before final burn, so a chargeback can be refunded back to treasury.
 
 Once unlocked, you’re Premium **forever**. No renewals.
 
