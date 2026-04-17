@@ -1572,6 +1572,18 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
     // webhook's `getPremiumRowByWallet` + externalId guard already
     // prevents reaching here in that case, and the WHERE clause is
     // defense-in-depth.
+    // Use COALESCE on the update side so the upsert enriches existing
+    // rows rather than overwriting them. Two webhook-replay scenarios
+    // motivate this:
+    //   (a) First call succeeded end-to-end → row has real tx hash +
+    //       amount. Replay with nulls must NOT clobber them.
+    //   (b) First call opened the escrow on-chain but CRASHED before
+    //       recordFiatUnlock (DB timeout, Neon blip). Replay hits
+    //       EscrowAlreadyExists, passes escrowStatus='pending' +
+    //       nulls elsewhere. No row exists, so INSERT runs — user
+    //       gets their premium row. escrow_open_tx stays null (lost
+    //       to the first-call crash); cron's EscrowBurned/Refunded
+    //       scan still reaches the row via externalId at settle time.
     await db
       .insert(premiumUsers)
       .values({
@@ -1590,12 +1602,12 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
       .onConflictDoUpdate({
         target: premiumUsers.wallet,
         set: {
-          escrowStatus: input.escrowStatus ?? null,
-          escrowOpenTx: input.escrowOpenTx ?? null,
-          externalId: input.externalId ?? null,
-          wordBurned: wordBurnedValue,
+          escrowStatus: sql`COALESCE(${premiumUsers.escrowStatus}, excluded.escrow_status)`,
+          escrowOpenTx: sql`COALESCE(${premiumUsers.escrowOpenTx}, excluded.escrow_open_tx)`,
+          externalId: sql`COALESCE(${premiumUsers.externalId}, excluded.external_id)`,
+          wordBurned: sql`COALESCE(${premiumUsers.wordBurned}, excluded.word_burned)`,
         },
-        setWhere: sql`${premiumUsers.externalId} = ${input.externalId ?? null} AND ${premiumUsers.source} = 'fiat'`,
+        setWhere: sql`${premiumUsers.source} = 'fiat'`,
       });
   }
 
