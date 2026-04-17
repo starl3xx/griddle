@@ -32,7 +32,12 @@ export function formatCountdown(totalSeconds: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-const MONTH_NAMES = [
+/**
+ * Full English month names, Jan–Dec (index 0–11). Exported so UI
+ * surfaces that need per-month labels can reuse the same copy as
+ * `formatLongDate` instead of re-declaring the array.
+ */
+export const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];

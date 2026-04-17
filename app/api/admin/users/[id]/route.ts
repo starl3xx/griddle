@@ -59,9 +59,38 @@ export async function PATCH(
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
-  // Update the scalar profile fields first. Premium is handled
-  // separately so handle/email failures don't leave the DB in a state
-  // where premium flipped but the name edit was lost.
+  // Load the current state up-front so we can validate the POST-
+  // patch intent before touching the DB. Without this, the previous
+  // order (scalar first, then premium) left the profile half-updated
+  // when the premium path rejected — e.g. admin clears the handle of
+  // a wallet-less profile AND flips premium=true in the same request:
+  // the handle clear commits, then grantPremium 400s because the
+  // profile now has neither wallet nor handle to anchor the grant.
+  const [existing] = await db
+    .select({ wallet: profiles.wallet, handle: profiles.handle })
+    .from(profiles)
+    .where(eq(profiles.id, id))
+    .limit(1);
+  if (!existing) {
+    return NextResponse.json({ error: 'profile not found' }, { status: 404 });
+  }
+
+  // Project the post-patch handle so the premium-grant path can
+  // check its anchor against the intended state, not the pre-patch
+  // state. wallet can't be edited via PATCH so no projection there.
+  const projectedHandle =
+    body.handle === undefined ? existing.handle : (body.handle ? body.handle.trim().toLowerCase() : null);
+
+  if (body.premium === true && !existing.wallet && !projectedHandle) {
+    return NextResponse.json(
+      { error: 'profile has no wallet or handle to grant premium to' },
+      { status: 400 },
+    );
+  }
+
+  // Scalar field update. Safe to do before the premium toggle now
+  // that the reject-case above has been ruled out — if we get past
+  // the guards, every downstream write is expected to succeed.
   if (body.handle !== undefined || body.email !== undefined) {
     const result = await updateAdminProfile({
       id,
@@ -84,26 +113,15 @@ export async function PATCH(
   // no-op rather than silently flipping to `false`.
   if (typeof body.premium === 'boolean') {
     if (body.premium) {
-      const [profile] = await db
-        .select({ wallet: profiles.wallet, handle: profiles.handle })
-        .from(profiles)
-        .where(eq(profiles.id, id))
-        .limit(1);
-      if (!profile) {
-        return NextResponse.json({ error: 'profile not found' }, { status: 404 });
-      }
       // `grantPremium` takes exactly one of wallet or handle. Prefer
       // wallet since that lights up the wallet-keyed premium_users
-      // table used by the game's premium check; fall back to handle.
-      if (profile.wallet) {
-        await grantPremium({ wallet: profile.wallet, grantedBy: admin, reason: 'admin UI' });
-      } else if (profile.handle) {
-        await grantPremium({ handle: profile.handle, grantedBy: admin, reason: 'admin UI' });
-      } else {
-        return NextResponse.json(
-          { error: 'profile has no wallet or handle to grant premium to' },
-          { status: 400 },
-        );
+      // table used by the game's premium check; fall back to the
+      // projected handle. The pre-write guard already ensured at
+      // least one anchor exists.
+      if (existing.wallet) {
+        await grantPremium({ wallet: existing.wallet, grantedBy: admin, reason: 'admin UI' });
+      } else if (projectedHandle) {
+        await grantPremium({ handle: projectedHandle, grantedBy: admin, reason: 'admin UI' });
       }
     } else {
       await revokePremiumForProfile(id);
