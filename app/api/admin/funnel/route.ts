@@ -13,8 +13,16 @@ import {
  *
  * Returns the full Funnel-tab payload: original stage counts +
  * breakdown + time-to-convert, PLUS drop-off rates, entry-point
- * breakdown, and stage-to-stage medians. Admin-gated — 404 to
- * non-admin callers so the route's existence isn't leaked.
+ * breakdown, and stage-to-stage medians.
+ *
+ * **Response shape is intentionally nested** (`{ stats, dropOff,
+ * entryPoints, timeToStage }`). Previous shape was `FunnelStats`
+ * flat at the top level; the only consumer is
+ * `components/admin/FunnelTab.tsx`, which is updated in the same
+ * commit. No external / public clients depend on this route.
+ *
+ * Admin-gated — 404 to non-admin callers so the route's existence
+ * isn't leaked.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

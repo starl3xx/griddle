@@ -62,16 +62,24 @@ export async function GET(req: Request): Promise<NextResponse> {
     // 'all' — logically one list: registered rows 0..registeredTotal-1
     // followed by anon rows 0..anonTotal-1. Compute what portion of
     // this page's window [startOffset, startOffset+limit) falls in
-    // each half and query each half at its own offset.
+    // each half and query each half at its own offset. `regTake` +
+    // `anonTake` is always <= `limit`, so the page never exceeds
+    // its row budget — traced by hand against the canonical 100+100
+    // at limit=50 case (pages of 50/50/50/50) and the uneven 75+75
+    // case (pages of 50, 25+25, 50 anon).
     const regEnd   = Math.min(startOffset + limit, registeredTotal);
     regOffset = Math.min(startOffset, registeredTotal);
     regTake   = Math.max(0, regEnd - regOffset);
 
     // Whatever part of the window is past the registered total spills
-    // into anon, starting at the corresponding anon offset.
+    // into anon, starting at the corresponding anon offset. Cap the
+    // take at the remaining anon rows so a request like "page 1,
+    // limit=50" against 5 anon rows doesn't ask the DB for 45 rows
+    // it'll never return.
     const spillStart = Math.max(startOffset, registeredTotal);
     anonOffset = spillStart - registeredTotal;
-    anonTake   = Math.max(0, (startOffset + limit) - spillStart);
+    const anonRemaining = Math.max(0, anonTotal - anonOffset);
+    anonTake = Math.min(Math.max(0, (startOffset + limit) - spillStart), anonRemaining);
   }
 
   const registeredRows = regTake > 0

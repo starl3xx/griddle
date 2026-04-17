@@ -18,6 +18,12 @@ import {
  * health, revenue breakdown + 30-day series, op-cost ledger, and the
  * solves-per-day time series for the trend chart.
  *
+ * **Response shape is intentionally nested** (`{ headline, activity,
+ * dailySeries, todaysPuzzle, revenue, revenueSeries, opCostsMonthlyTotal }`),
+ * not flat. Previous shape was the flat `AdminPulse` interface; the
+ * only consumer is `components/admin/PulseTab.tsx` which ships in the
+ * same commit. No external / public clients depend on this route.
+ *
  * Admin-gated via `requireAdminWallet()` — non-admin callers get a 404
  * (not 403) so the route's existence isn't leaked.
  */
