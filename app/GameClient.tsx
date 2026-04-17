@@ -965,13 +965,14 @@ export default function GameClient({
           </button>
         </header>
 
-        {/* Visible solve timer. Hidden before Start and once the solve
-            modal is open — the modal shows the authoritative server
-            time there. While `state.solved` is flipping to true during
-            the reveal animation, we freeze the timer client-side so
-            the value stops climbing a beat before the modal shows. */}
-        {startedAt != null && !solveResult && (
-          <GameTimer startedAt={startedAt} running={!state.solved} />
+        {/* Visible solve timer. Mounted only while the player is
+            actively solving — unmounted the moment state.solved flips
+            true so the modal close (which clears solveResult) doesn't
+            remount a fresh `now` reading against the original
+            startedAt, which would display wall-clock-including-modal
+            time instead of the solve duration. */}
+        {startedAt != null && !state.solved && !solveResult && (
+          <GameTimer startedAt={startedAt} />
         )}
 
         {/* Grid + slots + action buttons get blurred behind the Start

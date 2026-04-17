@@ -1337,19 +1337,16 @@ export async function getPuzzleLoadAndStart(
  * addressed by dayNumber. Used by SSR + archive puzzle loads to decide
  * whether to show the Start gate or render the puzzle as already-in-
  * progress (timer running from the stored start).
+ *
+ * Delegates to getPuzzleLoadAndStart so both callers share a single
+ * query shape — schema/join changes land in one place.
  */
 export async function getPuzzleStartedAt(
   sessionId: string,
   dayNumber: number,
 ): Promise<Date | null> {
-  const rows = await db
-    .select({ startedAt: puzzleLoads.startedAt })
-    .from(puzzleLoads)
-    .innerJoin(puzzles, eq(puzzleLoads.puzzleId, puzzles.id))
-    .where(and(eq(puzzleLoads.sessionId, sessionId), eq(puzzles.dayNumber, dayNumber)))
-    .limit(1);
-  if (rows.length === 0 || rows[0].startedAt == null) return null;
-  return new Date(rows[0].startedAt);
+  const result = await getPuzzleLoadAndStart(sessionId, dayNumber);
+  return result?.startedAt ?? null;
 }
 
 /**
