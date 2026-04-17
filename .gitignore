@@ -22,3 +22,4 @@ contracts/foundry.lock
 # the source of truth.
 data/puzzles.local.json
 griddle_words.local.txt
+.env.scratch

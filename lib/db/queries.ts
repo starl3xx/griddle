@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
 import {
   puzzles,
@@ -309,21 +309,29 @@ export async function getDailyLeaderboard(
   // `wordmarks.player_key` column matches the leaderboard's computed
   // player_key exactly so we can filter on it directly without any
   // profile-id ↔ wallet translation.
+  //
+  // NOTE on the shape: previously this used raw `sql\`... ANY(${playerKeys}::varchar[])\``,
+  // but Drizzle's sql template expands a JS array as a tuple `($1, $2)`,
+  // not as a single array parameter — Postgres then rejected it with
+  // SQLSTATE 42846 "cannot cast type record to character varying[]",
+  // which threw out of the function on every eligible leaderboard
+  // (any day with ≥1 qualified solve). Switching to Drizzle's
+  // `inArray` builder emits `player_key IN ($1, $2, …)` with each
+  // array element bound as its own parameter — same semantics as
+  // `= ANY($array)` but without the array-param shape mismatch.
   const playerKeys = resolved.map((r) => String(r.player_key));
-  const wordmarkRows = await db.execute<{
-    player_key: string;
-    wordmark_id: string;
-  }>(sql`
-    SELECT player_key, wordmark_id
-    FROM wordmarks
-    WHERE player_key = ANY(${playerKeys}::varchar[])
-  `);
+  const wordmarkRows = await db
+    .select({
+      playerKey: wordmarks.playerKey,
+      wordmarkId: wordmarks.wordmarkId,
+    })
+    .from(wordmarks)
+    .where(inArray(wordmarks.playerKey, playerKeys));
   const wordmarksByPlayer = new Map<string, string[]>();
-  const wordmarkResolved = Array.isArray(wordmarkRows) ? wordmarkRows : (wordmarkRows.rows ?? []);
-  for (const row of wordmarkResolved) {
-    const key = String(row.player_key);
+  for (const row of wordmarkRows) {
+    const key = row.playerKey;
     const arr = wordmarksByPlayer.get(key) ?? [];
-    arr.push(String(row.wordmark_id));
+    arr.push(row.wordmarkId);
     wordmarksByPlayer.set(key, arr);
   }
 
