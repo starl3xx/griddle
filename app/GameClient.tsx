@@ -116,6 +116,15 @@ export default function GameClient({
   const [activePuzzle, setActivePuzzle] = useState<InitialPuzzle>(initialPuzzle);
   const isArchive = activePuzzle.dayNumber !== initialPuzzle.dayNumber;
 
+  // Ref mirror of the active puzzle's dayNumber so async callbacks
+  // (notably handleStart's fetch resolution) can verify the user
+  // hasn't navigated away between POST and response without racing
+  // against a stale closure capture.
+  const activeDayNumberRef = useRef(activePuzzle.dayNumber);
+  useEffect(() => {
+    activeDayNumberRef.current = activePuzzle.dayNumber;
+  }, [activePuzzle.dayNumber]);
+
   // ── Start gate ────────────────────────────────────────────────────
   // `startedAt` is the epoch-ms timestamp of the player's Start press
   // for the CURRENT active puzzle. Null means the Start gate is still
@@ -168,14 +177,22 @@ export default function GameClient({
   // the solve route will use loaded_at in that case, which is strictly
   // more generous (slightly inflated time) but keeps the UX moving.
   //
-  // Both branches stash the resulting epoch ms into todayStartedAtRef
-  // when the active puzzle is today's, so return-to-today after an
-  // archive detour restores the running timer.
+  // `targetDayNumber` is captured at call time. The response handler
+  // checks activeDayNumberRef to make sure the user hasn't navigated
+  // to a different puzzle while the POST was in flight — if they
+  // have, we skip setStartedAt (it would leak the old puzzle's start
+  // into the new one) but still stash into todayStartedAtRef when
+  // the target was today's puzzle, so a later return-to-today
+  // restores the running timer.
   const handleStart = useCallback(async () => {
     if (startPending) return;
     setStartPending(true);
-    const stashIfToday = (ms: number) => {
-      if (activePuzzle.dayNumber === initialPuzzle.dayNumber) {
+    const targetDayNumber = activePuzzle.dayNumber;
+    const apply = (ms: number) => {
+      if (activeDayNumberRef.current === targetDayNumber) {
+        setStartedAt(ms);
+      }
+      if (targetDayNumber === initialPuzzle.dayNumber) {
         todayStartedAtRef.current = ms;
       }
     };
@@ -183,13 +200,11 @@ export default function GameClient({
       const res = await fetch('/api/puzzle/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ dayNumber: activePuzzle.dayNumber }),
+        body: JSON.stringify({ dayNumber: targetDayNumber }),
       });
       if (res.ok) {
         const data = (await res.json()) as { startedAt: string };
-        const ms = new Date(data.startedAt).getTime();
-        setStartedAt(ms);
-        stashIfToday(ms);
+        apply(new Date(data.startedAt).getTime());
         return;
       }
     } catch {
@@ -197,9 +212,7 @@ export default function GameClient({
     } finally {
       setStartPending(false);
     }
-    const fallbackMs = Date.now();
-    setStartedAt(fallbackMs);
-    stashIfToday(fallbackMs);
+    apply(Date.now());
   }, [activePuzzle.dayNumber, initialPuzzle.dayNumber, startPending]);
 
   // ── Persisted crumbs ─────────────────────────────────────────────
