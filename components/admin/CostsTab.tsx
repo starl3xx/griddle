@@ -157,10 +157,11 @@ export function CostsTab() {
                     <td className="py-1 px-2 text-right">
                       <InlineInput
                         value={String(r.monthlyUsd)}
-                        onSave={(v) => {
+                        validate={(v) => {
                           const n = Number(v);
-                          if (Number.isFinite(n) && n >= 0) updateRow(r.id, { monthlyUsd: n });
+                          return Number.isFinite(n) && n >= 0;
                         }}
+                        onSave={(v) => updateRow(r.id, { monthlyUsd: Number(v) })}
                         className="text-right tabular-nums"
                       />
                     </td>
@@ -200,17 +201,38 @@ export function CostsTab() {
 /**
  * Uncontrolled input that commits on blur or Enter. Avoids round-
  * trips on every keystroke while still feeling instant.
+ *
+ * Optional `validate` predicate gates the commit: if it returns
+ * false, the draft is reverted to the canonical `value` instead of
+ * silently calling `onSave` (which the parent might also silently
+ * reject, leaving the field stuck on an invalid string with no
+ * feedback). Visible-but-bounce behavior is the right default for
+ * a numeric column like monthly_usd where the wrong type is
+ * obviously wrong.
  */
 function InlineInput({
-  value, onSave, className,
-}: { value: string; onSave: (v: string) => void; className?: string }) {
+  value, onSave, validate, className,
+}: {
+  value: string;
+  onSave: (v: string) => void;
+  validate?: (v: string) => boolean;
+  className?: string;
+}) {
   const [draft, setDraft] = useState(value);
   useEffect(() => { setDraft(value); }, [value]);
+  const commit = () => {
+    if (draft === value) return;
+    if (validate && !validate(draft)) {
+      setDraft(value); // bounce invalid input back to canonical value
+      return;
+    }
+    onSave(draft);
+  };
   return (
     <input
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => { if (draft !== value) onSave(draft); }}
+      onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         if (e.key === 'Escape') setDraft(value);

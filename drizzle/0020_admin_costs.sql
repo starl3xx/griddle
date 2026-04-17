@@ -18,10 +18,21 @@ CREATE TABLE IF NOT EXISTS "admin_costs" (
   "updated_by"   varchar(42)
 );
 
-INSERT INTO "admin_costs" ("category", "label", "monthly_usd") VALUES
-  ('infra', 'Vercel Pro',     0),
-  ('infra', 'Neon Postgres',  0),
-  ('infra', 'Upstash Redis',  0),
-  ('email', 'Resend',         0),
-  ('infra', 'Domain + DNS',   0)
-ON CONFLICT DO NOTHING;
+-- Idempotent seed: the table has no UNIQUE on (category, label)
+-- (id is a serial), so an `ON CONFLICT DO NOTHING` would never
+-- actually skip a duplicate row — it'd silently insert duplicates
+-- on a re-run. Use NOT EXISTS instead so a second invocation is a
+-- no-op regardless of whether unique constraints exist.
+INSERT INTO "admin_costs" ("category", "label", "monthly_usd")
+SELECT v.category, v.label, v.monthly_usd
+FROM (VALUES
+  ('infra', 'Vercel Pro',     0::numeric),
+  ('infra', 'Neon Postgres',  0::numeric),
+  ('infra', 'Upstash Redis',  0::numeric),
+  ('email', 'Resend',         0::numeric),
+  ('infra', 'Domain + DNS',   0::numeric)
+) AS v(category, label, monthly_usd)
+WHERE NOT EXISTS (
+  SELECT 1 FROM "admin_costs" ac
+  WHERE ac.category = v.category AND ac.label = v.label
+);

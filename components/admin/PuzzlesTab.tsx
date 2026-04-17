@@ -248,8 +248,11 @@ export function PuzzlesTab() {
  * Signed wrapper around `formatMsCompact` for calibration residuals.
  * A residual of −12000 ms means "observed 12s faster than predicted"
  * and must retain its sign for the outlier table to be legible.
- * `formatMsCompact` already handles the magnitude + unit; we just
- * prepend the sign.
+ *
+ * `formatMsCompact` takes `Math.abs(ms)` internally — that's the only
+ * reason a naïve prefix works here without producing `--12.0s`. If
+ * `formatMsCompact`'s sign-stripping behavior ever changes, this
+ * function needs updating to match.
  */
 function formatSignedMs(ms: number): string {
   const sign = ms >= 0 ? '+' : '-';
