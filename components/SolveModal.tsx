@@ -6,7 +6,7 @@ import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
 import { SITE_URL } from '@/lib/site';
-import { WORDMARK_BY_ID, isWordmarkId } from '@/lib/wordmarks/catalog';
+import { WORDMARK_BY_ID, WORDMARK_THEMES, isWordmarkId } from '@/lib/wordmarks/catalog';
 
 interface SolveModalProps {
   dayNumber: number;
@@ -125,22 +125,22 @@ export function SolveModal({
         <div className="flex justify-center mb-2" aria-hidden>
           <Medal className="w-12 h-12 text-brand" weight="fill" />
         </div>
-        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900">
+        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
           Solved!
         </h2>
-        <p className="text-sm text-gray-500 mt-1 tabular-nums">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
           Griddle #{dayNumber.toString().padStart(3, '0')}
         </p>
 
-        <p className="mt-4 text-xl sm:text-2xl font-bold uppercase tracking-wider text-brand">
+        <p className="mt-4 text-3xl sm:text-4xl font-bold uppercase tracking-wider text-brand">
           {word}
         </p>
 
         <div className="mt-4 flex items-baseline justify-center gap-2">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">
+          <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
             Time
           </span>
-          <span className="text-3xl font-black text-gray-900 tabular-nums">
+          <span className="text-3xl font-black text-gray-900 dark:text-gray-100 tabular-nums">
             {formatMs(solveMs)}
           </span>
           {unassisted && (
@@ -160,26 +160,29 @@ export function SolveModal({
             here — correct and intentional. */}
         {earnedBadges.length > 0 && (
           <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 animate-fade-in">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">
               Earned
             </span>
-            {earnedBadges.map((w) => (
-              <span
-                key={w.id}
-                className="inline-flex items-center gap-1 rounded-pill bg-accent/10 text-accent-800 dark:text-accent-200 border border-accent/30 px-2 py-0.5 text-[11px] font-bold"
-                title={w.description}
-              >
-                <span aria-hidden>{w.emoji}</span>
-                {w.name}
-              </span>
-            ))}
+            {earnedBadges.map((w) => {
+              const theme = WORDMARK_THEMES[w.id];
+              return (
+                <span
+                  key={w.id}
+                  className={`inline-flex items-center gap-1 rounded-pill ring-1 ${theme.bg} ${theme.ring} text-gray-900 dark:text-gray-100 px-2 py-0.5 text-[11px] font-bold`}
+                  title={w.description}
+                >
+                  <span aria-hidden>{w.emoji}</span>
+                  {w.name}
+                </span>
+              );
+            })}
           </div>
         )}
 
         <button
           type="button"
           onClick={handleShare}
-          className="btn-accent mt-6 w-full relative inline-flex items-center justify-center gap-2"
+          className="btn-primary mt-6 w-full relative inline-flex items-center justify-center gap-2"
           aria-live="polite"
         >
           <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
