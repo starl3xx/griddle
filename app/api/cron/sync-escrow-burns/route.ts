@@ -40,11 +40,24 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// How far back to scan for new escrow settle events. Blocks on Base
-// tick every ~2s so 3_000 blocks ≈ 100 minutes — comfortable margin
-// for an hourly cron, and `onConflictDoUpdate`-style idempotency on
-// the event-hash cursor below keeps replays cheap.
-const LOOKBACK_BLOCKS = 3_000n;
+// How far back to scan on a first-run (no stored cursor). Blocks on
+// Base tick every ~2s so 3_000 blocks ≈ 100 minutes — comfortable
+// bootstrap margin for an hourly cron. Subsequent runs pick up from
+// the persisted cursor, NOT from `currentBlock - LOOKBACK_BLOCKS`.
+const INITIAL_LOOKBACK_BLOCKS = 3_000n;
+
+// Max blocks to scan per run. If the cron skips runs (deploy, outage,
+// config drift) and the cursor falls far behind, we chunk the
+// catch-up across multiple runs instead of losing events past the
+// lookback window or hitting RPC block-range limits. 10_000 is
+// comfortable for Alchemy/Base public endpoints.
+const MAX_SCAN_BLOCKS = 10_000n;
+
+// How many blocks of overlap to keep between runs so a reorg near
+// the cursor boundary doesn't leave events unprocessed. DB updates
+// are keyed by externalId and idempotent, so re-scanning is free.
+const CURSOR_OVERLAP_BLOCKS = 300n;
+
 const CURSOR_KEY = 'griddle:escrow-sync-cursor';
 
 interface RetryEntry {
@@ -72,7 +85,16 @@ export async function GET(req: Request): Promise<NextResponse> {
     transport: http(process.env.BASE_RPC_URL),
   });
 
-  const summary = {
+  const summary: {
+    retriesProcessed: number;
+    retriesSucceeded: number;
+    retriesSkippedAlreadyPremium: number;
+    burnEventsApplied: number;
+    refundEventsApplied: number;
+    scanFromBlock?: string;
+    scanToBlock?: string;
+    caughtUp?: boolean;
+  } = {
     retriesProcessed: 0,
     retriesSucceeded: 0,
     retriesSkippedAlreadyPremium: 0,
@@ -180,12 +202,28 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   // --- 2. Scan settle events -------------------------------------------
+  // Cursor is trusted as the authoritative "last processed up to" —
+  // do NOT clamp it to `currentBlock - LOOKBACK_BLOCKS`, which was the
+  // old behavior and caused events in a downtime gap to be skipped
+  // forever. Instead:
+  //   - On first run (no cursor), bootstrap from currentBlock -
+  //     INITIAL_LOOKBACK_BLOCKS so we don't scan full chain history.
+  //   - On subsequent runs, use the stored cursor unclamped.
+  //   - Cap the window per run at MAX_SCAN_BLOCKS so an old cursor
+  //     catches up across multiple runs instead of exploding a single
+  //     getLogs call past RPC provider limits.
   const currentBlock = await client.getBlockNumber();
   const cursorRaw = await kv.get<string>(CURSOR_KEY);
-  const cursor = cursorRaw ? BigInt(cursorRaw) : currentBlock - LOOKBACK_BLOCKS;
-  const fromBlock = cursor > currentBlock - LOOKBACK_BLOCKS
-    ? cursor
-    : currentBlock - LOOKBACK_BLOCKS;
+  const fromBlock = cursorRaw
+    ? BigInt(cursorRaw)
+    : currentBlock - INITIAL_LOOKBACK_BLOCKS;
+  const toBlock =
+    fromBlock + MAX_SCAN_BLOCKS < currentBlock
+      ? fromBlock + MAX_SCAN_BLOCKS
+      : currentBlock;
+  summary.scanFromBlock = fromBlock.toString();
+  summary.scanToBlock = toBlock.toString();
+  summary.caughtUp = toBlock === currentBlock;
 
   const [burnLogs, refundLogs] = await Promise.all([
     client.getLogs({
@@ -200,7 +238,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         ],
       },
       fromBlock,
-      toBlock: currentBlock,
+      toBlock,
     }),
     client.getLogs({
       address: premiumAddress,
@@ -215,7 +253,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         ],
       },
       fromBlock,
-      toBlock: currentBlock,
+      toBlock,
     }),
   ]);
 
@@ -274,9 +312,14 @@ export async function GET(req: Request): Promise<NextResponse> {
     summary.refundEventsApplied += 1;
   }
 
-  // Advance cursor. We overlap by LOOKBACK_BLOCKS / 10 so a chain
-  // reorg near the cursor boundary doesn't leave events unprocessed.
-  const nextCursor = currentBlock - LOOKBACK_BLOCKS / 10n;
+  // Advance cursor just past the scanned window, minus an overlap so
+  // a chain reorg near the boundary doesn't lose events. When caught
+  // up (toBlock === currentBlock) this lands a few hundred blocks
+  // behind head. When catching up from extended downtime, this
+  // monotonically advances past the last scanned region so the next
+  // run picks up where we left off.
+  const nextCursor =
+    toBlock > CURSOR_OVERLAP_BLOCKS ? toBlock - CURSOR_OVERLAP_BLOCKS : 0n;
   await kv.set(CURSOR_KEY, nextCursor.toString());
 
   return NextResponse.json({ ok: true, summary });

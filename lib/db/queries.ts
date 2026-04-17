@@ -1547,12 +1547,31 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
     // the buyer disconnects wallet A and connects wallet B). The audit
     // trail for wallet-path fiat purchases is in the profiles row written
     // below, which always carries the stripe_session_id.
-    // onConflictDoNothing: if the wallet already has a premium_users row
-    // (from a prior crypto unlock, admin grant, or a previous fiat purchase),
-    // the existing row wins. We must NOT overwrite it  -  doing so would
-    // destroy the txHash and source from a crypto premium row, making the
-    // on-chain burn untraceable from the DB alone. The wallet is already
-    // premium; no update is needed in any case.
+    // Only record the quoted $WORD amount when the escrow actually
+    // opened on-chain (escrowStatus='pending'). If the escrow call
+    // failed, the quote is stale and writing it to `word_burned`
+    // would show a bogus figure in the admin ledger until the retry
+    // cron fixes it.
+    const wordBurnedValue =
+      input.escrowStatus === 'pending' && input.wordAmount
+        ? input.wordAmount.toString()
+        : null;
+
+    // `onConflictDoUpdate` scoped by a WHERE clause: we want to
+    // update escrow fields ONLY when the existing row belongs to the
+    // same Stripe session (externalId match) OR we're freshly
+    // filling in a row we previously wrote with null escrow fields.
+    // This fixes the Stripe-webhook-replay case where the first
+    // attempt failed on-chain (row has null escrow fields + matching
+    // externalId) and the retry succeeded: without this update the
+    // successful escrow_open_tx + escrow_status='pending' would be
+    // silently dropped by onConflictDoNothing, leaving the admin
+    // ledger permanently stuck.
+    //
+    // We must NOT overwrite a crypto or admin_grant row — the
+    // webhook's `getPremiumRowByWallet` + externalId guard already
+    // prevents reaching here in that case, and the WHERE clause is
+    // defense-in-depth.
     await db
       .insert(premiumUsers)
       .values({
@@ -1562,25 +1581,22 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
         grantedBy: null,
         reason: null,
         stripeSessionId: null,
-        // Escrow telemetry — present whenever the on-chain
-        // unlockForUser succeeded. Null if the webhook couldn't reach
-        // the chain and left the retry queue to handle it.
         escrowStatus: input.escrowStatus ?? null,
         escrowOpenTx: input.escrowOpenTx ?? null,
         escrowBurnTx: null,
         externalId: input.externalId ?? null,
-        // Only record the quoted $WORD amount when the escrow
-        // actually opened on-chain (escrowStatus='pending'). If the
-        // escrow call failed, the quote is stale and writing it to
-        // `word_burned` would show a bogus figure in the admin ledger
-        // until the retry cron fixes it — let the cron set it at the
-        // real oracle price instead.
-        wordBurned:
-          input.escrowStatus === 'pending' && input.wordAmount
-            ? input.wordAmount.toString()
-            : null,
+        wordBurned: wordBurnedValue,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: premiumUsers.wallet,
+        set: {
+          escrowStatus: input.escrowStatus ?? null,
+          escrowOpenTx: input.escrowOpenTx ?? null,
+          externalId: input.externalId ?? null,
+          wordBurned: wordBurnedValue,
+        },
+        setWhere: sql`${premiumUsers.externalId} = ${input.externalId ?? null} AND ${premiumUsers.source} = 'fiat'`,
+      });
   }
 
   // Persist the stripe session id on the profile row. For wallet-path
