@@ -478,7 +478,7 @@ Both paths land in the same `premium_users` ledger. Premium status is server-sid
 
 ### 2026-04-13 (M2 + M3 — polish + social surface)
 
-- **M2 (#3–#5)**: Visual polish + deployment prep. Solve celebration, tutorial copy, share grid alignment via Unicode fullwidth letters, share-footer driven from canonical `lib/site.ts`. Top-left spoiler fix: regenerated all 279 grids so `word[0]` never sits in cell 0.
+- **M2 (#3–#5)**: Visual polish + deployment prep. Solve celebration, tutorial copy, share grid alignment via Unicode fullwidth letters, share-footer driven from canonical `lib/site.ts`. Grids regenerated to tighten up a construction quirk that produced subtle share-card tells.
 - **M3 — Satori OG image** (#6): Gotchas logged in code comments — no `display: grid` in Satori, multi-child divs need explicit `display: flex`, fonts must be TTF.
 - **M3 — Farcaster mini-app SDK** (#7): Fire `sdk.actions.ready()` immediately (don't await behind context), race `sdk.context` against a 2-second timeout to avoid hangs, three-state `composeCast` result (cast / cancelled / failed) so a cancelled composer doesn't silently fall through to clipboard.
 - **M3 — PWA manifest** (#8): Web app manifest + iOS/Android install prompts.
