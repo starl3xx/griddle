@@ -225,7 +225,7 @@ export function PuzzlesTab() {
                         <td className="py-1 px-2 text-right tabular-nums">{formatMs(p.observedAvgMs)}</td>
                         <td className="py-1 px-2 text-right tabular-nums text-gray-500">{formatMs(predicted)}</td>
                         <td className={`py-1 pl-2 text-right tabular-nums font-bold ${p.residual > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                          {p.residual > 0 ? '+' : ''}{formatMs(p.residual)}
+                          {formatSignedMs(p.residual)}
                         </td>
                       </tr>
                     );
@@ -242,6 +242,22 @@ export function PuzzlesTab() {
       </Card>
     </div>
   );
+}
+
+/**
+ * Signed ms formatter for calibration residuals. `formatMs` in
+ * lib/format clamps to 0 (solve-time semantics — negative is
+ * nonsensical), but a residual of −12000 ms means "observed 12s
+ * faster than predicted" and must retain its sign for the outlier
+ * table to be legible.
+ */
+function formatSignedMs(ms: number): string {
+  const sign = ms >= 0 ? '+' : '-';
+  const abs = Math.abs(ms);
+  if (abs < 1000) return `${sign}${Math.round(abs)}ms`;
+  if (abs < 60_000) return `${sign}${(abs / 1000).toFixed(1)}s`;
+  if (abs < 3_600_000) return `${sign}${(abs / 60_000).toFixed(1)}m`;
+  return `${sign}${(abs / 3_600_000).toFixed(1)}h`;
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {

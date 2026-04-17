@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Area, AreaChart, ResponsiveContainer } from 'recharts';
 
@@ -42,6 +43,13 @@ interface SparklineCardProps {
 export function SparklineCard({
   icon, label, value, sub, tone = 'ok', series, delta = null, deltaKind = 'abs',
 }: SparklineCardProps) {
+  // SVG ids must be a valid XML NAME. `useId()` can emit `:` which is
+  // invalid inside a url(#…) reference in some user agents; sanitize
+  // to word-chars only. Previously we used the raw `label` prop which
+  // contained spaces and "·", causing the `fill="url(#...)"` lookup
+  // to miss and gradients to render blank.
+  const rawId = useId();
+  const gradientId = `spark-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pill = deltaPill(delta, deltaKind);
   const iconClass: Record<Tone, string> = {
     ok: 'text-gray-400', warning: 'text-warning', error: 'text-error', accent: 'text-accent',
@@ -77,7 +85,7 @@ export function SparklineCard({
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={series} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                 <defs>
-                  <linearGradient id={`spark-${label}`} x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={strokeColor[tone]} stopOpacity={0.35} />
                     <stop offset="100%" stopColor={strokeColor[tone]} stopOpacity={0} />
                   </linearGradient>
@@ -87,7 +95,7 @@ export function SparklineCard({
                   dataKey="value"
                   stroke={strokeColor[tone]}
                   strokeWidth={1.5}
-                  fill={`url(#spark-${label})`}
+                  fill={`url(#${gradientId})`}
                   isAnimationActive={false}
                 />
               </AreaChart>

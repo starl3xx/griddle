@@ -129,9 +129,15 @@ export function PulseTab() {
   // approximate MTD via the last-30-day window since `revenue` here
   // is that window's breakdown. A stricter month-to-date column is
   // a follow-up if this proves misleading in practice.
+  //
+  // Op costs: prorate the monthly total by days-elapsed / days-in-
+  // current-month. Using a hardcoded 30 under-reports Feb and makes
+  // the 31st of long months > 100% of the monthly spend.
   const mtdGross = data.revenue.totalRealizedUsd;
-  const daysElapsed = new Date().getUTCDate();
-  const opCostMtd = (data.opCostsMonthlyTotal * daysElapsed) / 30;
+  const now = new Date();
+  const daysElapsed = now.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const opCostMtd = (data.opCostsMonthlyTotal * daysElapsed) / daysInMonth;
   const netMtd = mtdGross - opCostMtd;
 
   return (
