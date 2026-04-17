@@ -255,7 +255,8 @@ export function PuzzlesTab() {
  * function needs updating to match.
  */
 function formatSignedMs(ms: number): string {
-  const sign = ms >= 0 ? '+' : '-';
+  if (ms === 0) return formatMs(0); // '0ms' reads better than '+0ms'
+  const sign = ms > 0 ? '+' : '-';
   return `${sign}${formatMs(ms)}`;
 }
 

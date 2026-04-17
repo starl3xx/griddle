@@ -150,9 +150,16 @@ async function countRegistered(opts: { q: string }): Promise<number> {
   const where = searchTerm
     ? or(ilike(profiles.wallet, searchTerm), ilike(profiles.handle, searchTerm))
     : undefined;
+  // Mirror `listRegistered`'s LEFT JOIN so the count matches the row
+  // set the list query produces. Today both are equivalent to a bare
+  // `count(*)` on profiles because `premium_users.wallet` is the PK
+  // and `profiles.wallet` has a unique partial index — so the join
+  // is one-to-(0 or 1). The extra join + DISTINCT is defense in
+  // depth for the day one of those constraints changes.
   const [row] = await db
-    .select({ count: sql<number>`count(*)` })
+    .select({ count: sql<number>`count(distinct ${profiles.id})` })
     .from(profiles)
+    .leftJoin(premiumUsers, eq(profiles.wallet, premiumUsers.wallet))
     .where(where);
   return Number(row?.count ?? 0);
 }
