@@ -128,15 +128,22 @@ export function PulseTab() {
     : null;
 
   // MTD net = (realized revenue since 1st of month) − (op-costs
-  // prorated to the same window). The API computes `mtdGross`
-  // server-side with a `date_trunc('month', now())` filter so it's
-  // authoritative regardless of how far back the rolling chart
-  // series goes (a 30-day series would miss day 1 on the 31st of
-  // a long month — had that bug in an earlier revision).
+  // prorated to the same window). Revenue's `mtdGross` comes from
+  // the server with a `date_trunc('month', now())` filter — i.e.
+  // its window starts at midnight UTC on day 1. Costs have to
+  // prorate against that exact same window.
+  //
+  // Compute the fraction of the month that has ACTUALLY elapsed
+  // (ms-precision), not a day-of-month integer. `getUTCDate()`
+  // returns 1 all day long on the 1st, so using it directly
+  // would charge a full day of op-costs at 00:00 UTC when zero
+  // revenue has been booked yet — net margin would look
+  // misleadingly negative for all of day 1.
   const now = new Date();
-  const daysElapsed = now.getUTCDate();
-  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
-  const opCostMtd = (data.opCostsMonthlyTotal * daysElapsed) / daysInMonth;
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const monthFraction = (now.getTime() - monthStart) / (monthEnd - monthStart);
+  const opCostMtd = data.opCostsMonthlyTotal * monthFraction;
   const netMtd = data.mtdGross - opCostMtd;
 
   return (
