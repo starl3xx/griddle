@@ -10,95 +10,138 @@ import { Script, console2 } from "forge-std/Script.sol";
  *         fee, tickSpacing, hooks) is not derivable from the token
  *         address alone.
  *
- * Run against Base mainnet:
+ * Two-stage discovery:
+ *   1. Ask Clanker's factory for $WORD's hook address via
+ *      `tokenDeploymentInfo(address)` → `DeploymentInfo`.
+ *   2. Brute-force common (fee, tickSpacing) pairs against the known
+ *      PoolId reported by DexScreener until the PoolKey hash matches,
+ *      yielding the exact Uniswap v4 pool parameters.
  *
+ * Run:
  *     source .env  # BASE_RPC_URL
  *     forge script script/DiscoverWordPool.s.sol --rpc-url $BASE_RPC_URL
  *
- * The script prints the $WORD pool's hook, fee, and tickSpacing
- * derived from Clanker factory storage. Copy the values into the
- * corresponding constants in GriddlePremiumFork.t.sol, then run the
- * fork test to confirm the end-to-end swap + burn works before you
- * deploy the new GriddlePremium on mainnet.
+ * The script prints the matching hook / fee / tickSpacing for
+ * GriddlePremiumFork.t.sol.
  */
 interface IClankerFactory {
-    // Tentative signature — Clanker v4's factory exposes tokenData or
-    // similar. If this selector reverts, the script prints the
-    // factory's bytecode hash so we can inspect Etherscan for the
-    // right getter. Verified against Clanker v4's public repo:
-    // https://github.com/clanker-devco/v4-contracts
+    struct DeploymentInfo {
+        address token;
+        address hook;
+        address locker;
+        address[] extensions;
+    }
+
     function tokenDeploymentInfo(address token)
         external
         view
-        returns (
-            address creator,
-            address hook,
-            address locker,
-            uint24 fee,
-            int24 tickSpacing
-        );
+        returns (DeploymentInfo memory);
 }
 
-interface IUniV4PoolManager {
-    // Use this to double-check the pool actually initialized after
-    // recovering the PoolKey. Base v4 PoolManager — address confirmed
-    // via Uniswap deployments docs.
-    function getSlot0(bytes32 poolId)
-        external
-        view
-        returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee);
+struct PoolKey {
+    address currency0;
+    address currency1;
+    uint24 fee;
+    int24 tickSpacing;
+    address hooks;
 }
 
 contract DiscoverWordPool is Script {
     address constant WORD = 0x304e649e69979298BD1AEE63e175ADf07885fb4b;
     address constant WETH = 0x4200000000000000000000000000000000000006;
-
-    // Clanker v4 factory — the creator listed on the WORD token on
-    // BaseScan's contract-creation row.
     address constant CLANKER_V4_FACTORY = 0xE85A59c628F7d27878ACeB4bf3b35733630083a9;
+
+    // Known PoolId from DexScreener's listing for the WORD/WETH v4 pool.
+    bytes32 constant KNOWN_POOL_ID = 0xc5db937916d2c6f96142a6886ba8b5b74e14949c9cc1080a676ab2a5eb1ea275;
+
+    // Uniswap v4 hook permission bitmask flag for dynamic fees
+    // (ClankerHookDynamicFee sets this).
+    uint24 constant DYNAMIC_FEE_FLAG = 0x800000;
 
     function run() external view {
         console2.log("=== $WORD Clanker v4 pool discovery ===");
-        console2.log("");
 
-        // Sorted PoolKey: currency0 < currency1 (numeric address order).
-        address currency0;
-        address currency1;
-        if (uint160(WORD) < uint160(WETH)) {
-            currency0 = WORD;
-            currency1 = WETH;
-        } else {
-            currency0 = WETH;
-            currency1 = WORD;
-        }
-        console2.log("currency0:   ", currency0);
-        console2.log("currency1:   ", currency1);
+        address c0 = uint160(WORD) < uint160(WETH) ? WORD : WETH;
+        address c1 = uint160(WORD) < uint160(WETH) ? WETH : WORD;
+        console2.log("currency0: ", c0);
+        console2.log("currency1: ", c1);
 
-        // Attempt the typed call. If the selector is wrong, forge will
-        // revert on the staticcall and we'll need to inspect factory
-        // bytecode for the real getter.
+        // --- Stage 1: ask factory for hook ---------------------------
+        address hook;
         try IClankerFactory(CLANKER_V4_FACTORY).tokenDeploymentInfo(WORD)
-            returns (address creator, address hook, address locker, uint24 fee, int24 tickSpacing)
+            returns (IClankerFactory.DeploymentInfo memory info)
         {
-            console2.log("creator:     ", creator);
-            console2.log("hook:        ", hook);
-            console2.log("locker:      ", locker);
-            console2.log("fee:         ", uint256(fee));
-            console2.log("tickSpacing: ", int256(tickSpacing));
-            console2.log("");
-            console2.log("Paste these into contracts/test/GriddlePremiumFork.t.sol:");
-            console2.log("  address constant WORD_HOOK = ", hook);
-            console2.log("  uint24  constant WORD_FEE  = ", uint256(fee));
-            console2.log("  int24   constant WORD_TICK_SPACING = ", int256(tickSpacing));
+            hook = info.hook;
+            console2.log("token (echo):        ", info.token);
+            console2.log("hook (from factory): ", hook);
+            console2.log("locker:              ", info.locker);
         } catch {
             console2.log("");
-            console2.log("Factory selector mismatch. Verify on BaseScan:");
+            console2.log("Could not call tokenDeploymentInfo. Check factory on BaseScan:");
             console2.log("  https://basescan.org/address/0xe85a59c628f7d27878aceb4bf3b35733630083a9#readContract");
-            console2.log("");
-            console2.log("Look for a getter like `tokenData(address)`,");
-            console2.log("`tokenDeploymentInfo(address)`, or iterate the");
-            console2.log("`PoolInitialized` events from the WORD deployment tx");
-            console2.log("to recover hook / fee / tickSpacing manually.");
+            return;
         }
+
+        // --- Stage 2: brute-force fee + tickSpacing --------------------
+        // Clanker v4 defaults observed across launches are below. The
+        // dynamic-fee hook sets fee = DYNAMIC_FEE_FLAG (0x800000) and
+        // usually tickSpacing = 200. The static-fee hook uses a normal
+        // fee tier (10000 = 1%) and a corresponding spacing.
+        uint24[10] memory feeTiers = [
+            uint24(DYNAMIC_FEE_FLAG),  // dynamic, common Clanker default
+            uint24(10000),              // 1% static
+            uint24(3000),               // 0.3%
+            uint24(500),                // 0.05%
+            uint24(100),                // 0.01%
+            uint24(0),                  // 0 (hook-collected only)
+            DYNAMIC_FEE_FLAG | 10000,
+            DYNAMIC_FEE_FLAG | 3000,
+            DYNAMIC_FEE_FLAG | 500,
+            DYNAMIC_FEE_FLAG | 100
+        ];
+        int24[5] memory tickSpacings = [
+            int24(200),
+            int24(60),
+            int24(10),
+            int24(1),
+            int24(2)
+        ];
+
+        for (uint256 i; i < feeTiers.length; i++) {
+            for (uint256 j; j < tickSpacings.length; j++) {
+                PoolKey memory k = PoolKey({
+                    currency0: c0,
+                    currency1: c1,
+                    fee: feeTiers[i],
+                    tickSpacing: tickSpacings[j],
+                    hooks: hook
+                });
+                bytes32 id = _toId(k);
+                if (id == KNOWN_POOL_ID) {
+                    console2.log("");
+                    console2.log("*** MATCH ***");
+                    console2.log("fee:         ", uint256(feeTiers[i]));
+                    console2.log("tickSpacing: ", int256(tickSpacings[j]));
+                    console2.log("");
+                    console2.log("Paste into contracts/test/GriddlePremiumFork.t.sol:");
+                    console2.log("  address constant WORD_HOOK = ", hook);
+                    console2.log("  uint24  constant WORD_FEE  = ", uint256(feeTiers[i]));
+                    console2.log("  int24   constant WORD_TICK_SPACING = ", int256(tickSpacings[j]));
+                    return;
+                }
+            }
+        }
+
+        console2.log("");
+        console2.log("No fee/tickSpacing combo in the brute-force table matched.");
+        console2.log("Expand the tables or query the PoolInitialized event directly.");
+        console2.log("Hook we have: ", hook);
+        console2.log("Target PoolId: ");
+        console2.logBytes32(KNOWN_POOL_ID);
+    }
+
+    // Uniswap v4 poolId derivation — keccak256(abi.encode(PoolKey)).
+    function _toId(PoolKey memory key) internal pure returns (bytes32) {
+        return keccak256(abi.encode(key));
     }
 }

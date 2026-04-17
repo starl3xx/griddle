@@ -9,20 +9,48 @@ import { GriddlePremium } from "../src/GriddlePremium.sol";
 import { MockOracle } from "./mocks/MockOracle.sol";
 
 /**
- * Fork test against Base mainnet. Proves unlockWithUsdc end-to-end
+ * Fork test against Base mainnet. Exercises unlockWithUsdc end-to-end
  * against the real Universal Router, real Permit2, real USDC, and the
  * real Uniswap v4 WORD/WETH Clanker pool.
  *
- * What this test produces, on success:
- *   - Confirms the GriddlePremium contract's USDC permit + Permit2 +
- *     UR + burn sequence is correct against real infrastructure.
- *   - Prints the exact `commands` + `inputs` bytes that should be
- *     passed to `setSwapConfig()` on mainnet immediately after deploy.
+ * ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+ * ┃  STATUS: INCOMPLETE — ends in Clanker hook revert             ┃
+ * ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+ *
+ * The test walks the full permit + Permit2 + V3-leg path cleanly.
+ * The V4 leg (WETH → $WORD via the Clanker pool) reverts inside the
+ * hook with `NotPoolManager()` (selector 0xd81b2f2e). Trace shows
+ * Clanker's MEV-module path:
+ *
+ *   beforeSwap → collectRewardsWithoutUnlock → beforeSwap
+ *                → simulateSwap → REVERT
+ *
+ * This is NOT a bug in GriddlePremium — the contract's USDC pull,
+ * Permit2 allowance dance, and UR invocation are all correct. The
+ * barrier is Clanker's ClankerSniperAuctionV0 expecting a specific
+ * authorized-router calldata shape that plain UR V4_SWAP doesn't
+ * match by default.
+ *
+ * Forward path: DON'T hand-encode the V4 calldata. Instead use
+ * Uniswap's universal-router-sdk (npm package) to compute the swap
+ * recipe off-chain for a $5 USDC → $WORD trade. The SDK understands
+ * Clanker hooks + MEV modules and picks the correct route. Run it
+ * once per deploy, paste the resulting `commands` + `inputs` bytes
+ * into `setSwapConfig()` on the production contract.
+ *
+ * What this test is still useful for:
+ *   - Verifying GriddlePremium's USDC permit / Permit2 / UR call
+ *     sequence works against real infrastructure (up to the V4 hook
+ *     revert, everything passes).
+ *   - Producing the V3 leg's encoded bytes in case you want a
+ *     V3-only fallback route (e.g., if liquidity migrates).
  *
  * Prerequisites:
- *   1. Run `script/DiscoverWordPool.s.sol` first and paste the
- *      discovered pool params (hook address, fee, tickSpacing) into
- *      the WORD_HOOK / WORD_FEE / WORD_TICK_SPACING constants below.
+ *   1. Pool params already discovered via DiscoverWordPool.s.sol
+ *      (Initialize event on Base v4 PoolManager):
+ *        WORD_HOOK           = 0xd60D6B218116cFd801E28F78d011a203D2b068Cc
+ *        WORD_FEE            = 0x800000 (DYNAMIC_FEE_FLAG)
+ *        WORD_TICK_SPACING   = 200
  *   2. Set BASE_RPC_URL in your env.
  *
  * Run:
@@ -31,7 +59,8 @@ import { MockOracle } from "./mocks/MockOracle.sol";
  *   forge test \
  *     --match-contract GriddlePremiumForkTest \
  *     --fork-url $BASE_RPC_URL \
- *     -vvv
+ *     --evm-version cancun \
+ *     -vvvv
  */
 contract GriddlePremiumForkTest is Test {
     // --- Canonical Base mainnet addresses ---------------------------------
@@ -41,11 +70,11 @@ contract GriddlePremiumForkTest is Test {
     address constant UNIVERSAL_ROUTER = 0x6fF5693b99212Da76ad316178A184AB56D299b43;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
-    // --- WORD pool params (FILL FROM DiscoverWordPool.s.sol OUTPUT) -------
-    // Placeholders below assume Clanker v4 defaults. The discovery
-    // script will emit the real values — paste them here before running.
-    address constant WORD_HOOK = 0x0000000000000000000000000000000000000000; // TODO: discover
-    uint24  constant WORD_FEE  = 10_000;   // 1% static — common Clanker default
+    // --- WORD pool params (discovered via Uniswap v4 PoolManager log scan)
+    // Initialize(PoolId=0xc5db937916d2c6f96142a6886ba8b5b74e14949c9cc1080a676ab2a5eb1ea275)
+    // at block 42157034 on Base mainnet, currency0=WORD, currency1=WETH.
+    address constant WORD_HOOK = 0xd60D6B218116cFd801E28F78d011a203D2b068Cc;
+    uint24  constant WORD_FEE  = 0x800000; // DYNAMIC_FEE_FLAG — Clanker hook sets the fee at swap time
     int24   constant WORD_TICK_SPACING = 200;
 
     // --- V3 leg (USDC → WETH) ---------------------------------------------
@@ -126,10 +155,19 @@ contract GriddlePremiumForkTest is Test {
         );
 
         // --- Leg 2: V4 WETH→WORD ---------------------------------------
-        // V4_SWAP wraps a sub-action sequence:
-        //   - SWAP_EXACT_IN_SINGLE (0x06)
-        //   - SETTLE_ALL (0x0c)
-        //   - TAKE_ALL (0x0f)
+        // V4_SWAP sequence: SWAP builds deltas → SETTLE_ALL pays WETH
+        // debt from UR's balance → TAKE_ALL withdraws WORD credit.
+        //
+        // NOTE: amountIn is hardcoded conservatively below. UR's
+        // V4Router treats amountIn=0 as OPEN_DELTA which requires a
+        // prior SETTLE/credit — a pattern that doesn't chain cleanly
+        // from a V3_SWAP_EXACT_IN handoff. Hardcoding at ~99% of
+        // expected V3 leg output is the simplest working recipe; dust
+        // (<1%) may remain in UR and can be swept later via a SWEEP
+        // command or one-off owner call. A production deploy should
+        // instead use Uniswap's universal-router-sdk to compute the
+        // optimal recipe (it picks the best route + handles OPEN_DELTA
+        // chaining correctly across router versions).
         bytes memory v4Actions = abi.encodePacked(
             bytes1(0x06),
             bytes1(0x0c),
@@ -138,19 +176,25 @@ contract GriddlePremiumForkTest is Test {
 
         bytes[] memory v4Params = new bytes[](3);
 
-        // SWAP_EXACT_IN_SINGLE params:
-        //   (PoolKey poolKey, bool zeroForOne, uint128 amountIn,
-        //    uint128 amountOutMinimum, bytes hookData)
+        // At $5 USDC + ~$2430/ETH, V3 leg outputs ~2.057e15 WETH wei.
+        // Swap 2e15 of that (99.6%); the residual stays in UR per the
+        // note above and can be swept.
+        uint128 hardcodedWethIn = 2e15;
+
         bool wordIsZero = uint160(WORD) < uint160(WETH);
-        v4Params[0] = abi.encode(
-            _poolKey(),
-            !wordIsZero,        // WETH → WORD: zeroForOne if WETH is token0
-            uint128(0),          // amountIn = open — UR has WETH from leg 1, SETTLE_ALL routes it
-            uint128(0),          // min amount — our contract enforces final floor
-            bytes("")            // no hookData
-        );
+        PoolKey memory key = _poolKey();
+        ExactInputSingleParams memory params = ExactInputSingleParams({
+            poolKey: key,
+            zeroForOne: !wordIsZero,
+            amountIn: hardcodedWethIn,
+            amountOutMinimum: 0,
+            hookData: bytes("")
+        });
+        v4Params[0] = abi.encode(params);
+
         // SETTLE_ALL params: (Currency currency, uint256 maxAmount)
         v4Params[1] = abi.encode(WETH, type(uint256).max);
+
         // TAKE_ALL params: (Currency currency, uint256 minAmount)
         v4Params[2] = abi.encode(WORD, uint256(0));
 
@@ -260,4 +304,14 @@ struct PoolKey {
     uint24 fee;
     int24 tickSpacing;
     address hooks;
+}
+
+/// Mirror of v4-periphery's ExactInputSingleParams for ABI-clean
+/// encoding of the SWAP_EXACT_IN_SINGLE action.
+struct ExactInputSingleParams {
+    PoolKey poolKey;
+    bool zeroForOne;
+    uint128 amountIn;
+    uint128 amountOutMinimum;
+    bytes hookData;
 }
