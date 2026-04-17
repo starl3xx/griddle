@@ -1,14 +1,20 @@
 import { NextResponse } from 'next/server';
 import { requireAdminWallet } from '@/lib/admin';
-import { getFunnelStats, type FunnelWindow } from '@/lib/db/queries';
+import {
+  getFunnelStats,
+  getFunnelDropOff,
+  getFunnelEntryPoints,
+  getFunnelTimeToStage,
+  type FunnelWindow,
+} from '@/lib/db/queries';
 
 /**
  * GET /api/admin/funnel?window=7d
  *
- * Returns stage counts + breakdown + time-to-convert medians for the
- * admin Funnel tab. Admin-gated via the same wallet-session check as
- * the rest of /api/admin/*; non-admin callers see a 404 so the route's
- * existence isn't leaked.
+ * Returns the full Funnel-tab payload: original stage counts +
+ * breakdown + time-to-convert, PLUS drop-off rates, entry-point
+ * breakdown, and stage-to-stage medians. Admin-gated — 404 to
+ * non-admin callers so the route's existence isn't leaked.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,6 +33,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     ? (raw as FunnelWindow)
     : '7d';
 
-  const stats = await getFunnelStats(window);
-  return NextResponse.json(stats);
+  const [stats, dropOff, entryPoints, timeToStage] = await Promise.all([
+    getFunnelStats(window),
+    getFunnelDropOff(window),
+    getFunnelEntryPoints(window),
+    getFunnelTimeToStage(window),
+  ]);
+  return NextResponse.json({ stats, dropOff, entryPoints, timeToStage });
 }

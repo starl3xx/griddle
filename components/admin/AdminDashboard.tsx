@@ -4,13 +4,16 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { PulseTab } from './PulseTab';
 import { FunnelTab } from './FunnelTab';
+import { RetentionTab } from './RetentionTab';
 import { AnomaliesTab } from './AnomaliesTab';
 import { GrantTab } from './GrantTab';
 import { UsersTab } from './UsersTab';
+import { PuzzlesTab } from './PuzzlesTab';
 import { TransactionsTab } from './TransactionsTab';
-import { Gauge, Funnel, Warning, Gift, Users, Receipt } from '@phosphor-icons/react';
+import { CostsTab } from './CostsTab';
+import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins } from '@phosphor-icons/react';
 
-type Tab = 'pulse' | 'funnel' | 'anomalies' | 'grant' | 'users' | 'transactions';
+type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs';
 
 interface AdminDashboardProps {
   /** Connected admin wallet — shown in the header for context. */
@@ -45,54 +48,42 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
         </header>
 
         <TabGroup title="Analytics">
-          <TabButton
-            active={activeTab === 'pulse'}
-            onClick={() => setActiveTab('pulse')}
-            icon={<Gauge className="h-4 w-4" weight="bold" />}
-            label="Pulse"
-          />
-          <TabButton
-            active={activeTab === 'funnel'}
-            onClick={() => setActiveTab('funnel')}
-            icon={<Funnel className="h-4 w-4" weight="bold" />}
-            label="Funnel"
-          />
+          <TabButton active={activeTab === 'pulse'} onClick={() => setActiveTab('pulse')}
+            icon={<Gauge className="h-4 w-4" weight="bold" />} label="Pulse" />
+          <TabButton active={activeTab === 'funnel'} onClick={() => setActiveTab('funnel')}
+            icon={<Funnel className="h-4 w-4" weight="bold" />} label="Funnel" />
+          <TabButton active={activeTab === 'retention'} onClick={() => setActiveTab('retention')}
+            icon={<ChartLine className="h-4 w-4" weight="bold" />} label="Retention" />
         </TabGroup>
 
         <TabGroup title="Operations">
-          <TabButton
-            active={activeTab === 'users'}
-            onClick={() => setActiveTab('users')}
-            icon={<Users className="h-4 w-4" weight="bold" />}
-            label="Users"
-          />
-          <TabButton
-            active={activeTab === 'transactions'}
-            onClick={() => setActiveTab('transactions')}
-            icon={<Receipt className="h-4 w-4" weight="bold" />}
-            label="Transactions"
-          />
-          <TabButton
-            active={activeTab === 'anomalies'}
-            onClick={() => setActiveTab('anomalies')}
-            icon={<Warning className="h-4 w-4" weight="bold" />}
-            label="Anomalies"
-          />
-          <TabButton
-            active={activeTab === 'grant'}
-            onClick={() => setActiveTab('grant')}
-            icon={<Gift className="h-4 w-4" weight="bold" />}
-            label="Grant"
-          />
+          <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')}
+            icon={<Users className="h-4 w-4" weight="bold" />} label="Users" />
+          <TabButton active={activeTab === 'puzzles'} onClick={() => setActiveTab('puzzles')}
+            icon={<PuzzlePiece className="h-4 w-4" weight="bold" />} label="Puzzles" />
+          <TabButton active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')}
+            icon={<Receipt className="h-4 w-4" weight="bold" />} label="Transactions" />
+          <TabButton active={activeTab === 'anomalies'} onClick={() => setActiveTab('anomalies')}
+            icon={<Warning className="h-4 w-4" weight="bold" />} label="Anomalies" />
+          <TabButton active={activeTab === 'grant'} onClick={() => setActiveTab('grant')}
+            icon={<Gift className="h-4 w-4" weight="bold" />} label="Grant" />
+        </TabGroup>
+
+        <TabGroup title="Settings">
+          <TabButton active={activeTab === 'costs'} onClick={() => setActiveTab('costs')}
+            icon={<Coins className="h-4 w-4" weight="bold" />} label="Costs" />
         </TabGroup>
 
         <div className="mt-6">
           {activeTab === 'pulse' && <PulseTab />}
           {activeTab === 'funnel' && <FunnelTab />}
+          {activeTab === 'retention' && <RetentionTab />}
           {activeTab === 'users' && <UsersTab />}
+          {activeTab === 'puzzles' && <PuzzlesTab />}
           {activeTab === 'transactions' && <TransactionsTab />}
           {activeTab === 'anomalies' && <AnomaliesTab />}
           {activeTab === 'grant' && <GrantTab />}
+          {activeTab === 'costs' && <CostsTab />}
         </div>
       </div>
     </div>

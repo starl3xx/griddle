@@ -42,3 +42,40 @@ export interface FunnelStats {
   /** Median ms from upgrade_clicked to checkout_completed, per method. */
   medianTimeToConvertMs: FunnelTimeToConvertRow[];
 }
+
+/**
+ * The canonical anon → premium funnel, ordered. Each row carries its
+ * count plus drop-off from previous stage and from the initial stage —
+ * the two numbers an operator actually reads when diagnosing where the
+ * funnel leaks.
+ */
+export interface FunnelDropOffRow {
+  stage: string;
+  sessions: number;
+  /** 0-1; null for the first stage (no previous). */
+  dropFromPrev: number | null;
+  /** 0-1; always 1.0 for the first stage. */
+  retainedFromStart: number;
+}
+
+/**
+ * Entry-point rollup — "when the premium gate was shown for feature X,
+ * how often did the session go on to click upgrade / start checkout /
+ * complete?" Lets the Funnel tab compare conversion by gate trigger.
+ */
+export interface FunnelEntryPointRow {
+  feature: string;
+  shown: number;
+  clicked: number;
+  checkoutStarted: number;
+  checkoutCompleted: number;
+  convertedPct: number;
+}
+
+/** Medians (ms) for the user-visible stage-to-stage latencies. */
+export interface FunnelTimeToStage {
+  firstPlayToProfile: number | null;
+  profileToGate: number | null;
+  gateToUpgrade: number | null;
+  upgradeToCheckout: number | null;
+}

@@ -3,20 +3,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CircleNotch, ArrowsClockwise, ChartLineUp, Timer } from '@phosphor-icons/react';
+import { CircleNotch, ArrowsClockwise, ChartLineUp, Timer, Target } from '@phosphor-icons/react';
+import { formatMs } from '@/lib/format';
 import type {
   FunnelWindow,
   FunnelStageRow,
   FunnelBreakdownRow,
   FunnelStats,
+  FunnelDropOffRow,
+  FunnelEntryPointRow,
+  FunnelTimeToStage,
 } from '@/lib/funnel/types';
 
-// The canonical funnel order. Stages render top-to-bottom with
-// conversion % computed against the first populated stage. Events
-// outside this list (checkout_failed, profile_identified, etc.) are
-// rendered in a separate "Other signals" section below so failure
-// breakdowns and identification events are visible without polluting
-// the funnel math.
 const STAGE_ORDER: { name: string; label: string }[] = [
   { name: 'stats_opened',       label: 'Stats opened' },
   { name: 'premium_gate_shown', label: 'Premium gate shown' },
@@ -38,14 +36,28 @@ const WINDOW_LABELS: Record<FunnelWindow, string> = {
   'all': 'All time',
 };
 
+interface FunnelPayload {
+  stats: FunnelStats;
+  dropOff: FunnelDropOffRow[];
+  entryPoints: FunnelEntryPointRow[];
+  timeToStage: FunnelTimeToStage;
+}
+
+/**
+ * Funnel tab — actionable conversion insights.
+ *
+ * Sections:
+ *   - Stages with drop-off % between each step (horizontal bars)
+ *   - Other signals (checkout_failed, profile_* events) — unchanged
+ *   - Entry points: premium_gate_shown grouped by feature → conversion
+ *   - Time to stage: medians for first-play → profile → gate → upgrade → checkout
+ *   - Time-to-convert per method (existing)
+ */
 export function FunnelTab() {
   const [win, setWin] = useState<FunnelWindow>('7d');
-  const [data, setData] = useState<FunnelStats | null>(null);
+  const [data, setData] = useState<FunnelPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Bumped by the retry button to force a re-fetch without changing
-  // any other state. `setWin(win)` wouldn't re-run the effect because
-  // React bails out when the new state equals the old.
   const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
@@ -59,7 +71,7 @@ export function FunnelTab() {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-        setData(await res.json() as FunnelStats);
+        setData(await res.json() as FunnelPayload);
       } catch (err) {
         if ((err as Error).name === 'AbortError') return;
         setError(err instanceof Error ? err.message : 'Failed to load');
@@ -72,37 +84,27 @@ export function FunnelTab() {
 
   const stageMap = useMemo(() => {
     const m = new Map<string, FunnelStageRow>();
-    data?.stages.forEach((s) => m.set(s.eventName, s));
+    data?.stats.stages.forEach((s) => m.set(s.eventName, s));
     return m;
   }, [data]);
 
   const breakdownByEvent = useMemo(() => {
     const m = new Map<string, FunnelBreakdownRow[]>();
-    data?.breakdown.forEach((b) => {
+    data?.stats.breakdown.forEach((b) => {
       const list = m.get(b.eventName) ?? [];
       list.push(b);
       m.set(b.eventName, list);
     });
-    // Within each event sort by sessions desc so the dominant variant leads.
     m.forEach((list) => list.sort((a, b) => b.sessions - a.sessions));
     return m;
   }, [data]);
 
-  // Baseline for conversion % = the first stage in the canonical list
-  // that actually has data. Using the literal first stage would make
-  // everything look 0% when instrumentation is still warming up.
-  const baselineSessions = useMemo(() => {
-    for (const s of STAGE_ORDER) {
-      const row = stageMap.get(s.name);
-      if (row && row.sessions > 0) return row.sessions;
-    }
-    return 0;
-  }, [stageMap]);
+  const dropOffMap = useMemo(() => {
+    const m = new Map<string, FunnelDropOffRow>();
+    data?.dropOff.forEach((d) => m.set(d.stage, d));
+    return m;
+  }, [data]);
 
-  // Events outside the canonical funnel (checkout_failed, the
-  // profile_* identification events, etc.). Preserve the catalog
-  // order when known, then append anything unexpected last for
-  // instrumentation-drift visibility.
   const otherEvents = useMemo(() => {
     const stageNames = new Set(STAGE_ORDER.map((s) => s.name));
     const names = Array.from(stageMap.keys()).filter((n) => !stageNames.has(n));
@@ -119,25 +121,18 @@ export function FunnelTab() {
   }, [stageMap]);
 
   if (loading && !data) {
-    return (
-      <div className="flex justify-center py-12">
-        <CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" />
-      </div>
-    );
+    return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" /></div>;
   }
-
   if (error) {
     return (
       <div className="text-center py-12">
         <p className="text-sm text-error mb-4">{error}</p>
         <Button variant="outline" size="sm" onClick={() => setRetryNonce((n) => n + 1)}>
-          <ArrowsClockwise className="h-4 w-4 mr-2" weight="bold" />
-          Retry
+          <ArrowsClockwise className="h-4 w-4 mr-2" weight="bold" />Retry
         </Button>
       </div>
     );
   }
-
   if (!data) return null;
 
   return (
@@ -146,19 +141,14 @@ export function FunnelTab() {
         <h2 className="text-lg font-bold tracking-tight text-gray-900">Funnel</h2>
         <div className="flex gap-1.5">
           {(Object.keys(WINDOW_LABELS) as FunnelWindow[]).map((w) => (
-            <Button
-              key={w}
-              size="sm"
-              variant={w === win ? 'default' : 'outline'}
-              onClick={() => setWin(w)}
-            >
+            <Button key={w} size="sm" variant={w === win ? 'default' : 'outline'} onClick={() => setWin(w)}>
               {w === 'all' ? 'All' : w}
             </Button>
           ))}
         </div>
       </div>
 
-      {/* Stages */}
+      {/* Stages with drop-off */}
       <Card>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2 text-gray-500">
@@ -167,33 +157,39 @@ export function FunnelTab() {
               Stages · {WINDOW_LABELS[win]}
             </span>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {STAGE_ORDER.map((stage) => {
               const row = stageMap.get(stage.name);
+              const drop = dropOffMap.get(stage.name);
               const sessions = row?.sessions ?? 0;
-              const pct = baselineSessions > 0 ? (sessions / baselineSessions) * 100 : 0;
+              const retainedFromStart = drop?.retainedFromStart ?? 0;
+              const dropFromPrev = drop?.dropFromPrev ?? null;
               const buckets = breakdownByEvent.get(stage.name) ?? [];
               return (
                 <div key={stage.name} className="space-y-1">
                   <div className="flex items-center justify-between text-sm">
                     <span className="font-semibold text-gray-900">{stage.label}</span>
-                    <span className="tabular-nums text-gray-600">
-                      {sessions.toLocaleString()} sessions
-                      <span className="text-gray-400 ml-2">
-                        ({(row?.total ?? 0).toLocaleString()} events)
-                      </span>
-                      {baselineSessions > 0 && (
-                        <span className="ml-2 font-bold text-brand">
-                          {pct.toFixed(1)}%
+                    <span className="flex items-center gap-2 tabular-nums">
+                      <span className="text-gray-600">{sessions.toLocaleString()} sessions</span>
+                      {dropFromPrev !== null && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            dropFromPrev < 0.3 ? 'bg-red-100 text-red-700'
+                            : dropFromPrev < 0.6 ? 'bg-orange-100 text-orange-700'
+                            : 'bg-emerald-100 text-emerald-700'
+                          }`}
+                          title="% of previous stage that made it to this stage"
+                        >
+                          {(dropFromPrev * 100).toFixed(0)}% from prev
                         </span>
                       )}
+                      <span className="font-bold text-brand">
+                        {(retainedFromStart * 100).toFixed(1)}% from start
+                      </span>
                     </span>
                   </div>
                   <div className="h-2 bg-gray-100 rounded overflow-hidden">
-                    <div
-                      className="h-full bg-brand transition-all"
-                      style={{ width: `${Math.min(100, pct)}%` }}
-                    />
+                    <div className="h-full bg-brand transition-all" style={{ width: `${Math.min(100, retainedFromStart * 100)}%` }} />
                   </div>
                   {buckets.length > 1 && (
                     <div className="pl-3 pt-1 text-[11px] text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -211,15 +207,73 @@ export function FunnelTab() {
         </CardContent>
       </Card>
 
+      {/* Entry points */}
+      <Card>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2 text-gray-500">
+            <Target className="h-4 w-4" weight="bold" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">
+              Entry points — gate triggered by feature
+            </span>
+          </div>
+          {data.entryPoints.length === 0 ? (
+            <p className="text-sm text-gray-500">No gate events in this window.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                <tr>
+                  <th className="py-1 pr-2 text-left">Feature</th>
+                  <th className="py-1 px-2 text-right">Shown</th>
+                  <th className="py-1 px-2 text-right">Clicked</th>
+                  <th className="py-1 px-2 text-right">Checkout started</th>
+                  <th className="py-1 px-2 text-right">Completed</th>
+                  <th className="py-1 pl-2 text-right">Convert %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.entryPoints.map((ep) => (
+                  <tr key={ep.feature} className="border-t border-gray-100">
+                    <td className="py-1 pr-2 font-mono text-[12px]">{ep.feature}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{ep.shown}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{ep.clicked}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{ep.checkoutStarted}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{ep.checkoutCompleted}</td>
+                    <td className="py-1 pl-2 text-right tabular-nums font-bold text-brand">
+                      {(ep.convertedPct * 100).toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Time to stage */}
+      <Card>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2 text-gray-500">
+            <Timer className="h-4 w-4" weight="bold" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">
+              Time to stage (medians)
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <TtsCell label="First play → profile" ms={data.timeToStage.firstPlayToProfile} />
+            <TtsCell label="Profile → gate" ms={data.timeToStage.profileToGate} />
+            <TtsCell label="Gate → upgrade click" ms={data.timeToStage.gateToUpgrade} />
+            <TtsCell label="Upgrade → checkout" ms={data.timeToStage.upgradeToCheckout} />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Other signals — events outside the canonical funnel */}
       {otherEvents.length > 0 && (
         <Card>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 text-gray-500">
               <ChartLineUp className="h-4 w-4" weight="bold" />
-              <span className="text-[10px] font-bold uppercase tracking-wider">
-                Other signals
-              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wider">Other signals</span>
             </div>
             <div className="space-y-3">
               {otherEvents.map((name) => {
@@ -233,9 +287,7 @@ export function FunnelTab() {
                       <span className="font-semibold text-gray-900">{label}</span>
                       <span className="tabular-nums text-gray-600">
                         {row.sessions.toLocaleString()} sessions
-                        <span className="text-gray-400 ml-2">
-                          ({row.total.toLocaleString()} events)
-                        </span>
+                        <span className="text-gray-400 ml-2">({row.total.toLocaleString()} events)</span>
                       </span>
                     </div>
                     {buckets.length > 0 && (
@@ -255,21 +307,19 @@ export function FunnelTab() {
         </Card>
       )}
 
-      {/* Time-to-convert */}
+      {/* Time-to-convert (existing, upgrade → checkout per method) */}
       <Card>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2 text-gray-500">
             <Timer className="h-4 w-4" weight="bold" />
             <span className="text-[10px] font-bold uppercase tracking-wider">
-              Median time · upgrade click → checkout complete
+              Median time · upgrade click → checkout complete (by method)
             </span>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            {data.medianTimeToConvertMs.map((m) => (
+            {data.stats.medianTimeToConvertMs.map((m) => (
               <div key={m.method}>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                  {m.method}
-                </div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{m.method}</div>
                 <div className="text-2xl font-black tabular-nums text-gray-900">
                   {m.ms == null ? '—' : formatMs(m.ms)}
                 </div>
@@ -282,9 +332,13 @@ export function FunnelTab() {
   );
 }
 
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)}m`;
-  return `${(ms / 3_600_000).toFixed(1)}h`;
+function TtsCell({ label, ms }: { label: string; ms: number | null }) {
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{label}</div>
+      <div className="text-xl font-black tabular-nums text-gray-900">
+        {ms == null ? '—' : formatMs(ms)}
+      </div>
+    </div>
+  );
 }
