@@ -378,20 +378,37 @@ export default function GameClient({
     [activePuzzle.dayNumber],
   );
 
+  /**
+   * Authoritative solve duration that survives past the SolveModal
+   * close — the visible timer freezes to this value after solve, and
+   * the post-solve `locked` flag to useGriddle is derived from its
+   * non-null-ness. Distinct from solveResult (which gets cleared on
+   * modal close); finalSolveMs persists for the whole puzzle lifetime
+   * so the frozen timer stays visible whether or not the modal is up.
+   */
+  const [finalSolveMs, setFinalSolveMs] = useState<number | null>(null);
+
   const handleSolved = useCallback(
     (payload: SolvePayload & { unassisted: boolean; word: string }) => {
       // Prefer the server-side duration. The client-side value is only
       // a fallback for the no-puzzle-load edge case (direct POST), and
       // is wrong for any user who reloaded mid-attempt.
       const serverMs = serverSolveMsRef.current;
+      const solveMs = serverMs != null ? serverMs : payload.clientSolveMs;
       // Stash the result; Grid will fire onReorderComplete once the
       // tile shuffle settles, and we'll promote the stash to state then.
       pendingSolveResultRef.current = {
-        solveMs: serverMs != null ? serverMs : payload.clientSolveMs,
+        solveMs,
         unassisted: payload.unassisted,
         word: payload.word,
         earnedWordmarks: earnedWordmarksRef.current,
       };
+      // Lock in the displayed time immediately — the visible grid
+      // timer freezes here, before the reveal animation even starts,
+      // rather than waiting for the modal to open. Also drives the
+      // `locked` prop to useGriddle that suppresses post-solve crumb
+      // discovery.
+      setFinalSolveMs(solveMs);
       serverSolveMsRef.current = null;
       earnedWordmarksRef.current = [];
     },
@@ -418,6 +435,12 @@ export default function GameClient({
     // gate hasn't been cleared — no keystrokes should fill the grid
     // behind a blocking surface.
     disabled: showTutorial || startedAt == null,
+    // Post-solve lock: crumb detection is suppressed once finalSolveMs
+    // is set. Typing still works (Reset + replay explores the grid)
+    // but no new crumbs get added to the strip or POSTed to the crumb
+    // store, and any fresh 9-letter attempt is short-circuited by the
+    // server's first-solve-wins path.
+    locked: finalSolveMs != null,
     unassisted: unassistedMode,
     onCrumbFound: handleCrumbFound,
   });
@@ -447,6 +470,7 @@ export default function GameClient({
     if (prevDayRef.current !== activePuzzle.dayNumber) {
       prevDayRef.current = activePuzzle.dayNumber;
       setSolveResult(null);
+      setFinalSolveMs(null);
       fullReset();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -978,14 +1002,14 @@ export default function GameClient({
           </button>
         </header>
 
-        {/* Visible solve timer. Mounted only while the player is
-            actively solving — unmounted the moment state.solved flips
-            true so the modal close (which clears solveResult) doesn't
-            remount a fresh `now` reading against the original
-            startedAt, which would display wall-clock-including-modal
-            time instead of the solve duration. */}
-        {startedAt != null && !state.solved && !solveResult && (
-          <GameTimer startedAt={startedAt} />
+        {/* Visible solve timer. Hidden while the solve modal is up
+            (the modal shows the time more prominently there) and
+            before Start. Between Start and solve, ticks live. After
+            solve, stays visible with `frozenMs` — modal close won't
+            remount-inflate the display because GameTimer reads from
+            the prop, not the client clock, when frozenMs is non-null. */}
+        {startedAt != null && !solveResult && (
+          <GameTimer startedAt={startedAt} frozenMs={finalSolveMs} />
         )}
 
         {/* Grid + slots + action buttons get blurred behind the Start

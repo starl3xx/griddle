@@ -72,6 +72,15 @@ interface UseGriddleOptions {
    */
   disabled?: boolean;
   /**
+   * When true, the real-time crumb detection is suppressed — typing
+   * valid 4-8 letter words neither adds them to the foundWords list
+   * nor fires onCrumbFound. Used by GameClient after a confirmed
+   * solve so post-solve exploration can't discover "new" crumbs: the
+   * player's solve is committed (first-solve-wins server-side) and
+   * additional finds would have nowhere legitimate to land.
+   */
+  locked?: boolean;
+  /**
    * Fires whenever a new crumb is discovered (not on initial load).
    * The caller can use this to persist the word server-side.
    */
@@ -84,6 +93,7 @@ export function useGriddle({
   onSolved,
   unassisted = false,
   disabled = false,
+  locked = false,
   onCrumbFound,
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
   const [path, setPath] = useState<number[]>([]);
@@ -254,6 +264,10 @@ export function useGriddle({
   // is fired from the first keystroke handler so the chunk is usually
   // already in flight by the time the user types 4 letters.
   useEffect(() => {
+    // Post-solve lock: skip crumb detection entirely. See the `locked`
+    // prop doc — once a puzzle is committed, further typing shouldn't
+    // mint new crumbs with nowhere legitimate to persist.
+    if (locked) return;
     if (letters.length < 4 || letters.length > 8) return;
     const candidate = letters.join('');
     if (candidate === lastFoundWordRef.current) return;
@@ -289,7 +303,7 @@ export function useGriddle({
     return () => {
       cancelled = true;
     };
-  }, [letters]);
+  }, [letters, locked]);
 
   /**
    * Imperative solve trigger. Called from `typeLetter` / `tapCell` after
@@ -342,15 +356,18 @@ export function useGriddle({
           // half-solved state with no SolveModal.
           if (verdict.solved && verdict.word != null) {
             setSolved(true);
-            // Clear the mid-attempt found-words strip on confirmed solve
-            // so the post-solve grid (which stays visible while the
-            // SolveModal is up, and still visible if the player closes
-            // the modal without Play Again) isn't cluttered with the
-            // leftover shorter-word pills.
-            setFoundWords([]);
+            // foundWords intentionally preserved on confirmed solve —
+            // the crumbs the player found during the attempt stay
+            // visible in the FoundWords strip after the modal closes
+            // so a post-solve Reset leaves their discoveries on
+            // screen. Post-solve locking lives upstream: GameClient
+            // passes `locked=true` once a solve is committed, which
+            // gates the crumb-detection effect above against adding
+            // any NEW words after the fact.
             lastFoundWordRef.current = null;
-            // Wordmark counters reset on confirmed solve so the next
-            // puzzle starts fresh (Blameless is earnable again).
+            // Wordmark counters reset on confirmed solve so a
+            // post-solve replay attempt (short-circuited by the
+            // server's first-solve-wins) starts from a clean slate.
             backspaceCountRef.current = 0;
             resetCountRef.current = 0;
             onSolved?.({ ...payload, unassisted, word: verdict.word });
