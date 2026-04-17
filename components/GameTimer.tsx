@@ -8,22 +8,17 @@ interface GameTimerProps {
   startedAt: number;
   /** Freeze when false (solve landed, modal is opening). */
   running: boolean;
-  /**
-   * When running=false, prefer this authoritative server-computed
-   * duration over `Date.now() - startedAt`. Keeps the final displayed
-   * number aligned with what the solve modal and leaderboard show,
-   * even if the client clock drifted.
-   */
-  frozenMs?: number | null;
 }
 
 /**
  * Running solve timer above the grid. Ticks once per second — subsecond
  * smoothing adds re-renders without any perceptual benefit at mm:ss
- * resolution. Stops ticking on `running=false`, then snaps to
- * `frozenMs` if provided so the displayed number matches the server.
+ * resolution. Stops ticking on `running=false` and displays the last
+ * tick value; the solve modal opens immediately afterward with the
+ * authoritative server-computed time, so the frozen intermediate
+ * number only shows during the ~1 s reveal animation.
  */
-export function GameTimer({ startedAt, running, frozenMs }: GameTimerProps) {
+export function GameTimer({ startedAt, running }: GameTimerProps) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -32,10 +27,7 @@ export function GameTimer({ startedAt, running, frozenMs }: GameTimerProps) {
     return () => window.clearInterval(id);
   }, [running]);
 
-  const elapsed =
-    !running && typeof frozenMs === 'number'
-      ? Math.max(0, frozenMs)
-      : Math.max(0, now - startedAt);
+  const elapsed = Math.max(0, now - startedAt);
 
   return (
     <div
