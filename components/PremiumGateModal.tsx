@@ -12,7 +12,10 @@ import { Crown, ArrowLeft, CircleNotch } from '@phosphor-icons/react';
  * overlay like the crypto flow.
  */
 const LazyPremiumCheckoutEmbed = dynamic(
-  () => import('./LazyPremiumCheckoutEmbed'),
+  () =>
+    import('./PremiumCheckoutEmbed').then((mod) => ({
+      default: mod.PremiumCheckoutEmbed,
+    })),
   { ssr: false, loading: () => <EmbedLoading /> },
 );
 
@@ -177,10 +180,19 @@ export function PremiumGateModal({
     return () => { cancelled = true; };
   }, [step, sessionWallet, onFiatCheckoutComplete]);
 
+  // During `confirming` the user has already paid — closing the modal
+  // unmounts the polling effect via its cleanup, so onFiatCheckoutComplete
+  // never fires and premium UI doesn't flip until the next refresh. Lock
+  // both the backdrop and the close button for the ≤5 s window; on
+  // timeout the polling loop navigates away, which dismounts the modal
+  // regardless.
+  const dismissible = step !== 'confirming';
+  const handleBackdropClick = dismissible ? onClose : undefined;
+
   return (
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
-      onClick={onClose}
+      onClick={handleBackdropClick}
     >
       <div
         className="modal-sheet animate-slide-up"
@@ -215,8 +227,9 @@ export function PremiumGateModal({
           <button
             type="button"
             onClick={onClose}
+            disabled={!dismissible}
             aria-label="Close"
-            className="ml-auto w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast"
+            className="ml-auto w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors duration-fast disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
           >
             <svg
               viewBox="0 0 24 24"
