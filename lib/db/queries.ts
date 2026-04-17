@@ -1337,15 +1337,26 @@ export async function deleteAdminProfile(profileId: number): Promise<boolean> {
   // Detach attributed rows first. Without this the FK constraints on
   // solves.profile_id, wordmarks.profile_id, and streaks.profile_id
   // would block the delete (Postgres raises SQLSTATE 23503 on any row
-  // still referencing the profile). Solves + wordmarks keep the rows
-  // alive under a null profile_id (anonymous attribution, still
-  // counted on the daily leaderboard); streaks is deleted outright
-  // since a streak without an owner has no meaning.
+  // still referencing the profile).
+  //
+  // Per-table strategy differs:
+  //   - solves: null out profile_id. Rows stay alive under anonymous
+  //     attribution so the daily leaderboard totals don't shift under
+  //     the other players' feet.
+  //   - wordmarks: DELETE outright. A naive null-out would violate
+  //     the `wordmarks_identity_required` CHECK on any handle-only or
+  //     email-auth holder — their rows carry profile_id but no wallet,
+  //     so clearing profile_id leaves nothing to satisfy the "at
+  //     least one identity" constraint AND collapses the generated
+  //     `player_key` column to NULL. Wordmarks are per-owner
+  //     achievements; deleting the user deletes them with him.
+  //   - streaks: DELETE outright. Same reasoning — a streak with no
+  //     owner has no meaning and some streak rows are profile-only.
   await db.execute(sql`
     UPDATE solves SET profile_id = NULL WHERE profile_id = ${profileId}
   `);
   await db.execute(sql`
-    UPDATE wordmarks SET profile_id = NULL WHERE profile_id = ${profileId}
+    DELETE FROM wordmarks WHERE profile_id = ${profileId}
   `);
   await db.execute(sql`
     DELETE FROM streaks WHERE profile_id = ${profileId}

@@ -10,8 +10,13 @@ interface OtpCodeInputProps {
    * parent handles the post-verify flow (close modal, refetch
    * profile, show welcome, etc.) — this component only owns the
    * input UX.
+   *
+   * May return a Promise (CreateProfileModal's callback awaits a
+   * PATCH before closing) — submit() awaits it so the spinner stays
+   * up for the full cycle and any error surfaces as inline copy
+   * rather than an unhandled rejection.
    */
-  onVerified: () => void;
+  onVerified: () => void | Promise<void>;
   /**
    * Optional prompt. Defaults to "Already have the code?" — suits the
    * primary sign-in flow. The Settings add-email surface overrides
@@ -51,7 +56,17 @@ export function OtpCodeInput({ email, onVerified, prompt }: OtpCodeInputProps) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? 'Invalid or expired code.');
       }
-      onVerified();
+      // Await in case the parent's callback does async work (PATCH
+      // the pending username, refetch profile, etc.) before closing
+      // the modal. Without awaiting, the spinner would stop the
+      // moment the fetch resolved and any rejection inside the
+      // callback would become an unhandled promise rejection.
+      await onVerified();
+      // Success: the parent usually unmounts this component via its
+      // own state flip. If it didn't (callback succeeded but left
+      // this component on-screen), reset the spinner so the button
+      // isn't stuck showing "verifying…".
+      setSubmitting(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Verification failed');
       setSubmitting(false);
