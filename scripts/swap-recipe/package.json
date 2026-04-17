@@ -1,0 +1,19 @@
+{
+  "name": "swap-recipe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@uniswap/universal-router-sdk": "^4.21.9",
+    "@uniswap/v4-sdk": "^2.0.0",
+    "@uniswap/v3-sdk": "^3.25.2",
+    "@uniswap/sdk-core": "^7.7.2",
+    "ethers": "5.7.2",
+    "jsbi": "3.2.5"
+  },
+  "overrides": {
+    "@uniswap/v4-sdk": "^2.0.0"
+  },
+  "resolutions": {
+    "@uniswap/v4-sdk": "^2.0.0"
+  }
+}
