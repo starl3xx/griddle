@@ -115,7 +115,6 @@ export function CreateProfileModal({
         {step === 'check-email' ? (
           <CheckEmailState
             email={email.trim()}
-            username={username.trim()}
             onClose={onClose}
             onVerifiedWithCode={async () => {
               // OTP verify already bound the session → profile. Apply
@@ -238,20 +237,18 @@ export function CreateProfileModal({
 
 function CheckEmailState({
   email,
-  username,
   onClose,
   onVerifiedWithCode,
 }: {
   email: string;
-  /** Passed through so the OtpCodeInput can apply pending-username on verify. */
-  username: string;
   onClose: () => void;
+  /**
+   * Fires after a successful OTP verify. Parent's callback closes
+   * over the pending username directly (not through a prop on this
+   * component), so we only need to surface the verify result here.
+   */
   onVerifiedWithCode: () => void | Promise<void>;
 }) {
-  // `username` is read by the parent's onVerifiedWithCode via closure;
-  // referencing it here keeps the lint rule happy and documents the
-  // dependency.
-  void username;
   return (
     <div className="py-4">
       <div className="text-center mb-5">
