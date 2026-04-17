@@ -5,7 +5,11 @@ import { setSessionPremium } from '@/lib/session-premium';
 import { recordFunnelEvent } from '@/lib/funnel/record';
 import { isValidSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
-import { openEscrowForFiatSession, externalIdForStripe } from '@/lib/contracts/escrowSigner';
+import {
+  openEscrowForFiatSession,
+  externalIdForStripe,
+  ESCROW_RETRY_KEY,
+} from '@/lib/contracts/escrowSigner';
 import { quoteWordForUsd } from '@/lib/contracts/quoteWord';
 import { kv } from '@/lib/kv';
 import type Stripe from 'stripe';
@@ -46,11 +50,6 @@ export const dynamic = 'force-dynamic';
 // fees + small treasury margin. Escrow needs $WORD equivalent at
 // current oracle price (+1% buffer for drift inside the 30-day window).
 const FIAT_USD_AMOUNT = 6;
-
-// Stripe retry queue key. When the on-chain call can't complete, the
-// session id lands here and the sync cron retries the escrow open
-// before flipping its status.
-const ESCROW_RETRY_KEY = 'griddle:escrow-retries';
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!STRIPE_WEBHOOK_SECRET) {

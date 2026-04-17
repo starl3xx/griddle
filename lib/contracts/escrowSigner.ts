@@ -13,6 +13,14 @@ import { griddlePremiumAbi } from './griddlePremiumAbi';
 import { getGriddlePremiumAddress } from './addresses';
 
 /**
+ * Upstash KV list key for failed fiat escrow opens. The Stripe webhook
+ * LPUSHes on failure, the hourly sync cron RPOPs + retries. Exported
+ * from a single source of truth so both producers and consumers can't
+ * silently split on a rename.
+ */
+export const ESCROW_RETRY_KEY = 'griddle:escrow-retries';
+
+/**
  * Escrow-manager signer for the fiat path. Reads
  * `ESCROW_MANAGER_PRIVATE_KEY` server-side only (NEVER expose in a
  * `NEXT_PUBLIC_*` var) and wraps it in a viem WalletClient bound to

@@ -3,7 +3,11 @@ import { createPublicClient, http, parseEventLogs } from 'viem';
 import { base } from 'viem/chains';
 import { griddlePremiumAbi } from '@/lib/contracts/griddlePremiumAbi';
 import { getGriddlePremiumAddress } from '@/lib/contracts/addresses';
-import { openEscrowForFiatSession, externalIdForStripe } from '@/lib/contracts/escrowSigner';
+import {
+  openEscrowForFiatSession,
+  externalIdForStripe,
+  ESCROW_RETRY_KEY,
+} from '@/lib/contracts/escrowSigner';
 import { getPremiumRowByWallet } from '@/lib/db/queries';
 import { kv } from '@/lib/kv';
 import { db } from '@/lib/db/client';
@@ -36,7 +40,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const ESCROW_RETRY_KEY = 'griddle:escrow-retries';
 // How far back to scan for new escrow settle events. Blocks on Base
 // tick every ~2s so 3_000 blocks ≈ 100 minutes — comfortable margin
 // for an hourly cron, and `onConflictDoUpdate`-style idempotency on
