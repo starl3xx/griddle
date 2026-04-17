@@ -47,17 +47,16 @@ export default async function Page() {
     notFound();
   }
 
-  const [settings] = await Promise.all([
+  // Read started_at in parallel with recordPuzzleLoad + settings. No
+  // ordering constraint: on a first visit the row doesn't exist yet
+  // and the read returns null regardless; on return visits the row
+  // already exists from a prior recordPuzzleLoad and the current
+  // insert is an onConflictDoNothing no-op.
+  const [settings, initialStartedAt] = await Promise.all([
     sessionWallet ? getUserSettings(sessionWallet) : Promise.resolve(null),
+    getPuzzleStartedAt(sessionId, puzzle.dayNumber),
     recordPuzzleLoad(sessionId, puzzle.id),
   ]);
-
-  // Read any existing started_at for this session + today's puzzle so
-  // the Start gate can be skipped when the player is resuming an attempt
-  // they already started (refresh, tab restore, cross-device session).
-  // Sequenced after recordPuzzleLoad so the row is guaranteed to exist;
-  // the read is tiny and the write is fire-and-forget on the hot path.
-  const initialStartedAt = await getPuzzleStartedAt(sessionId, puzzle.dayNumber);
 
   // Explicit prop shape — intentionally does NOT include `puzzle.word`.
   // Don’t be tempted to spread `puzzle` here; the spread would leak the
