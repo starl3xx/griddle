@@ -8,27 +8,35 @@ import { getSessionId } from '@/lib/session';
  * POST /api/stripe/checkout
  *
  * Creates a Stripe Checkout Session for Griddle Premium ($6, one-time)
- * and returns the hosted checkout URL. No wallet required — premium
- * binds to the browser session first, then migrates to a wallet on
- * first connect.
+ * and returns either a `clientSecret` (embedded, default) or a hosted
+ * `url`. Embedded mode renders the Stripe form inside an iframe on
+ * griddle.fun so the user never leaves the app (and the Farcaster mini
+ * app Frame doesn't break on full-page navigation). Hosted mode stays
+ * as a fallback for contexts where embedded is blocked — selected by
+ * the client when `inMiniApp === true` or via `mode: 'hosted'` body.
  *
- * The server reads the session id from the `x-session-id` header (set
- * by middleware on every request) and stores it in the Stripe session
- * metadata. The webhook uses it to set `griddle:session-premium:{sid}`
- * in Upstash, which GameClient checks on every page load.
+ * No wallet required — premium binds to the browser session first,
+ * then migrates to a wallet on first connect. Session id comes from
+ * the `x-session-id` header (set by middleware on every request) and
+ * is stored in the Stripe session metadata; the webhook uses it to
+ * set `griddle:session-premium:{sid}` in Upstash for anonymous buyers.
  *
  * If a wallet IS connected, it's also stored in metadata so the webhook
  * can simultaneously write a `premium_users` row — skipping the
  * migration step for wallet-connected buyers.
  *
- * Apple Pay surfaces automatically via `payment_method_types: ['card']`
- * on eligible devices.
+ * `automatic_payment_methods: { enabled: true }` surfaces Apple Pay,
+ * Google Pay, and Link automatically on eligible devices now that
+ * griddle.fun domain verification is complete in the Stripe dashboard.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type CheckoutMode = 'embedded' | 'hosted';
+
 interface CheckoutRequestBody {
   wallet?: string;
+  mode?: CheckoutMode;
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -49,21 +57,57 @@ export async function POST(req: Request): Promise<NextResponse> {
   const wallet = body.wallet && isValidAddress(body.wallet)
     ? body.wallet.toLowerCase()
     : null;
+  const mode: CheckoutMode = body.mode === 'hosted' ? 'hosted' : 'embedded';
 
-  // Read session id server-side — middleware guarantees it's present.
   const sessionId = await getSessionId();
 
-  const session = await getStripe().checkout.sessions.create({
-    mode: 'payment',
+  // Both modes share everything but ui_mode + completion routing.
+  // Session metadata is the identity layer for the webhook; it must
+  // not differ between modes or the fiat unlock path becomes
+  // mode-dependent.
+  const sharedParams = {
+    mode: 'payment' as const,
     line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-    payment_method_types: ['card'],
+    automatic_payment_methods: { enabled: true },
     metadata: {
       sessionId,
       wallet: wallet ?? '',
     },
-    // Include wallet in the success URL so the success page can poll
-    // /api/premium/[wallet] for wallet-connected buyers (who don't get
-    // a session-premium KV key — their premium is in premium_users).
+  };
+
+  if (mode === 'embedded') {
+    // `redirect_on_completion: 'if_required'` keeps 3DS/bank-redirect
+    // flows working (they land on return_url) while cards resolve
+    // in-embed so onComplete fires without navigating away. return_url
+    // is reused as the confirmation landing for both the redirect case
+    // and the hosted fallback below — one success page, one polling
+    // path, less divergence.
+    const session = await getStripe().checkout.sessions.create({
+      ...sharedParams,
+      ui_mode: 'embedded',
+      redirect_on_completion: 'if_required',
+      return_url: `${SITE_URL}/premium/success?session_id={CHECKOUT_SESSION_ID}${wallet ? `&wallet=${wallet}` : ''}`,
+    });
+
+    if (!session.client_secret) {
+      return NextResponse.json(
+        { error: 'stripe did not return a client secret' },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({
+      mode: 'embedded' as const,
+      clientSecret: session.client_secret,
+      sessionId: session.id,
+    });
+  }
+
+  // Hosted fallback. Used when the client signals it can't render the
+  // embed (Farcaster mini app today; other iframe-restricted hosts in
+  // future). Preserves the pre-M5-premium-embedded behaviour exactly.
+  const session = await getStripe().checkout.sessions.create({
+    ...sharedParams,
     success_url: `${SITE_URL}/premium/success?session_id={CHECKOUT_SESSION_ID}${wallet ? `&wallet=${wallet}` : ''}`,
     cancel_url: `${SITE_URL}/?premium=cancelled`,
   });
@@ -75,5 +119,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  return NextResponse.json({ url: session.url, sessionId: session.id });
+  return NextResponse.json({
+    mode: 'hosted' as const,
+    url: session.url,
+    sessionId: session.id,
+  });
 }
