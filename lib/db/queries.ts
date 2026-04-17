@@ -1404,22 +1404,33 @@ export interface RecordCryptoUnlockInput {
 
 /**
  * Look up the current `premium_users` row for a wallet. Returns null if
- * none exists. Used by the Stripe webhook to short-circuit before
- * opening a new on-chain escrow — if the wallet is already premium
- * (prior crypto unlock, admin grant, or earlier fiat), pulling more
- * $WORD from the stockpile would lock funds with no DB trace, since
- * `onConflictDoNothing` on the insert would drop the new row.
+ * none exists. Used by:
+ *
+ *   - **Stripe webhook**: short-circuit before opening a new on-chain
+ *     escrow — if the wallet is already premium (prior crypto unlock,
+ *     admin grant, or earlier fiat), pulling more $WORD from the
+ *     stockpile would lock funds with no DB trace, since
+ *     `onConflictDoNothing` on the insert would drop the new row.
+ *
+ *   - **Escrow-sync cron**: distinguish "incomplete fiat row from THIS
+ *     session" (safe to retry) from "row belongs to a different
+ *     premium path" (drop the retry). The caller compares
+ *     `externalId` against `keccak256(stripeSessionId)`.
  */
 export async function getPremiumRowByWallet(wallet: string): Promise<{
   wallet: string;
   source: string;
   unlockedAt: Date;
+  externalId: string | null;
+  escrowStatus: string | null;
 } | null> {
   const rows = await db
     .select({
       wallet: premiumUsers.wallet,
       source: premiumUsers.source,
       unlockedAt: premiumUsers.unlockedAt,
+      externalId: premiumUsers.externalId,
+      escrowStatus: premiumUsers.escrowStatus,
     })
     .from(premiumUsers)
     .where(eq(premiumUsers.wallet, wallet.toLowerCase()))

@@ -93,21 +93,29 @@ export async function GET(req: Request): Promise<NextResponse> {
     }
     summary.retriesProcessed += 1;
 
-    // Mirror the webhook's duplicate-premium guard. Between the
-    // original failed webhook attempt and this retry, the wallet may
-    // have become premium via a different path (crypto unlock, admin
-    // grant, or a separate fiat session). If so, opening a new
-    // on-chain escrow would (a) pull stockpile $WORD unnecessarily
-    // and (b) overwrite the existing DB row's source-specific fields
-    // with fiat telemetry, corrupting the admin ledger. Drop the
-    // entry and log for ops — Stripe refund is manual out-of-band.
+    // Distinguish two states before retrying the on-chain open:
+    //   (a) Row belongs to THIS Stripe session and is missing escrow
+    //       fields — that's exactly what the retry is for. Proceed.
+    //   (b) Row belongs to a DIFFERENT premium path (crypto unlock,
+    //       admin grant, earlier fiat session). Re-opening an escrow
+    //       would pull stockpile $WORD unnecessarily and overwrite
+    //       source-specific fields. Drop the retry.
+    //
+    // The webhook always writes a row for the fiat path (even on
+    // escrow failure) so a naive "row exists → skip" check would
+    // drop every retry — the defeat round-5 created. Use `externalId`
+    // (keccak256 of the Stripe session id, mirrors the contract's
+    // idempotency key) to identify which session a row belongs to.
+    const thisSessionExternalId = externalIdForStripe(entry.stripeSessionId);
     const existing = await getPremiumRowByWallet(entry.wallet);
-    if (existing) {
+    if (existing && existing.externalId !== thisSessionExternalId) {
       console.warn(
-        '[escrow-sync] wallet became premium via another path — dropping retry, manual Stripe refund required',
+        '[escrow-sync] wallet premium via different path — dropping retry, manual Stripe refund required',
         {
           wallet: entry.wallet,
           existingSource: existing.source,
+          existingExternalId: existing.externalId,
+          thisSessionExternalId,
           existingUnlockedAt: existing.unlockedAt,
           stripeSessionId: entry.stripeSessionId,
         },

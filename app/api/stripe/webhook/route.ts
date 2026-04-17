@@ -110,13 +110,22 @@ export async function POST(req: Request): Promise<NextResponse> {
       // the sync cron would have no row to advance when `EscrowBurned`
       // fires. Log loudly, skip both on-chain + DB writes, and let
       // ops manually refund the Stripe charge out-of-band.
+      //
+      // Skip ONLY when the existing row belongs to a different path.
+      // A row with a matching externalId means this is a Stripe
+      // webhook retry for the same session — let it fall through;
+      // the contract's EscrowAlreadyExists check handles idempotency
+      // on the on-chain side.
+      const thisSessionExternalId = externalIdForStripe(session.id);
       const existing = await getPremiumRowByWallet(wallet);
-      if (existing) {
+      if (existing && existing.externalId !== thisSessionExternalId) {
         console.warn(
-          '[stripe/webhook] wallet already premium — skipping on-chain escrow + DB write',
+          '[stripe/webhook] wallet premium via different path — skipping on-chain escrow + DB write',
           {
             wallet,
             existingSource: existing.source,
+            existingExternalId: existing.externalId,
+            thisSessionExternalId,
             existingUnlockedAt: existing.unlockedAt,
             stripeSessionId: session.id,
           },
