@@ -16,11 +16,12 @@ interface GameTimerProps {
 }
 
 /**
- * Running solve timer above the grid. Ticks once per second while
- * `frozenMs` is null; freezes to `frozenMs` the moment it's non-null,
- * stopping the interval and ignoring the client clock entirely so
- * modal-close remounts can't inflate the display by picking up a
- * fresh `Date.now()` against the original startedAt.
+ * Solve timer pill — small, neutral, sits in the header row alongside
+ * the Griddle wordmark. Intentionally quiet so the player's attention
+ * stays on the grid, not the clock. Ticks once per second while
+ * `frozenMs` is null; otherwise displays that fixed value and clears
+ * the interval so a modal-close remount can't inflate the display by
+ * picking up a fresh `Date.now()` against the original startedAt.
  */
 export function GameTimer({ startedAt, frozenMs }: GameTimerProps) {
   const frozen = frozenMs != null;
@@ -38,7 +39,7 @@ export function GameTimer({ startedAt, frozenMs }: GameTimerProps) {
 
   return (
     <div
-      className="mt-1 text-4xl sm:text-5xl font-black tabular-nums text-gray-900 dark:text-gray-100"
+      className="inline-flex items-center rounded-pill bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-1 text-sm font-semibold tabular-nums"
       aria-live="off"
     >
       {formatMs(displayMs)}

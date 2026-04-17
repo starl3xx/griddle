@@ -985,35 +985,49 @@ export default function GameClient({
       />
 
       <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
-        <header className="text-center">
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100 inline-block">
-            Griddl<span className="relative inline-block">
-              e
-              {/* Premium-only crown perched on the final 'e'. The crown
-                  is the Premium indicator — replaces the diamond that
-                  used to live in the subtitle.
-
-                  Transform lives in an inline `style` so the translate
-                  and rotate definitely compose into one `transform`
-                  value — mixing arbitrary + preset Tailwind transform
-                  utilities with `bottom-full` left the crown stuck at
-                  the top of the line-box in the Vercel preview,
-                  visibly floating above the ascender of "Griddle"
-                  rather than perched on the visible top of the 'e'.
-                  The translate-y value has to cross both the ascender
-                  space (line-height - x-height) AND Phosphor's
-                  internal SVG padding, which is why it's larger than
-                  a naive "just clear the letter top" would suggest. */}
-              {premium && (
-                <Crown
-                  className="absolute bottom-full right-0 w-5 h-5 sm:w-6 sm:h-6 text-accent pointer-events-none"
-                  style={{ transform: 'translate(25%, 95%) rotate(18deg)' }}
-                  weight="fill"
-                  aria-hidden
-                />
+        <header className="text-center w-full">
+          {/* Timer + title row. Grid columns [1fr auto 1fr] keep the
+              h1 precisely centered regardless of timer presence —
+              filling or vacating the left column doesn't reflow the
+              middle column or the subtitle below. Title and subtitle
+              stay pinned to the same visual position whether or not
+              the timer is visible. */}
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-3">
+            <div className="justify-self-end">
+              {startedAt != null && !solveResult && (
+                <GameTimer startedAt={startedAt} frozenMs={finalSolveMs} />
               )}
-            </span>
-          </h1>
+            </div>
+            <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-gray-900 dark:text-gray-100 inline-block">
+              Griddl<span className="relative inline-block">
+                e
+                {/* Premium-only crown perched on the final 'e'. The crown
+                    is the Premium indicator — replaces the diamond that
+                    used to live in the subtitle.
+
+                    Transform lives in an inline `style` so the translate
+                    and rotate definitely compose into one `transform`
+                    value — mixing arbitrary + preset Tailwind transform
+                    utilities with `bottom-full` left the crown stuck at
+                    the top of the line-box in the Vercel preview,
+                    visibly floating above the ascender of "Griddle"
+                    rather than perched on the visible top of the 'e'.
+                    The translate-y value has to cross both the ascender
+                    space (line-height - x-height) AND Phosphor's
+                    internal SVG padding, which is why it's larger than
+                    a naive "just clear the letter top" would suggest. */}
+                {premium && (
+                  <Crown
+                    className="absolute bottom-full right-0 w-5 h-5 sm:w-6 sm:h-6 text-accent pointer-events-none"
+                    style={{ transform: 'translate(25%, 95%) rotate(18deg)' }}
+                    weight="fill"
+                    aria-hidden
+                  />
+                )}
+              </span>
+            </h1>
+            <div aria-hidden />
+          </div>
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
             #{activePuzzle.dayNumber.toString().padStart(3, '0')}
             {isArchive ? ` · ${activePuzzle.date}` : ' · find the 9-letter word'}
@@ -1037,27 +1051,22 @@ export default function GameClient({
           </button>
         </header>
 
-        {/* Visible solve timer. Hidden while the solve modal is up
-            (the modal shows the time more prominently there) and
-            before Start. Between Start and solve, ticks live. After
-            solve, stays visible with `frozenMs` — modal close won't
-            remount-inflate the display because GameTimer reads from
-            the prop, not the client clock, when frozenMs is non-null. */}
-        {startedAt != null && !solveResult && (
-          <GameTimer startedAt={startedAt} frozenMs={finalSolveMs} />
-        )}
-
-        {/* Grid + slots + action buttons get blurred behind the Start
-            gate. pointer-events-none on the inner container blocks tap
-            interaction while blurred; useGriddle's `disabled` blocks
-            keyboard input. The overlay lives as a sibling (not inside
-            the blurred div) so the Start button itself stays
-            interactive and crisp. */}
+        {/* Grid + slots + action buttons sit behind the Start gate.
+            The gate renders two siblings on top when !startedAt: a
+            backdrop-filter overlay that blurs what's visible behind
+            it, and the Start button itself. Using `backdrop-blur-*`
+            (backdrop-filter) instead of `blur-*` (filter) on the
+            content avoids the rectangular halo-clip artifact WebKit
+            produces when filter: blur hits a container edge —
+            backdrop-filter renders through a different compositor
+            path that doesn't clamp the halo. pointer-events-none on
+            the inner content blocks tap interaction; useGriddle's
+            `disabled` blocks keyboard input. */}
         <div className="relative w-full flex flex-col items-center gap-6">
           <div
             className={
               startedAt == null
-                ? 'w-full flex flex-col items-center gap-6 blur-md pointer-events-none select-none'
+                ? 'w-full flex flex-col items-center gap-6 pointer-events-none select-none'
                 : 'w-full flex flex-col items-center gap-6'
             }
             aria-hidden={startedAt == null}
@@ -1100,7 +1109,18 @@ export default function GameClient({
           </div>
 
           {startedAt == null && (
-            <StartGate onStart={handleStart} pending={startPending} />
+            <>
+              {/* Frosted-glass overlay: blurs whatever's behind it via
+                  backdrop-filter. Semi-transparent tint layered on top
+                  ensures the blur reads as "hidden" and not
+                  "accidentally faint" even on a browser that quietly
+                  degrades backdrop-filter to a no-op. */}
+              <div
+                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-black/50"
+                aria-hidden
+              />
+              <StartGate onStart={handleStart} pending={startPending} />
+            </>
           )}
         </div>
 
