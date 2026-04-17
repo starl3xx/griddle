@@ -124,8 +124,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         // tx hash from a prior run. The EscrowBurned/Refunded scan
         // below will backfill the settle tx + status correctly via
         // `externalId`, which is enough for the admin ledger.
-        const externalId = (await import('@/lib/contracts/escrowSigner'))
-          .externalIdForStripe(entry.stripeSessionId);
+        const externalId = externalIdForStripe(entry.stripeSessionId);
         await db
           .update(premiumUsers)
           .set({
@@ -242,11 +241,6 @@ export async function GET(req: Request): Promise<NextResponse> {
   // reorg near the cursor boundary doesn't leave events unprocessed.
   const nextCursor = currentBlock - LOOKBACK_BLOCKS / 10n;
   await kv.set(CURSOR_KEY, nextCursor.toString());
-
-  // Ensure the unused import guard passes — externalIdForStripe is
-  // imported defensively for future extension of the retry payload
-  // decoder (callers might send only a stripeSessionId in raw form).
-  void externalIdForStripe;
 
   return NextResponse.json({ ok: true, summary });
 }

@@ -1558,7 +1558,16 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
         escrowOpenTx: input.escrowOpenTx ?? null,
         escrowBurnTx: null,
         externalId: input.externalId ?? null,
-        wordBurned: input.wordAmount ? input.wordAmount.toString() : null,
+        // Only record the quoted $WORD amount when the escrow
+        // actually opened on-chain (escrowStatus='pending'). If the
+        // escrow call failed, the quote is stale and writing it to
+        // `word_burned` would show a bogus figure in the admin ledger
+        // until the retry cron fixes it — let the cron set it at the
+        // real oracle price instead.
+        wordBurned:
+          input.escrowStatus === 'pending' && input.wordAmount
+            ? input.wordAmount.toString()
+            : null,
       })
       .onConflictDoNothing();
   }
