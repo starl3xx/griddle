@@ -173,11 +173,17 @@ export default function GameClient({
       setFinalSolveMs(todayFinalSolveMsRef.current);
       return;
     }
-    // Clear before fetch — avoids briefly flashing today's frozen
-    // time against the freshly-set archive puzzle while the GET is
-    // in flight. The API returns the archive's own previousSolveMs
-    // (if any) which we set on resolve.
-    setFinalSolveMs(null);
+    // Don't pre-clear finalSolveMs here. Two reasons:
+    //   1. On fetch failure / non-ok, we return without restoring —
+    //      which would permanently unfreeze today's timer even
+    //      though the user never actually navigated away (the
+    //      archive switch didn't happen).
+    //   2. Even on success, pre-clear would visibly unfreeze today's
+    //      timer during the in-flight window because activePuzzle is
+    //      still today until the fetch resolves.
+    // React 18 batches the three post-fetch set*s in this then
+    // callback into a single render, so there's no intermediate
+    // "archive puzzle with today's frozen time" frame to avoid.
     try {
       const res = await fetch(`/api/puzzle/${dayNumber}`);
       if (!res.ok) return;
