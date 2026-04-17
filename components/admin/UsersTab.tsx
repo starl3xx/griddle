@@ -113,19 +113,21 @@ export function UsersTab() {
   const counts = data?.counts;
 
   // Encoding contract with /api/admin/users/[id]/dossier:
-  //   - The `session:` prefix is a literal token; never encoded.
-  //   - The sessionId suffix IS encoded via encodeURIComponent so
-  //     path-reserved chars ('/', '?', '#', etc.) survive the URL.
-  //   - The server does NOT double-decode — Next.js decodes params
-  //     for us, which is exactly the inverse of this encode, so
-  //     `session:<id>` round-trips faithfully for any sessionId
-  //     value including ones containing literal '%'.
+  //   - `targetId` is the raw opaque identifier: either a numeric
+  //     profile id or `session:<rawSessionId>` for anon rows.
+  //   - Encoding is applied exactly once — by `UserDossierModal`
+  //     when it builds the fetch URL (`encodeURIComponent(targetId)`).
+  //     Next.js decodes once when populating `params.id`, so the
+  //     server receives the raw targetId and slices off the prefix.
+  //   - Encoding here as well would be a double-encode: Next.js
+  //     un-does the outer level, leaving the inner `%XX` sequences
+  //     in the server's sessionId value and breaking DB lookups.
   const openDossier = (row: UserRow) => {
     if (row.kind === 'registered') {
       setDossierTarget({ id: String(row.id), label: rowLabel(row) });
     } else {
       setDossierTarget({
-        id: `session:${encodeURIComponent(row.sessionId)}`,
+        id: `session:${row.sessionId}`,
         label: `anon:${row.sessionId.slice(0, 8)}`,
       });
     }
