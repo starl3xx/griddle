@@ -3623,13 +3623,19 @@ export interface AnonSessionRow {
 /**
  * Sessions that have played but never bound a profile or wallet.
  * Grouped by session_id from the solves table. Paginated.
+ *
+ * Accepts either `offset` directly OR `page` (for callers that
+ * prefer 1-indexed pagination). The unified Users-tab route uses
+ * offset so that a single `all` page can contiguously span both
+ * registered rows and anon rows without double-counting.
  */
 export async function getAnonSessions(opts: {
-  page?: number; limit?: number; minSolves?: number; search?: string;
+  page?: number; limit?: number; offset?: number; minSolves?: number; search?: string;
 }): Promise<{ rows: AnonSessionRow[]; total: number }> {
-  const page = Math.max(1, opts.page ?? 1);
-  const limit = Math.min(100, opts.limit ?? 50);
-  const offset = (page - 1) * limit;
+  const limit = Math.min(100, Math.max(0, opts.limit ?? 50));
+  const offset = opts.offset !== undefined
+    ? Math.max(0, opts.offset)
+    : (Math.max(1, opts.page ?? 1) - 1) * limit;
   const minSolves = opts.minSolves ?? 1;
   const searchFilter = opts.search
     ? sql`AND session_id ILIKE ${`%${opts.search}%`}`

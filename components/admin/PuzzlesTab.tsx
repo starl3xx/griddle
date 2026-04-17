@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X } from '@phosphor-icons/react';
-import { formatMs } from '@/lib/format';
+import { formatMsCompact as formatMs } from '@/lib/format';
 import { ScatterCalibration, type CalibrationPoint } from './charts/ScatterCalibration';
 
 interface PuzzlesPayload {
@@ -245,19 +245,15 @@ export function PuzzlesTab() {
 }
 
 /**
- * Signed ms formatter for calibration residuals. `formatMs` in
- * lib/format clamps to 0 (solve-time semantics — negative is
- * nonsensical), but a residual of −12000 ms means "observed 12s
- * faster than predicted" and must retain its sign for the outlier
- * table to be legible.
+ * Signed wrapper around `formatMsCompact` for calibration residuals.
+ * A residual of −12000 ms means "observed 12s faster than predicted"
+ * and must retain its sign for the outlier table to be legible.
+ * `formatMsCompact` already handles the magnitude + unit; we just
+ * prepend the sign.
  */
 function formatSignedMs(ms: number): string {
   const sign = ms >= 0 ? '+' : '-';
-  const abs = Math.abs(ms);
-  if (abs < 1000) return `${sign}${Math.round(abs)}ms`;
-  if (abs < 60_000) return `${sign}${(abs / 1000).toFixed(1)}s`;
-  if (abs < 3_600_000) return `${sign}${(abs / 60_000).toFixed(1)}m`;
-  return `${sign}${(abs / 3_600_000).toFixed(1)}h`;
+  return `${sign}${formatMs(ms)}`;
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {

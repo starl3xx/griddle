@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CircleNotch, ArrowsClockwise, ChartLineUp, Timer, Target } from '@phosphor-icons/react';
-import { formatMs } from '@/lib/format';
+import { formatMsCompact as formatMs } from '@/lib/format';
 import type {
   FunnelWindow,
   FunnelStageRow,

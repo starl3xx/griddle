@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { CircleNotch, Crown, Check, PuzzlePiece } from '@phosphor-icons/react';
-import { formatMs } from '@/lib/format';
+import { formatMsCompact as formatMs } from '@/lib/format';
 
 interface DossierData {
   summary: {

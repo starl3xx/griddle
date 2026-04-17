@@ -16,7 +16,7 @@ import {
   Coins,
   Receipt,
 } from '@phosphor-icons/react';
-import { formatMs } from '@/lib/format';
+import { formatMsCompact as formatMs } from '@/lib/format';
 import { SparklineCard } from './charts/SparklineCard';
 import { TrendLine } from './charts/TrendLine';
 import { StackedBar } from './charts/StackedBar';
