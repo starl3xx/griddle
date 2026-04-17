@@ -32,7 +32,7 @@
  */
 import { Pool } from '@neondatabase/serverless';
 import { config } from 'dotenv';
-import { getTableColumns, getTableName, Table } from 'drizzle-orm';
+import { getTableColumns, getTableName, isTable } from 'drizzle-orm';
 import * as schema from '../lib/db/schema';
 
 config({ path: '.env.local' });
@@ -53,17 +53,15 @@ interface ExpectedTable {
 function collectExpected(): ExpectedTable[] {
   const tables: ExpectedTable[] = [];
   for (const value of Object.values(schema)) {
-    // Drizzle tables carry an internal symbol; getTableName throws on
-    // anything else. A try/catch is the documented way to duck-type
-    // here — safer than reaching into `_.type`, which has moved
-    // between drizzle major versions.
-    let tableName: string;
-    try {
-      tableName = getTableName(value as Table);
-    } catch {
-      continue;
-    }
-    const cols = getTableColumns(value as Table);
+    // `isTable` is drizzle's official type guard — checks the internal
+    // Table symbol. Needed over try/catch around getTableName because
+    // getTableName returns undefined (not throws) for non-Table values
+    // like pgEnum or relations, so try/catch never triggers and the
+    // script would crash later with a confusing `Object.values(undefined)`
+    // TypeError the moment a non-table schema export is added.
+    if (!isTable(value)) continue;
+    const tableName = getTableName(value);
+    const cols = getTableColumns(value);
     const columnNames = Object.values(cols).map((c) => c.name);
     tables.push({ tableName, columns: columnNames });
   }
