@@ -16,6 +16,7 @@ export const PREMIUM_BENEFITS: readonly string[] = [
   'Streak protection (once a week)',
   'Unassisted solve mode',
   'Wordmarks & Lexicon tracking',
+  'Profile customization',
 ];
 
 interface PremiumBenefitsListProps {

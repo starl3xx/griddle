@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Crown, Backspace, ArrowCounterClockwise, Info } from '@phosphor-icons/react';
+import { formatLongDate } from '@/lib/format';
 import { useDarkMode } from '@/lib/useDarkMode';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
@@ -85,6 +86,15 @@ interface GameClientProps {
    * detection armed on a puzzle the player has already banked.
    */
   initialFinalSolveMs: number | null;
+  /**
+   * Crumbs (4–8 letter words the session has already discovered on
+   * today's puzzle) read server-side from `puzzle_crumbs`. Seeds
+   * useGriddle's `foundWords` from tick zero so a mid-play refresh
+   * keeps the FoundWords strip populated instead of flashing empty
+   * for the frame between mount and the client-side refetch. Empty
+   * array when nothing has been found yet.
+   */
+  initialCrumbs: readonly string[];
 }
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
@@ -102,6 +112,7 @@ export default function GameClient({
   initialUnassistedMode,
   initialStartedAt,
   initialFinalSolveMs,
+  initialCrumbs,
 }: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
 
@@ -481,6 +492,11 @@ export default function GameClient({
     locked: finalSolveMs != null,
     unassisted: unassistedMode,
     onCrumbFound: handleCrumbFound,
+    // SSR-hydrated crumbs — populates foundWords from tick zero so a
+    // mid-play refresh doesn't flash an empty strip. The client-side
+    // /api/crumbs fetch below still runs (for archive nav + as a
+    // consistency check) and de-dups via seedFoundWords.
+    initialFoundWords: initialCrumbs,
   });
 
   // When persisted crumbs arrive from the server, merge them into the
@@ -990,7 +1006,7 @@ export default function GameClient({
         pfpUrl={pfpUrl}
       />
 
-      <main className="flex-1 flex flex-col items-center px-4 pt-10 pb-6 gap-6">
+      <main className="flex-1 flex flex-col items-center px-4 pt-4 pb-6 gap-6">
         <header className="text-center w-full">
           {/* Timer + title row. Grid columns [1fr auto 1fr] keep the
               h1 precisely centered regardless of timer presence —
@@ -1034,27 +1050,36 @@ export default function GameClient({
             </h1>
             <div aria-hidden />
           </div>
+          {/* Subtitle = puzzle number + long human date. Previously we
+              flipped between "find the 9-letter word" (today) and the
+              raw ISO date (archive) — the rule-restatement was noise
+              on every load, and the ISO date was ugly. Showing the
+              date always pairs naturally with archive play and lets
+              the dedicated "How to play" link carry the rules. */}
           <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
-            #{activePuzzle.dayNumber.toString().padStart(3, '0')}
-            {isArchive ? ` · ${activePuzzle.date}` : ' · find the 9-letter word'}
+            #{activePuzzle.dayNumber.toString().padStart(3, '0')} · {formatLongDate(activePuzzle.date)}
           </p>
-          {isArchive && (
+          {/* Today shows "How to play"; archive swaps it for a quick
+              return link. Mutually exclusive on purpose — stacking
+              both on archive reads as two competing CTAs. */}
+          {isArchive ? (
             <button
               type="button"
               onClick={returnToToday}
-              className="text-xs font-semibold text-brand hover:text-brand/80 mt-1 transition-colors"
+              className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-brand hover:text-brand-600 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
             >
-              ← Back to today’s puzzle
+              ← Back to today
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={openTutorial}
+              className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-brand hover:text-brand-600 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
+            >
+              How to play
+              <Info className="w-3 h-3" weight="bold" aria-hidden />
             </button>
           )}
-          <button
-            type="button"
-            onClick={openTutorial}
-            className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-brand hover:text-brand-600 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
-          >
-            How to play
-            <Info className="w-3 h-3" weight="bold" aria-hidden />
-          </button>
         </header>
 
         {/* Puzzle area behind the Start gate: FoundWords, Grid,
@@ -1100,9 +1125,26 @@ export default function GameClient({
                   backdrop-filter. Semi-transparent tint layered on top
                   ensures the blur reads as "hidden" and not
                   "accidentally faint" even on a browser that quietly
-                  degrades backdrop-filter to a no-op. */}
+                  degrades backdrop-filter to a no-op.
+
+                  Dark-mode tint matches the body's `bg-gray-900` — NOT
+                  black — so the overlay doesn't create a visibly
+                  darker band against the surrounding page. Using
+                  `bg-black/50` here layered a near-black rectangle on
+                  top of gray-900, which looked like a hard-edged
+                  horizontal stripe spanning the full viewport width.
+
+                  The mask-image gradient fades the bottom ~20% of the
+                  overlay so the blur + tint don't end in a visible
+                  straight line where the WordSlots row ends. Without
+                  the mask the cutoff is a pronounced horizontal edge
+                  right above the Backspace / Reset row — especially
+                  obvious in dark mode where the tint and body tones
+                  are close but not identical. `-webkit-mask-image`
+                  pair is for Safari, which still needs the vendor
+                  prefix for mask-image as of 2026. */}
               <div
-                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-black/50"
+                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-gray-900/40 [mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)] [-webkit-mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)]"
                 aria-hidden
               />
               <StartGate onStart={handleStart} pending={startPending} />

@@ -81,6 +81,16 @@ interface UseGriddleOptions {
    */
   locked?: boolean;
   /**
+   * Words to seed `foundWords` with on the FIRST render. Used by the
+   * SSR-hydrated crumbs path — the page server-renders persisted
+   * crumbs and threads them through here so the FoundWords strip
+   * paints populated from tick zero, rather than flashing empty for
+   * the one frame between mount and the client-side /api/crumbs
+   * fetch resolving. Passed only on first mount; subsequent
+   * crumb arrivals still flow through `seedFoundWords`.
+   */
+  initialFoundWords?: readonly string[];
+  /**
    * Fires whenever a new crumb is discovered (not on initial load).
    * The caller can use this to persist the word server-side.
    */
@@ -94,13 +104,16 @@ export function useGriddle({
   unassisted = false,
   disabled = false,
   locked = false,
+  initialFoundWords,
   onCrumbFound,
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
   const [path, setPath] = useState<number[]>([]);
   const [shakeSignal, setShakeSignal] = useState(0);
   const [solved, setSolved] = useState(false);
   const [pendingSolve, setPendingSolve] = useState(false);
-  const [foundWords, setFoundWords] = useState<string[]>([]);
+  const [foundWords, setFoundWords] = useState<string[]>(
+    () => (initialFoundWords ? [...initialFoundWords] : []),
+  );
 
   const telemetryRef = useRef<SolveTelemetry | null>(null);
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();
@@ -321,6 +334,16 @@ export function useGriddle({
   const triggerSolve = useCallback(
     (finalPath: number[]) => {
       if (solved) return;
+      // Post-solve lock: the puzzle is already banked. Completing the
+      // 9-letter word again on a Reset-replay shouldn't re-open the
+      // SolveModal, re-POST to /api/solve, or overwrite the frozen
+      // `finalSolveMs` with a later duration — first-solve-wins is
+      // authoritative, and on anonymous sessions the server can't
+      // dedupe so replays would insert fresh solves rows each time.
+      // Upstream, GameClient passes `locked=true` once finalSolveMs
+      // is set (SSR-hydrated from the prior solve OR set by the
+      // live solve path), which also gates the crumb detector above.
+      if (locked) return;
       if (finalPath.length !== 9) return;
       if (!isValidPath(finalPath)) return;
 
@@ -385,7 +408,7 @@ export function useGriddle({
           inFlightAttemptRef.current = null;
         });
     },
-    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake],
+    [grid, solved, onSolveAttempt, onSolved, unassisted, triggerShake, locked],
   );
 
   const typeLetter = useCallback(

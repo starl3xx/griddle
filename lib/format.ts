@@ -33,6 +33,41 @@ export function formatCountdown(totalSeconds: number): string {
 }
 
 /**
+ * Full English month names, Jan–Dec (index 0–11). Exported so UI
+ * surfaces that need per-month labels can reuse the same copy as
+ * `formatLongDate` instead of re-declaring the array.
+ */
+export const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/**
+ * Render a puzzle's ISO date (`YYYY-MM-DD`, the shape Postgres’s
+ * `date` type marshals to) as a long human date like "April 16, 2026".
+ *
+ * Parses the string by hand rather than going through `new Date` —
+ * `new Date('2026-04-16')` interprets as UTC midnight, which renders
+ * as the *previous day* in every timezone west of UTC (e.g. US users
+ * would see April 15). Splitting on `-` keeps the calendar date stable
+ * regardless of the viewer's locale.
+ *
+ * Falls back to the raw input if parsing fails, so a bad row in the
+ * DB never produces the literal string "undefined" in the UI.
+ */
+export function formatLongDate(iso: string): string {
+  const parts = iso.split('-');
+  if (parts.length < 3) return iso;
+  const year = parts[0];
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!Number.isFinite(month) || !Number.isFinite(day)) return iso;
+  const monthName = MONTH_NAMES[month - 1];
+  if (!monthName) return iso;
+  return `${monthName} ${day}, ${year}`;
+}
+
+/**
  * Seconds remaining until the next UTC midnight.
  */
 export function secondsUntilUtcMidnight(now: Date = new Date()): number {

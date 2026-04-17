@@ -113,7 +113,7 @@ export function PremiumStatsSection({
             <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
               See your solve trend, weekly pacing, today’s percentile, and career podium.
             </p>
-            <button type="button" onClick={onUpgrade} className="btn-primary w-full text-xs">
+            <button type="button" onClick={onUpgrade} className="btn-accent w-full text-xs">
               See Premium options
             </button>
           </div>

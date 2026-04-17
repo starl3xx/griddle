@@ -24,3 +24,15 @@ export function getCurrentDayNumber(now: Date = new Date()): number {
   const diff = now.getTime() - LAUNCH_DATE.getTime();
   return Math.max(1, Math.floor(diff / msPerDay) + 1);
 }
+
+/**
+ * ISO calendar date (`YYYY-MM-DD`, UTC) for a given day number. Pure
+ * math against `LAUNCH_DATE` — avoids a DB round-trip when the caller
+ * just needs the date for rendering (the archive calendar marks
+ * today's cell without pulling the puzzles row).
+ */
+export function getDateForDayNumber(dayNumber: number): string {
+  const msPerDay = 86_400_000;
+  const ms = LAUNCH_DATE.getTime() + (dayNumber - 1) * msPerDay;
+  return new Date(ms).toISOString().slice(0, 10);
+}

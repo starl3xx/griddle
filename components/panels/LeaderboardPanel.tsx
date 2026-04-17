@@ -5,6 +5,7 @@ import { Crown, CaretLeft, CaretRight, CircleNotch } from '@phosphor-icons/react
 import { formatMs, formatPlayerName } from '@/lib/format';
 import { Avatar } from '../Avatar';
 import { PremiumBenefitsList } from '../PremiumBenefitsList';
+import { WordmarkBadges } from '../WordmarkBadges';
 
 interface LeaderboardEntry {
   rank: number;
@@ -14,6 +15,13 @@ interface LeaderboardEntry {
   avatarUrl: string | null;
   serverSolveMs: number;
   unassisted: boolean;
+  /**
+   * Up to 3 wordmark ids to render as overlapping circular badges next
+   * to the player's name. Pre-filtered server-side via
+   * `getLeaderboardWordmarks` (speed/streak group collapse + top-3
+   * Z-index selection), so the client just renders them in order.
+   */
+  topWordmarks: string[];
 }
 
 interface LeaderboardResponse {
@@ -159,15 +167,22 @@ export function LeaderboardPanel({
                   #{e.rank}
                 </span>
                 <Avatar pfpUrl={e.avatarUrl} size="xs" />
-                <span
-                  className={`flex-1 text-sm truncate ${
-                    e.handle
-                      ? 'font-semibold text-gray-900 dark:text-gray-100'
-                      : 'font-mono text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  {formatPlayerName(e)}
-                </span>
+                {/* Name + wordmark badges share a flex-1 shrinkable
+                    container so the name truncates instead of pushing
+                    the badges off-row on tight widths. min-w-0 is
+                    mandatory to let `truncate` actually clip. */}
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <span
+                    className={`text-sm truncate ${
+                      e.handle
+                        ? 'font-semibold text-gray-900 dark:text-gray-100'
+                        : 'font-mono text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {formatPlayerName(e)}
+                  </span>
+                  <WordmarkBadges ids={e.topWordmarks} />
+                </div>
                 {e.unassisted && (
                   <span
                     className="text-accent inline-flex items-center"

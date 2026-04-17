@@ -5,6 +5,7 @@ import { getDailyLeaderboard } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatMs, formatPlayerName } from '@/lib/format';
 import { Avatar } from '@/components/Avatar';
+import { WordmarkBadges } from '@/components/WordmarkBadges';
 
 /**
  * Daily leaderboard page. Server component — fetches directly via
@@ -56,13 +57,16 @@ export default async function LeaderboardPage({
                   #{e.rank}
                 </span>
                 <Avatar pfpUrl={e.avatarUrl} size="xs" />
-                <span
-                  className={`flex-1 text-sm truncate ${
-                    e.handle ? 'font-semibold text-gray-900' : 'font-mono text-gray-700'
-                  }`}
-                >
-                  {formatPlayerName(e)}
-                </span>
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <span
+                    className={`text-sm truncate ${
+                      e.handle ? 'font-semibold text-gray-900' : 'font-mono text-gray-700'
+                    }`}
+                  >
+                    {formatPlayerName(e)}
+                  </span>
+                  <WordmarkBadges ids={e.topWordmarks} />
+                </div>
                 {e.unassisted && (
                   <span
                     className="text-accent inline-flex items-center"
