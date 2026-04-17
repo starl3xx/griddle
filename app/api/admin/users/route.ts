@@ -44,9 +44,12 @@ export async function GET(req: Request): Promise<NextResponse> {
   const startOffset = (page - 1) * limit;
 
   // Totals first — needed for pagination math whether we return
-  // registered, anon, or both.
-  const registeredTotal = type === 'anon' ? 0 : await countRegistered({ q });
-  const anonTotal       = type === 'registered' ? 0 : await countAnon({ q });
+  // registered, anon, or both. Run the two count queries in
+  // parallel; they're on different tables and fully independent.
+  const [registeredTotal, anonTotal] = await Promise.all([
+    type === 'anon'       ? Promise.resolve(0) : countRegistered({ q }),
+    type === 'registered' ? Promise.resolve(0) : countAnon({ q }),
+  ]);
 
   // Work out how many rows from each source this page should contain.
   let regOffset = 0, regTake = 0;
@@ -82,12 +85,16 @@ export async function GET(req: Request): Promise<NextResponse> {
     anonTake = Math.min(Math.max(0, (startOffset + limit) - spillStart), anonRemaining);
   }
 
-  const registeredRows = regTake > 0
-    ? await listRegistered({ q, offset: regOffset, limit: regTake })
-    : [];
-  const anonResult = anonTake > 0
-    ? await getAnonSessions({ offset: anonOffset, limit: anonTake, search: q || undefined })
-    : { rows: [], total: anonTotal };
+  // Parallelize the row fetches — they depend on the counts
+  // computed above but are independent of each other.
+  const [registeredRows, anonResult] = await Promise.all([
+    regTake > 0
+      ? listRegistered({ q, offset: regOffset, limit: regTake })
+      : Promise.resolve([] as Awaited<ReturnType<typeof listRegistered>>),
+    anonTake > 0
+      ? getAnonSessions({ offset: anonOffset, limit: anonTake, search: q || undefined })
+      : Promise.resolve({ rows: [], total: anonTotal }),
+  ]);
 
   const users = [
     ...registeredRows.map((r) => ({ ...r, kind: 'registered' as const })),

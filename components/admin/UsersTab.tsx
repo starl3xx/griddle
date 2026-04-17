@@ -82,8 +82,10 @@ export function UsersTab() {
     return () => clearTimeout(t);
   }, [query]);
 
-  // Reset to page 1 when filter changes.
-  useEffect(() => { setPage(1); }, [type]);
+  // Type filter changes are handled in the onClick below (setType +
+  // setPage(1) batched in a single event handler) so the fetch effect
+  // only fires once with the new filter + page=1, avoiding a
+  // wasteful first request at the stale page.
 
   useEffect(() => {
     const controller = new AbortController();
@@ -147,7 +149,7 @@ export function UsersTab() {
             <button
               key={t}
               type="button"
-              onClick={() => setType(t)}
+              onClick={() => { setType(t); setPage(1); }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
                 type === t
                   ? 'bg-brand text-white'
