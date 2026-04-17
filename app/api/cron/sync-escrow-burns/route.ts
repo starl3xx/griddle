@@ -215,11 +215,19 @@ export async function GET(req: Request): Promise<NextResponse> {
     logs: refundLogs,
   });
   for (const log of parsedRefunds) {
+    // Clear wordBurned on refund — the webhook writes the escrowed
+    // amount there optimistically at open-time, and for burned rows
+    // the cron overwrites with the real on-chain burn amount above.
+    // For refunded rows the tokens went back to treasury, nothing was
+    // burned, so leaving the optimistic number would show a bogus
+    // "X $WORD burned" in the admin ledger and skew total-burned
+    // accounting.
     await db
       .update(premiumUsers)
       .set({
         escrowStatus: 'refunded',
         escrowBurnTx: log.transactionHash,
+        wordBurned: null,
       })
       .where(
         and(
