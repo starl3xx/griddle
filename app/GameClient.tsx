@@ -1051,17 +1051,18 @@ export default function GameClient({
           </button>
         </header>
 
-        {/* Grid + slots + action buttons sit behind the Start gate.
-            The gate renders two siblings on top when !startedAt: a
-            backdrop-filter overlay that blurs what's visible behind
-            it, and the Start button itself. Using `backdrop-blur-*`
-            (backdrop-filter) instead of `blur-*` (filter) on the
-            content avoids the rectangular halo-clip artifact WebKit
-            produces when filter: blur hits a container edge —
-            backdrop-filter renders through a different compositor
-            path that doesn't clamp the halo. pointer-events-none on
-            the inner content blocks tap interaction; useGriddle's
-            `disabled` blocks keyboard input. */}
+        {/* Puzzle area behind the Start gate: FoundWords, Grid,
+            WordSlots. The gate renders two siblings on top when
+            !startedAt: a backdrop-filter overlay that blurs what's
+            visible behind it, and the Start button itself. Using
+            `backdrop-blur-*` instead of `blur-*` on the content
+            avoids the rectangular halo-clip artifact WebKit produces
+            when filter: blur hits a container edge.
+            pointer-events-none on the inner content blocks tap
+            interaction while gated; useGriddle's `disabled` blocks
+            keyboard. Backspace / Reset live OUTSIDE this wrapper
+            because they carry no puzzle letters — they're just
+            disabled pre-Start, not hidden. */}
         <div className="relative w-full flex flex-col items-center gap-6">
           <div
             className={
@@ -1085,27 +1086,6 @@ export default function GameClient({
             />
 
             <WordSlots letters={state.letters} />
-
-            <div className="flex gap-2 mt-1">
-              <button
-                type="button"
-                className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-                onClick={actions.backspace}
-                disabled={state.pendingSolve}
-              >
-                <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
-                Backspace
-              </button>
-              <button
-                type="button"
-                className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-                onClick={actions.reset}
-                disabled={state.pendingSolve}
-              >
-                <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
-                Reset
-              </button>
-            </div>
           </div>
 
           {startedAt == null && (
@@ -1122,6 +1102,27 @@ export default function GameClient({
               <StartGate onStart={handleStart} pending={startPending} />
             </>
           )}
+        </div>
+
+        <div className="flex gap-2 mt-1">
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+            onClick={actions.backspace}
+            disabled={state.pendingSolve || startedAt == null}
+          >
+            <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
+            Backspace
+          </button>
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+            onClick={actions.reset}
+            disabled={state.pendingSolve || startedAt == null}
+          >
+            <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
+            Reset
+          </button>
         </div>
 
         <HomeTiles onTileClick={handleTileClick} />
