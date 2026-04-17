@@ -427,6 +427,13 @@ export const puzzleLoads = pgTable(
     sessionId: varchar('session_id', { length: 64 }).notNull(),
     puzzleId: integer('puzzle_id').references(() => puzzles.id).notNull(),
     loadedAt: timestamp('loaded_at').defaultNow().notNull(),
+    /**
+     * Timestamp of the first Start-button press for this (session, puzzle).
+     * Null until the player actually starts playing — the solve route times
+     * from here, falling back to loaded_at only for pre-start direct POSTs
+     * and historical rows that pre-date the Start gate.
+     */
+    startedAt: timestamp('started_at'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.sessionId, t.puzzleId] }),

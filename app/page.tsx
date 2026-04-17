@@ -1,6 +1,11 @@
 import { notFound } from 'next/navigation';
 import GameClient from './GameClient';
-import { getTodayPuzzle, getUserSettings, recordPuzzleLoad } from '@/lib/db/queries';
+import {
+  getPuzzleStartedAt,
+  getTodayPuzzle,
+  getUserSettings,
+  recordPuzzleLoad,
+} from '@/lib/db/queries';
 import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
 
@@ -42,8 +47,14 @@ export default async function Page() {
     notFound();
   }
 
-  const [settings] = await Promise.all([
+  // Read started_at in parallel with recordPuzzleLoad + settings. No
+  // ordering constraint: on a first visit the row doesn't exist yet
+  // and the read returns null regardless; on return visits the row
+  // already exists from a prior recordPuzzleLoad and the current
+  // insert is an onConflictDoNothing no-op.
+  const [settings, initialStartedAt] = await Promise.all([
     sessionWallet ? getUserSettings(sessionWallet) : Promise.resolve(null),
+    getPuzzleStartedAt(sessionId, puzzle.dayNumber),
     recordPuzzleLoad(sessionId, puzzle.id),
   ]);
 
@@ -59,6 +70,7 @@ export default async function Page() {
       }}
       initialSessionWallet={sessionWallet}
       initialUnassistedMode={settings?.unassistedModeEnabled ?? false}
+      initialStartedAt={initialStartedAt != null ? initialStartedAt.toISOString() : null}
     />
   );
 }

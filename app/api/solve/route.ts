@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client';
 import { solves } from '@/lib/db/schema';
 import { getSessionId } from '@/lib/session';
 import {
-  getPuzzleLoadedAt,
+  getPuzzleLoadAndStart,
   getPuzzleWordByDayNumber,
   updateStreakForSolve,
   getLifetimeSolveCount,
@@ -23,7 +23,10 @@ import { awardWordmarks } from '@/lib/wordmarks/award';
  *   1. Looks up the puzzle word by day number (this is the ONLY place
  *      the word is read from the DB on a path that touches a response)
  *   2. Compares claimedWord === puzzle.word
- *   3. Computes `server_solve_ms` from `puzzle_loads.loaded_at`
+ *   3. Computes `server_solve_ms` from `puzzle_loads.started_at` (the
+ *      moment the player pressed Start). Falls back to `loaded_at` when
+ *      started_at is null — direct POSTs, or rows that pre-date the
+ *      Start gate.
  *   4. Computes keystroke stddev and min from the intervals array
  *   5. Determines the anti-bot flag (ineligible / suspicious / null)
  *   6. Inserts a `solves` row with all of the above
@@ -177,9 +180,9 @@ export async function POST(
   // canonical identity for stats (new in this PR) so handle-only and
   // email-auth users — who may never bind a wallet — still see their
   // own solves. A solve can carry both, one, or neither.
-  const [puzzle, loadedAt, wallet, profileId] = await Promise.all([
+  const [puzzle, loadAndStart, wallet, profileId] = await Promise.all([
     getPuzzleWordByDayNumber(body.dayNumber),
-    getPuzzleLoadedAt(sessionId, body.dayNumber),
+    getPuzzleLoadAndStart(sessionId, body.dayNumber),
     getSessionWallet(sessionId),
     getSessionProfile(sessionId),
   ]);
@@ -215,11 +218,14 @@ export async function POST(
     }
   }
 
-  // Authoritative server-side timing. Null if the session submitted
-  // without first loading the puzzle (possible via direct POST) — in
-  // that case the solve still counts but has no server time.
+  // Authoritative server-side timing. Prefer started_at (the moment
+  // the player pressed Start); fall back to loaded_at for rows that
+  // pre-date the Start gate or for direct POSTs that skipped the gate.
+  // Null only when neither exists, which means the session submitted
+  // without first loading the puzzle — solve still counts, no time.
+  const clockStart = loadAndStart?.startedAt ?? loadAndStart?.loadedAt ?? null;
   const serverSolveMs =
-    loadedAt != null ? Math.max(0, Date.now() - loadedAt.getTime()) : null;
+    clockStart != null ? Math.max(0, Date.now() - clockStart.getTime()) : null;
 
   const { stddev: keystrokeStddevMs, min: keystrokeMinMs } = keystrokeStats(
     body.keystrokeIntervalsMs,
