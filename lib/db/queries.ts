@@ -2643,6 +2643,40 @@ export async function getFirstSuccessfulSolveForPuzzle(
   };
 }
 
+/**
+ * Earliest successful-solve duration for this (identity, puzzle)
+ * combination, or null if the caller hasn't solved it yet. Unlike
+ * `getFirstSuccessfulSolveForPuzzle`, this matches on profile_id OR
+ * wallet OR session_id (via `solveBelongsTo`) — so an anonymous
+ * session's prior solve is still detected on refresh.
+ *
+ * Used by SSR to hydrate the post-solve UI state (frozen timer, crumb
+ * lock) on page load. Without this, a refreshed already-solved page
+ * would render the timer ticking from the original `started_at` (so
+ * a minutes-old start looks like a live-but-very-slow attempt) and
+ * the crumb detector would be armed, letting the player "discover"
+ * words they'd already banked.
+ */
+export async function getPreviousSolveMsForPuzzle(
+  identity: StatsIdentity,
+  puzzleId: number,
+): Promise<number | null> {
+  const rows = await db
+    .select({ ms: solves.serverSolveMs })
+    .from(solves)
+    .where(
+      and(
+        eq(solves.puzzleId, puzzleId),
+        eq(solves.solved, true),
+        isNotNull(solves.serverSolveMs),
+        solveBelongsTo(identity),
+      ),
+    )
+    .orderBy(asc(solves.createdAt))
+    .limit(1);
+  return rows.length > 0 && rows[0].ms != null ? Number(rows[0].ms) : null;
+}
+
 // ─── Premium Stats ─────────────────────────────────────────────────
 
 export interface PremiumStats {
