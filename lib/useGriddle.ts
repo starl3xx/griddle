@@ -81,6 +81,16 @@ interface UseGriddleOptions {
    */
   locked?: boolean;
   /**
+   * Words to seed `foundWords` with on the FIRST render. Used by the
+   * SSR-hydrated crumbs path — the page server-renders persisted
+   * crumbs and threads them through here so the FoundWords strip
+   * paints populated from tick zero, rather than flashing empty for
+   * the one frame between mount and the client-side /api/crumbs
+   * fetch resolving. Passed only on first mount; subsequent
+   * crumb arrivals still flow through `seedFoundWords`.
+   */
+  initialFoundWords?: readonly string[];
+  /**
    * Fires whenever a new crumb is discovered (not on initial load).
    * The caller can use this to persist the word server-side.
    */
@@ -94,13 +104,16 @@ export function useGriddle({
   unassisted = false,
   disabled = false,
   locked = false,
+  initialFoundWords,
   onCrumbFound,
 }: UseGriddleOptions): [GriddleState, GriddleActions] {
   const [path, setPath] = useState<number[]>([]);
   const [shakeSignal, setShakeSignal] = useState(0);
   const [solved, setSolved] = useState(false);
   const [pendingSolve, setPendingSolve] = useState(false);
-  const [foundWords, setFoundWords] = useState<string[]>([]);
+  const [foundWords, setFoundWords] = useState<string[]>(
+    () => (initialFoundWords ? [...initialFoundWords] : []),
+  );
 
   const telemetryRef = useRef<SolveTelemetry | null>(null);
   if (telemetryRef.current === null) telemetryRef.current = new SolveTelemetry();

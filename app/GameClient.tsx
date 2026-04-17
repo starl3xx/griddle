@@ -86,6 +86,15 @@ interface GameClientProps {
    * detection armed on a puzzle the player has already banked.
    */
   initialFinalSolveMs: number | null;
+  /**
+   * Crumbs (4–8 letter words the session has already discovered on
+   * today's puzzle) read server-side from `puzzle_crumbs`. Seeds
+   * useGriddle's `foundWords` from tick zero so a mid-play refresh
+   * keeps the FoundWords strip populated instead of flashing empty
+   * for the frame between mount and the client-side refetch. Empty
+   * array when nothing has been found yet.
+   */
+  initialCrumbs: readonly string[];
 }
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
@@ -103,6 +112,7 @@ export default function GameClient({
   initialUnassistedMode,
   initialStartedAt,
   initialFinalSolveMs,
+  initialCrumbs,
 }: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
 
@@ -482,6 +492,11 @@ export default function GameClient({
     locked: finalSolveMs != null,
     unassisted: unassistedMode,
     onCrumbFound: handleCrumbFound,
+    // SSR-hydrated crumbs — populates foundWords from tick zero so a
+    // mid-play refresh doesn't flash an empty strip. The client-side
+    // /api/crumbs fetch below still runs (for archive nav + as a
+    // consistency check) and de-dups via seedFoundWords.
+    initialFoundWords: initialCrumbs,
   });
 
   // When persisted crumbs arrive from the server, merge them into the

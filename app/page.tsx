@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import GameClient from './GameClient';
 import {
+  getCrumbsForSession,
   getPreviousSolveMsForPuzzle,
   getPuzzleStartedAt,
   getTodayPuzzle,
@@ -52,19 +53,24 @@ export default async function Page() {
     notFound();
   }
 
-  // Read started_at + any prior solve in parallel with recordPuzzleLoad
-  // + settings. No ordering constraint: on a first visit no row exists
-  // and both return null; on return visits the row is already there
-  // (onConflictDoNothing no-op). Prior-solve detection matches on
-  // profile_id OR wallet OR session_id, so anonymous refreshes still
-  // hydrate the post-solve UI state.
-  const [settings, initialStartedAt, previousSolveMs] = await Promise.all([
+  // Read started_at + any prior solve + persisted crumbs in parallel
+  // with recordPuzzleLoad + settings. No ordering constraint: on a
+  // first visit no rows exist and all return null/empty; on return
+  // visits the rows are already there (onConflictDoNothing no-op).
+  // Prior-solve detection matches on profile_id OR wallet OR
+  // session_id, so anonymous refreshes still hydrate the post-solve
+  // UI state. Crumbs are keyed on session_id today (same semantics
+  // as /api/crumbs) so the SSR fetch and the client fetch return
+  // identical data — the refresh lane in GameClient becomes a no-op
+  // dedup instead of the sole source of truth.
+  const [settings, initialStartedAt, previousSolveMs, initialCrumbs] = await Promise.all([
     sessionWallet ? getUserSettings(sessionWallet) : Promise.resolve(null),
     getPuzzleStartedAt(sessionId, puzzle.dayNumber),
     getPreviousSolveMsForPuzzle(
       { sessionId, wallet: sessionWallet, profileId },
       puzzle.id,
     ),
+    getCrumbsForSession(sessionId, puzzle.id),
     recordPuzzleLoad(sessionId, puzzle.id),
   ]);
 
@@ -82,6 +88,7 @@ export default async function Page() {
       initialUnassistedMode={settings?.unassistedModeEnabled ?? false}
       initialStartedAt={initialStartedAt != null ? initialStartedAt.toISOString() : null}
       initialFinalSolveMs={previousSolveMs}
+      initialCrumbs={initialCrumbs}
     />
   );
 }
