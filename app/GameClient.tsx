@@ -131,15 +131,21 @@ export default function GameClient({
   );
   const [startPending, setStartPending] = useState(false);
 
-  // Memoized epoch ms for today's puzzle so effects can restore the
-  // Start state when the player returns from an archive puzzle
-  // without re-parsing the ISO string each time.
-  const todayStartedAtMs = initialStartedAt != null ? new Date(initialStartedAt).getTime() : null;
+  // Today's startedAt lives in a ref (not a const) so it stays current
+  // when the player presses Start client-side. Seeded from the SSR
+  // prop, but updated by handleStart on today's puzzle so a
+  // today → archive → today navigation restores the running timer
+  // instead of falsely re-showing the Start gate. Archive puzzles
+  // recover their own startedAt by re-fetching /api/puzzle/[day], so
+  // only today needs in-memory bookkeeping.
+  const todayStartedAtRef = useRef<number | null>(
+    initialStartedAt != null ? new Date(initialStartedAt).getTime() : null,
+  );
 
   const loadArchivePuzzle = useCallback(async (dayNumber: number) => {
     if (dayNumber === initialPuzzle.dayNumber) {
       setActivePuzzle(initialPuzzle);
-      setStartedAt(todayStartedAtMs);
+      setStartedAt(todayStartedAtRef.current);
       return;
     }
     try {
@@ -149,21 +155,30 @@ export default function GameClient({
       setActivePuzzle({ dayNumber: data.dayNumber, date: data.date, grid: data.grid });
       setStartedAt(data.startedAt != null ? new Date(data.startedAt).getTime() : null);
     } catch {/* best-effort */}
-  }, [initialPuzzle, todayStartedAtMs]);
+  }, [initialPuzzle]);
 
   const returnToToday = useCallback(() => {
     setActivePuzzle(initialPuzzle);
-    setStartedAt(todayStartedAtMs);
-  }, [initialPuzzle, todayStartedAtMs]);
+    setStartedAt(todayStartedAtRef.current);
+  }, [initialPuzzle]);
 
   // Start press → POST /api/puzzle/start. On success, seed startedAt
   // with the server's authoritative timestamp. On failure, fall back
   // to the client clock so gameplay isn't blocked by a flaky POST —
   // the solve route will use loaded_at in that case, which is strictly
   // more generous (slightly inflated time) but keeps the UX moving.
+  //
+  // Both branches stash the resulting epoch ms into todayStartedAtRef
+  // when the active puzzle is today's, so return-to-today after an
+  // archive detour restores the running timer.
   const handleStart = useCallback(async () => {
     if (startPending) return;
     setStartPending(true);
+    const stashIfToday = (ms: number) => {
+      if (activePuzzle.dayNumber === initialPuzzle.dayNumber) {
+        todayStartedAtRef.current = ms;
+      }
+    };
     try {
       const res = await fetch('/api/puzzle/start', {
         method: 'POST',
@@ -172,7 +187,9 @@ export default function GameClient({
       });
       if (res.ok) {
         const data = (await res.json()) as { startedAt: string };
-        setStartedAt(new Date(data.startedAt).getTime());
+        const ms = new Date(data.startedAt).getTime();
+        setStartedAt(ms);
+        stashIfToday(ms);
         return;
       }
     } catch {
@@ -180,8 +197,10 @@ export default function GameClient({
     } finally {
       setStartPending(false);
     }
-    setStartedAt(Date.now());
-  }, [activePuzzle.dayNumber, startPending]);
+    const fallbackMs = Date.now();
+    setStartedAt(fallbackMs);
+    stashIfToday(fallbackMs);
+  }, [activePuzzle.dayNumber, initialPuzzle.dayNumber, startPending]);
 
   // ── Persisted crumbs ─────────────────────────────────────────────
   // Fetch any previously saved crumbs whenever the active puzzle

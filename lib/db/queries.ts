@@ -1307,27 +1307,6 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
 }
 
 /**
- * Fetch the loaded_at timestamp for a (session, puzzle) pair. Returns
- * null if the session never called /api/puzzle/today for this puzzle
- * before submitting a solve.
- *
- * NOT cached: per-session, per-puzzle, low cache-hit-rate. Direct DB read.
- */
-export async function getPuzzleLoadedAt(
-  sessionId: string,
-  dayNumber: number,
-): Promise<Date | null> {
-  const rows = await db
-    .select({ loadedAt: puzzleLoads.loadedAt })
-    .from(puzzleLoads)
-    .innerJoin(puzzles, eq(puzzleLoads.puzzleId, puzzles.id))
-    .where(and(eq(puzzleLoads.sessionId, sessionId), eq(puzzles.dayNumber, dayNumber)))
-    .limit(1);
-  if (rows.length === 0) return null;
-  return new Date(rows[0].loadedAt);
-}
-
-/**
  * Solve-timing read. Returns both the load time and the Start time for
  * this session's puzzle row. The solve route prefers started_at and
  * falls back to loaded_at when it's null (direct POST, or a row that
