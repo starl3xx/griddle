@@ -65,10 +65,21 @@ export async function POST(req: Request): Promise<NextResponse> {
   // Session metadata is the identity layer for the webhook; it must
   // not differ between modes or the fiat unlock path becomes
   // mode-dependent.
+  //
+  // Explicit method whitelist rather than automatic_payment_methods:
+  // ['card'] (covers Apple Pay + Google Pay as wrappers, synchronous)
+  // plus ['link'] (Stripe's saved-card wallet, synchronous). All three
+  // new methods surface in-embed now that griddle.fun domain verification
+  // is complete, and every method in the list settles synchronously —
+  // `checkout.session.completed` fires with `payment_status: 'paid'`,
+  // matching the webhook's current contract. automatic_payment_methods
+  // would also surface delayed-notification methods (ACH, SEPA, Boleto)
+  // that complete via the later `async_payment_succeeded` event, which
+  // the webhook does NOT handle.
   const sharedParams = {
     mode: 'payment' as const,
     line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-    automatic_payment_methods: { enabled: true },
+    payment_method_types: ['card', 'link'] as Array<'card' | 'link'>,
     metadata: {
       sessionId,
       wallet: wallet ?? '',

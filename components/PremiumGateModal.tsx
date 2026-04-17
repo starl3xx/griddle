@@ -169,7 +169,16 @@ export function PremiumGateModal({
       attempts++;
       if (attempts >= MAX_ATTEMPTS) {
         if (!cancelled) {
-          window.location.href = '/premium/success';
+          // Thread the wallet through so /premium/success polls
+          // /api/premium/[wallet] rather than /api/premium/session —
+          // the webhook for wallet-connected buyers writes to
+          // premium_users (wallet-keyed), not the session KV key, so
+          // a session-only poll on the success page would never see
+          // the row.
+          const href = sessionWallet
+            ? `/premium/success?wallet=${sessionWallet}`
+            : '/premium/success';
+          window.location.href = href;
         }
         return;
       }
