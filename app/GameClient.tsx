@@ -1110,9 +1110,16 @@ export default function GameClient({
                   backdrop-filter. Semi-transparent tint layered on top
                   ensures the blur reads as "hidden" and not
                   "accidentally faint" even on a browser that quietly
-                  degrades backdrop-filter to a no-op. */}
+                  degrades backdrop-filter to a no-op.
+
+                  Dark-mode tint matches the body's `bg-gray-900` — NOT
+                  black — so the overlay doesn't create a visibly
+                  darker band against the surrounding page. Using
+                  `bg-black/50` here layered a near-black rectangle on
+                  top of gray-900, which looked like a hard-edged
+                  horizontal stripe spanning the full viewport width. */}
               <div
-                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-black/50"
+                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-gray-900/40"
                 aria-hidden
               />
               <StartGate onStart={handleStart} pending={startPending} />
