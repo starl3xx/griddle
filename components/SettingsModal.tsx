@@ -756,7 +756,7 @@ export function SettingsModal({
                     Premium unlocked
                   </p>
                   <p className="text-[11px] text-gray-500">
-                    {profile?.premiumSource === 'crypto' && 'Unlocked via $WORD burn'}
+                    {profile?.premiumSource === 'crypto' && 'Unlocked via USDC → $WORD burn'}
                     {profile?.premiumSource === 'fiat' && 'Unlocked via Apple Pay / card'}
                     {profile?.premiumSource === 'admin_grant' && 'Comped by an admin'}
                     {!profile?.premiumSource && 'Full access to leaderboard, archive, and settings'}

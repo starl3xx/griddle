@@ -14,29 +14,25 @@ import { checkRateLimit, rateLimitResponseInit } from '@/lib/rate-limit';
  *
  * Body: `{ txHash: '0x…' }`
  *
- * Called by the client after `unlockWithPermit` lands on-chain. The
+ * Called by the client after `unlockWithUsdc` lands on-chain. The
  * client-supplied wallet / amount are NOT trusted — this route reads
  * the transaction receipt from a public Base RPC and parses the
- * `UnlockedWithBurn` event emitted by our GriddlePremium contract.
- * That gives us three independent facts from the chain itself:
+ * `UnlockedWithUsdcSwap` event emitted by our GriddlePremium contract.
+ * That gives us four independent facts from the chain itself:
  *
  *   1. The tx was included in a successful block
  *   2. The emitting contract is our configured GriddlePremium address
  *   3. The `user` indexed arg of the event is the real payer
+ *   4. The `usdcIn` + `wordBurned` fields are the actual amounts, not
+ *      client claims — these feed the admin Transactions ledger.
  *
- * If all three check out we insert/upsert a premium_users row bound to
- * that user and echo back `{premium: true, wallet}`. Otherwise we
+ * If all four check out we upsert the premium_users row with payment
+ * telemetry and echo back `{premium: true, wallet}`. Otherwise we
  * reject with a 400 and no DB write happens — the client may retry.
- *
- * This decouples the "client knows about the burn" step from the
- * "server grants premium" step, which means a malicious client can't
- * grant themselves premium by POSTing a fake wallet address.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Single long-lived public client per serverless instance. viem's
-// clients are cheap but we still don't want one per request.
 const publicClient = createPublicClient({
   chain: base,
   transport: http(),
@@ -67,10 +63,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'txHash must be 0x + 64 hex' }, { status: 400 });
   }
 
-  // Per-session limiter. A legit user verifies once per unlock, with
-  // at most a handful of client retries while the tx is being indexed.
-  // Ten attempts a minute leaves headroom for the retry loop without
-  // letting an attacker fire arbitrary tx hashes at our Base RPC.
   const sessionId = await getSessionId();
   const rl = await checkRateLimit(`premium-verify:${sessionId}`, 10, 60);
   if (!rl.allowed) {
@@ -80,11 +72,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  // Wait for the receipt. If the tx doesn't exist yet (eager call from
-  // the client), viem throws — the client should retry after a short
-  // delay. Two confirmations is overkill on Base but it's cheap and
-  // protects against a reorg flipping a valid unlock into an invalid
-  // state between verify and display.
   let receipt: Awaited<ReturnType<typeof publicClient.getTransactionReceipt>>;
   try {
     receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
@@ -99,10 +86,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'transaction reverted' }, { status: 400 });
   }
 
-  // Every log we care about was emitted by our contract, so narrow
-  // the log list to that address before decoding. Defense in depth
-  // against a malicious contract that happens to emit a look-alike
-  // UnlockedWithBurn event with a fake user.
   const ourLogs = receipt.logs.filter(
     (l) => l.address.toLowerCase() === premiumAddress,
   );
@@ -113,33 +96,30 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  // parseEventLogs filters to events matching our ABI and gives us
-  // typed `args` back. We want the UnlockedWithBurn log specifically.
   const parsed = parseEventLogs({
     abi: griddlePremiumAbi,
-    eventName: 'UnlockedWithBurn',
+    eventName: 'UnlockedWithUsdcSwap',
     logs: ourLogs,
   });
 
   if (parsed.length === 0) {
     return NextResponse.json(
-      { error: 'no UnlockedWithBurn event in transaction' },
+      { error: 'no UnlockedWithUsdcSwap event in transaction' },
       { status: 400 },
     );
   }
 
-  // Use the first event — a single tx should only contain one unlock
-  // (our contract has no reason to emit multiple in one call), but if
-  // one ever did we'd still honor the first user.
   const event = parsed[0];
   const wallet = event.args.user.toLowerCase();
+  const usdcIn = event.args.usdcIn;
+  const wordBurned = event.args.wordBurned;
 
   if (!isValidAddress(wallet)) {
     return NextResponse.json({ error: 'event user is not a valid address' }, { status: 400 });
   }
 
   try {
-    await recordCryptoUnlock(wallet, txHash);
+    await recordCryptoUnlock({ wallet, txHash, usdcAmount: usdcIn, wordBurned });
   } catch (err) {
     console.error('[premium/verify] recordCryptoUnlock failed', err);
     return NextResponse.json(
@@ -148,12 +128,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  // checkout_completed — idempotency key = tx hash, so client retries
-  // (which are common while waiting for RPC indexing) can't double-
-  // count the unlock in the funnel. Wrap the whole telemetry hop in
-  // try/catch so any funnel failure never turns a successful premium
-  // unlock into a 500. `sessionId` is already bound above for rate
-  // limiting, reuse it here.
   try {
     await recordFunnelEvent(
       { name: 'checkout_completed', method: 'crypto' },

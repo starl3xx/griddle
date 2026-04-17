@@ -14,7 +14,7 @@ import {
   puzzleCrumbs,
 } from './schema';
 import { getCurrentDayNumber } from '@/lib/scheduler';
-import { secondsUntilUtcMidnight } from '@/lib/format';
+import { secondsUntilUtcMidnight, formatUsdc6 } from '@/lib/format';
 import { kv } from '@/lib/kv';
 import { slugifyUsername, validateUsername } from '@/lib/username';
 import { getLeaderboardWordmarks } from '@/lib/wordmarks/leaderboard';
@@ -1400,25 +1400,80 @@ export async function deleteAdminProfile(profileId: number): Promise<boolean> {
  * on wallet  -  a replayed verify re-runs the same upsert with the same
  * txHash and ends up at identical state.
  */
-export async function recordCryptoUnlock(
-  wallet: string,
-  txHash: string,
-): Promise<void> {
-  const normalized = wallet.toLowerCase();
+export interface RecordCryptoUnlockInput {
+  wallet: string;
+  txHash: string;
+  /** USDC pulled on-chain (6-decimal units). Serialized to the
+   *  numeric(20,6) column as a decimal string. */
+  usdcAmount: bigint;
+  /** $WORD wei burned in the same tx. Serialized as a decimal string. */
+  wordBurned: bigint;
+}
+
+/**
+ * Look up the current `premium_users` row for a wallet. Returns null if
+ * none exists. Used by:
+ *
+ *   - **Stripe webhook**: short-circuit before opening a new on-chain
+ *     escrow — if the wallet is already premium (prior crypto unlock,
+ *     admin grant, or earlier fiat), pulling more $WORD from the
+ *     stockpile would lock funds with no DB trace, since
+ *     `onConflictDoNothing` on the insert would drop the new row.
+ *
+ *   - **Escrow-sync cron**: distinguish "incomplete fiat row from THIS
+ *     session" (safe to retry) from "row belongs to a different
+ *     premium path" (drop the retry). The caller compares
+ *     `externalId` against `keccak256(stripeSessionId)`.
+ */
+export async function getPremiumRowByWallet(wallet: string): Promise<{
+  wallet: string;
+  source: string;
+  unlockedAt: Date;
+  externalId: string | null;
+  escrowStatus: string | null;
+} | null> {
+  const rows = await db
+    .select({
+      wallet: premiumUsers.wallet,
+      source: premiumUsers.source,
+      unlockedAt: premiumUsers.unlockedAt,
+      externalId: premiumUsers.externalId,
+      escrowStatus: premiumUsers.escrowStatus,
+    })
+    .from(premiumUsers)
+    .where(eq(premiumUsers.wallet, wallet.toLowerCase()))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function recordCryptoUnlock(input: RecordCryptoUnlockInput): Promise<void> {
+  const normalized = input.wallet.toLowerCase();
+  // USDC is 6-decimal, so convert the integer unit count back to a
+  // dollar-precision decimal string for the numeric(20, 6) column.
+  // Explicit string representation avoids JS number precision loss.
+  const usdcDecimal = formatUsdc6(input.usdcAmount);
+  const wordBurnedStr = input.wordBurned.toString();
   await db
     .insert(premiumUsers)
     .values({
       wallet: normalized,
-      txHash,
+      txHash: input.txHash,
       source: 'crypto',
       grantedBy: null,
       reason: null,
       stripeSessionId: null,
+      usdcAmount: usdcDecimal,
+      wordBurned: wordBurnedStr,
+      // Crypto burns immediately — no escrow lifecycle to track.
+      escrowStatus: null,
+      escrowOpenTx: null,
+      escrowBurnTx: null,
+      externalId: null,
     })
     .onConflictDoUpdate({
       target: premiumUsers.wallet,
       set: {
-        txHash,
+        txHash: input.txHash,
         source: 'crypto',
         grantedBy: null,
         reason: null,
@@ -1429,6 +1484,12 @@ export async function recordCryptoUnlock(
         // still references a Stripe session). Matches the existing
         // txHash / grantedBy / reason clearing pattern above.
         stripeSessionId: null,
+        usdcAmount: usdcDecimal,
+        wordBurned: wordBurnedStr,
+        escrowStatus: null,
+        escrowOpenTx: null,
+        escrowBurnTx: null,
+        externalId: null,
         unlockedAt: new Date(),
       },
     });
@@ -1462,6 +1523,18 @@ export interface RecordFiatUnlockInput {
   stripeSessionId: string;
   wallet?: string | null;
   handle?: string | null;
+  /** Populated when the webhook successfully opened the on-chain
+   *  escrow via `unlockForUser`. Null when the call failed + was
+   *  enqueued for retry; the sync cron will backfill it. */
+  escrowOpenTx?: string | null;
+  /** keccak256(stripeSessionId) — same key the contract uses. */
+  externalId?: string | null;
+  /** $WORD wei pulled into escrow. Stringified; DB column is
+   *  numeric(40,0). */
+  wordAmount?: bigint | null;
+  /** 'pending' | 'burned' | 'refunded'. Defaults to 'pending' at
+   *  write time. */
+  escrowStatus?: 'pending' | 'burned' | 'refunded' | null;
 }
 
 export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<void> {
@@ -1482,12 +1555,43 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
     // the buyer disconnects wallet A and connects wallet B). The audit
     // trail for wallet-path fiat purchases is in the profiles row written
     // below, which always carries the stripe_session_id.
-    // onConflictDoNothing: if the wallet already has a premium_users row
-    // (from a prior crypto unlock, admin grant, or a previous fiat purchase),
-    // the existing row wins. We must NOT overwrite it  -  doing so would
-    // destroy the txHash and source from a crypto premium row, making the
-    // on-chain burn untraceable from the DB alone. The wallet is already
-    // premium; no update is needed in any case.
+    // Only record the quoted $WORD amount when the escrow actually
+    // opened on-chain (escrowStatus='pending'). If the escrow call
+    // failed, the quote is stale and writing it to `word_burned`
+    // would show a bogus figure in the admin ledger until the retry
+    // cron fixes it.
+    const wordBurnedValue =
+      input.escrowStatus === 'pending' && input.wordAmount
+        ? input.wordAmount.toString()
+        : null;
+
+    // `onConflictDoUpdate` scoped by a WHERE clause: we want to
+    // update escrow fields ONLY when the existing row belongs to the
+    // same Stripe session (externalId match) OR we're freshly
+    // filling in a row we previously wrote with null escrow fields.
+    // This fixes the Stripe-webhook-replay case where the first
+    // attempt failed on-chain (row has null escrow fields + matching
+    // externalId) and the retry succeeded: without this update the
+    // successful escrow_open_tx + escrow_status='pending' would be
+    // silently dropped by onConflictDoNothing, leaving the admin
+    // ledger permanently stuck.
+    //
+    // We must NOT overwrite a crypto or admin_grant row — the
+    // webhook's `getPremiumRowByWallet` + externalId guard already
+    // prevents reaching here in that case, and the WHERE clause is
+    // defense-in-depth.
+    // Use COALESCE on the update side so the upsert enriches existing
+    // rows rather than overwriting them. Two webhook-replay scenarios
+    // motivate this:
+    //   (a) First call succeeded end-to-end → row has real tx hash +
+    //       amount. Replay with nulls must NOT clobber them.
+    //   (b) First call opened the escrow on-chain but CRASHED before
+    //       recordFiatUnlock (DB timeout, Neon blip). Replay hits
+    //       EscrowAlreadyExists, passes escrowStatus='pending' +
+    //       nulls elsewhere. No row exists, so INSERT runs — user
+    //       gets their premium row. escrow_open_tx stays null (lost
+    //       to the first-call crash); cron's EscrowBurned/Refunded
+    //       scan still reaches the row via externalId at settle time.
     await db
       .insert(premiumUsers)
       .values({
@@ -1497,8 +1601,22 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
         grantedBy: null,
         reason: null,
         stripeSessionId: null,
+        escrowStatus: input.escrowStatus ?? null,
+        escrowOpenTx: input.escrowOpenTx ?? null,
+        escrowBurnTx: null,
+        externalId: input.externalId ?? null,
+        wordBurned: wordBurnedValue,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: premiumUsers.wallet,
+        set: {
+          escrowStatus: sql`COALESCE(${premiumUsers.escrowStatus}, excluded.escrow_status)`,
+          escrowOpenTx: sql`COALESCE(${premiumUsers.escrowOpenTx}, excluded.escrow_open_tx)`,
+          externalId: sql`COALESCE(${premiumUsers.externalId}, excluded.external_id)`,
+          wordBurned: sql`COALESCE(${premiumUsers.wordBurned}, excluded.word_burned)`,
+        },
+        setWhere: sql`${premiumUsers.source} = 'fiat'`,
+      });
   }
 
   // Persist the stripe session id on the profile row. For wallet-path

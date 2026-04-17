@@ -8,15 +8,33 @@
 export const griddlePremiumAbi = [
   {
     type: 'function',
-    name: 'unlockWithPermit',
+    name: 'unlockWithUsdc',
     stateMutability: 'nonpayable',
     inputs: [
-      { name: 'tokenAmount', type: 'uint256' },
-      { name: 'deadline', type: 'uint256' },
+      { name: 'permitDeadline', type: 'uint256' },
       { name: 'v', type: 'uint8' },
       { name: 'r', type: 'bytes32' },
       { name: 's', type: 'bytes32' },
+      { name: 'minWordOut', type: 'uint256' },
     ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'unlockForUser',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'user', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'externalId', type: 'bytes32' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'burnEscrowed',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'externalId', type: 'bytes32' }],
     outputs: [],
   },
   {
@@ -42,21 +60,79 @@ export const griddlePremiumAbi = [
   },
   {
     type: 'function',
-    name: 'SLIPPAGE_PCT',
+    name: 'USDC_UNLOCK_AMOUNT',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'SWAP_SLIPPAGE_PCT',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
     type: 'event',
-    name: 'UnlockedWithBurn',
+    name: 'UnlockedWithUsdcSwap',
     inputs: [
       { name: 'user', type: 'address', indexed: true },
-      { name: 'tokensBurned', type: 'uint256', indexed: false },
+      { name: 'usdcIn', type: 'uint256', indexed: false },
+      { name: 'wordBurned', type: 'uint256', indexed: false },
       { name: 'oraclePrice', type: 'uint256', indexed: false },
     ],
     anonymous: false,
   },
+  {
+    type: 'event',
+    name: 'EscrowOpened',
+    inputs: [
+      { name: 'externalId', type: 'bytes32', indexed: true },
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'EscrowBurned',
+    inputs: [
+      { name: 'externalId', type: 'bytes32', indexed: true },
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'EscrowRefunded',
+    inputs: [
+      { name: 'externalId', type: 'bytes32', indexed: true },
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'to', type: 'address', indexed: false },
+    ],
+    anonymous: false,
+  },
+  // Errors — included so viem can decode reverts into typed error names
+  // for callers that pattern-match (e.g. the escrow-sync cron treats
+  // `EscrowAlreadyExists` as a success signal). Without the ABI entry,
+  // viem falls back to raw revert bytes and the name-match regex
+  // silently fails, turning a replay into a permanent poison pill.
+  { type: 'error', name: 'EscrowAlreadyExists', inputs: [] },
+  { type: 'error', name: 'EscrowNotPending', inputs: [] },
+  { type: 'error', name: 'EscrowStillLocked', inputs: [] },
+  { type: 'error', name: 'NotEscrowManager', inputs: [] },
+  { type: 'error', name: 'StaleOraclePrice', inputs: [] },
+  { type: 'error', name: 'OracleZeroPrice', inputs: [] },
+  { type: 'error', name: 'MinWordOutTooLow', inputs: [] },
+  { type: 'error', name: 'SwapProducedInsufficientWord', inputs: [] },
+  { type: 'error', name: 'SwapConfigNotSet', inputs: [] },
+  { type: 'error', name: 'ZeroAddress', inputs: [] },
+  { type: 'error', name: 'ZeroAmount', inputs: [] },
+  { type: 'error', name: 'AmountOverflow', inputs: [] },
+  { type: 'error', name: 'NothingToSweep', inputs: [] },
+  { type: 'error', name: 'ConstructorInterfaceMismatch', inputs: [] },
 ] as const;
 
 /**
@@ -73,5 +149,40 @@ export const wordOracleAbi = [
       { name: 'price', type: 'uint256' },
       { name: 'updatedAt', type: 'uint256' },
     ],
+  },
+] as const;
+
+/**
+ * USDC ABI fragment — permit domain + nonces for the ERC-2612 signature
+ * the crypto flow uses.
+ */
+export const usdcAbi = [
+  {
+    type: 'function',
+    name: 'name',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'version',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    type: 'function',
+    name: 'nonces',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
