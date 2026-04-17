@@ -3,6 +3,9 @@ import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
 import { getCrumbsForSession, saveCrumb, getPuzzleByDay } from '@/lib/db/queries';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/crumbs?dayNumber=123
  *
@@ -10,9 +13,6 @@ import { getCrumbsForSession, saveCrumb, getPuzzleByDay } from '@/lib/db/queries
  * sorted oldest-first. Used by GameClient to restore found words on
  * page reload or return visit.
  */
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
 export async function GET(req: Request): Promise<NextResponse> {
   const { searchParams } = new URL(req.url);
   const dayStr = searchParams.get('dayNumber');
@@ -30,7 +30,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ crumbs: [] });
   }
 
-  const crumbs = await getCrumbsForSession(sessionId, puzzle.id);
+  // Passing wallet widens the crumb match from "this session only"
+  // to "this session OR any session that ever saved a crumb with
+  // this wallet" — resilient to session rotation (PWA vs browser,
+  // cookie eviction, etc.) without re-requiring the user to find
+  // their crumbs again.
+  const wallet = await getSessionWallet(sessionId);
+  const crumbs = await getCrumbsForSession(sessionId, puzzle.id, wallet);
   return NextResponse.json({ crumbs });
 }
 

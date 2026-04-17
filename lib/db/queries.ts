@@ -2973,25 +2973,53 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
 // ─── Puzzle Crumbs ─────────────────────────────────────────────────
 
 /**
- * Fetch all crumbs a session has found on a given puzzle, oldest first.
- * Returns the raw word strings — the caller (API route or hook) owns
- * the response shape.
+ * Fetch all crumbs for a given puzzle, matching by session_id OR
+ * (when the caller has a wallet bound) by wallet. Returns the raw
+ * word strings — the caller owns the response shape.
+ *
+ * Why the OR: crumbs are written with whatever identity the session
+ * has at save time. If the user finds crumbs pre-wallet-connect and
+ * the session later connects a wallet, `/api/wallet/link` backfills
+ * `puzzle_crumbs.wallet` — but only for rows carrying the current
+ * session_id. A user who cycles through multiple sessions (browser
+ * vs PWA, cookie eviction, etc.) would otherwise lose crumbs on
+ * refresh. Matching by wallet in addition to session_id unions the
+ * user's crumbs across every session that ever carried that wallet.
+ *
+ * Still DISTINCT on word so a crumb found on multiple sessions
+ * collapses to a single entry. Oldest-first by `foundAt` so the
+ * original discovery order is preserved on the client strip.
  */
 export async function getCrumbsForSession(
   sessionId: string,
   puzzleId: number,
+  wallet?: string | null,
 ): Promise<string[]> {
+  const normalizedWallet = wallet?.toLowerCase() ?? null;
   const rows = await db
-    .select({ word: puzzleCrumbs.word })
+    .select({ word: puzzleCrumbs.word, foundAt: puzzleCrumbs.foundAt })
     .from(puzzleCrumbs)
     .where(
       and(
-        eq(puzzleCrumbs.sessionId, sessionId),
         eq(puzzleCrumbs.puzzleId, puzzleId),
+        normalizedWallet
+          ? sql`(${puzzleCrumbs.sessionId} = ${sessionId} OR ${puzzleCrumbs.wallet} = ${normalizedWallet})`
+          : eq(puzzleCrumbs.sessionId, sessionId),
       ),
     )
     .orderBy(asc(puzzleCrumbs.foundAt));
-  return rows.map((r) => r.word);
+
+  // DISTINCT on word (earliest foundAt wins) so a crumb found on
+  // multiple sessions — common when the user bounces between browser
+  // and PWA — doesn't render as a duplicate pill.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of rows) {
+    if (seen.has(r.word)) continue;
+    seen.add(r.word);
+    out.push(r.word);
+  }
+  return out;
 }
 
 /**

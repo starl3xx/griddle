@@ -70,7 +70,7 @@ export default async function Page() {
       { sessionId, wallet: sessionWallet, profileId },
       puzzle.id,
     ),
-    getCrumbsForSession(sessionId, puzzle.id),
+    getCrumbsForSession(sessionId, puzzle.id, sessionWallet),
     recordPuzzleLoad(sessionId, puzzle.id),
   ]);
 
