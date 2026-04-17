@@ -286,6 +286,8 @@ bun run typecheck                # TypeScript check
 bun run db:generate              # Generate Drizzle migrations
 bun run db:migrate               # Apply migrations
 bun run db:studio                # Open Drizzle Studio GUI
+bun run db:check                 # Schema drift check — prod vs lib/db/schema.ts
+                                 # (run after any migration PR to catch unapplied SQL)
 # Puzzle seeding: deliberately not a package script. Load your
 # private puzzle list into Neon via a local script kept out of git.
 ```
