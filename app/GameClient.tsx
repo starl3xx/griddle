@@ -76,6 +76,15 @@ interface GameClientProps {
    * hasn't started this puzzle yet.
    */
   initialStartedAt: string | null;
+  /**
+   * Authoritative solve duration (ms) for this caller's first
+   * successful solve of today's puzzle, or null if they haven't
+   * solved it yet. Seeds `finalSolveMs` so a refresh after solving
+   * renders the frozen timer + crumb lock from tick zero instead of
+   * the timer ticking from the ancient started_at with crumb
+   * detection armed on a puzzle the player has already banked.
+   */
+  initialFinalSolveMs: number | null;
 }
 
 const TUTORIAL_STORAGE_KEY = 'griddle_tutorial_seen_v1';
@@ -92,6 +101,7 @@ export default function GameClient({
   initialSessionWallet,
   initialUnassistedMode,
   initialStartedAt,
+  initialFinalSolveMs,
 }: GameClientProps) {
   const { inMiniApp, fid, username, pfpUrl, displayName } = useFarcaster();
 
@@ -150,25 +160,41 @@ export default function GameClient({
   const todayStartedAtRef = useRef<number | null>(
     initialStartedAt != null ? new Date(initialStartedAt).getTime() : null,
   );
+  // Today's finalSolveMs follows the same persistence rule. Archive
+  // detours would otherwise blow away the frozen solve value on a
+  // return-to-today, letting the timer tick fresh from startedAt
+  // against a puzzle the player has already banked.
+  const todayFinalSolveMsRef = useRef<number | null>(initialFinalSolveMs);
 
   const loadArchivePuzzle = useCallback(async (dayNumber: number) => {
     if (dayNumber === initialPuzzle.dayNumber) {
       setActivePuzzle(initialPuzzle);
       setStartedAt(todayStartedAtRef.current);
+      setFinalSolveMs(todayFinalSolveMsRef.current);
       return;
     }
+    // Clear before fetch — avoids briefly flashing today's frozen
+    // time against the freshly-set archive puzzle while the GET is
+    // in flight. The API returns the archive's own previousSolveMs
+    // (if any) which we set on resolve.
+    setFinalSolveMs(null);
     try {
       const res = await fetch(`/api/puzzle/${dayNumber}`);
       if (!res.ok) return;
-      const data = (await res.json()) as InitialPuzzle & { startedAt: string | null };
+      const data = (await res.json()) as InitialPuzzle & {
+        startedAt: string | null;
+        previousSolveMs: number | null;
+      };
       setActivePuzzle({ dayNumber: data.dayNumber, date: data.date, grid: data.grid });
       setStartedAt(data.startedAt != null ? new Date(data.startedAt).getTime() : null);
+      setFinalSolveMs(data.previousSolveMs);
     } catch {/* best-effort */}
   }, [initialPuzzle]);
 
   const returnToToday = useCallback(() => {
     setActivePuzzle(initialPuzzle);
     setStartedAt(todayStartedAtRef.current);
+    setFinalSolveMs(todayFinalSolveMsRef.current);
   }, [initialPuzzle]);
 
   // Start press → POST /api/puzzle/start. On success, seed startedAt
@@ -386,7 +412,7 @@ export default function GameClient({
    * modal close); finalSolveMs persists for the whole puzzle lifetime
    * so the frozen timer stays visible whether or not the modal is up.
    */
-  const [finalSolveMs, setFinalSolveMs] = useState<number | null>(null);
+  const [finalSolveMs, setFinalSolveMs] = useState<number | null>(initialFinalSolveMs);
 
   const handleSolved = useCallback(
     (payload: SolvePayload & { unassisted: boolean; word: string }) => {
@@ -409,10 +435,16 @@ export default function GameClient({
       // `locked` prop to useGriddle that suppresses post-solve crumb
       // discovery.
       setFinalSolveMs(solveMs);
+      // Stash into today's ref so a later archive → return-to-today
+      // restores the frozen state without needing a page refresh
+      // (matches todayStartedAtRef's role for the Start stamp).
+      if (activeDayNumberRef.current === initialPuzzle.dayNumber) {
+        todayFinalSolveMsRef.current = solveMs;
+      }
       serverSolveMsRef.current = null;
       earnedWordmarksRef.current = [];
     },
-    [],
+    [initialPuzzle.dayNumber],
   );
 
   const handleReorderComplete = useCallback(() => {
@@ -470,7 +502,10 @@ export default function GameClient({
     if (prevDayRef.current !== activePuzzle.dayNumber) {
       prevDayRef.current = activePuzzle.dayNumber;
       setSolveResult(null);
-      setFinalSolveMs(null);
+      // finalSolveMs is intentionally NOT cleared here — the nav
+      // function (loadArchivePuzzle / returnToToday) is authoritative
+      // for that value per puzzle. Clearing here would race with the
+      // value those functions set in the same tick.
       fullReset();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
