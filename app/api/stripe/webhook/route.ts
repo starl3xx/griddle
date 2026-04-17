@@ -150,6 +150,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       let escrowOpenTx: Hex | null = null;
       let wordAmount: bigint | null = null;
       let escrowStatus: 'pending' | null = null;
+      let alreadyExists = false;
       try {
         wordAmount = await quoteWordForUsd(FIAT_ESCROW_USD);
         const result = await openEscrowForFiatSession({
@@ -160,31 +161,54 @@ export async function POST(req: Request): Promise<NextResponse> {
         escrowOpenTx = result.txHash;
         escrowStatus = 'pending';
       } catch (err) {
-        console.error('[stripe/webhook] on-chain escrow open failed — enqueuing retry', err);
-        await kv
-          .lpush(
-            ESCROW_RETRY_KEY,
-            JSON.stringify({
-              stripeSessionId: session.id,
-              wallet,
-              externalId: externalIdForStripe(session.id),
-              enqueuedAt: Date.now(),
-              reason: err instanceof Error ? err.message : 'unknown',
-            }),
-          )
-          .catch((qerr) => {
-            console.error('[stripe/webhook] retry enqueue itself failed', qerr);
-          });
+        const message = err instanceof Error ? err.message : String(err);
+        // Stripe webhook retries can (and do) replay events. On a
+        // replay the first call's `unlockForUser` already landed
+        // on-chain, so simulateContract reverts with
+        // `EscrowAlreadyExists`. We must NOT treat this as a failure
+        // that needs a DB write — the escrow telemetry from the
+        // first (successful) attempt is already in `premium_users`,
+        // and the `recordFiatUnlock` call below would overwrite those
+        // good values with the null locals via `onConflictDoUpdate`'s
+        // setWhere. Just log + short-circuit instead.
+        if (/EscrowAlreadyExists/i.test(message)) {
+          alreadyExists = true;
+          console.log(
+            '[stripe/webhook] idempotent Stripe replay — escrow already open, skipping DB overwrite',
+            { wallet, stripeSessionId: session.id },
+          );
+        } else {
+          console.error(
+            '[stripe/webhook] on-chain escrow open failed — enqueuing retry',
+            err,
+          );
+          await kv
+            .lpush(
+              ESCROW_RETRY_KEY,
+              JSON.stringify({
+                stripeSessionId: session.id,
+                wallet,
+                externalId: externalIdForStripe(session.id),
+                enqueuedAt: Date.now(),
+                reason: message,
+              }),
+            )
+            .catch((qerr) => {
+              console.error('[stripe/webhook] retry enqueue itself failed', qerr);
+            });
+        }
       }
 
-      await recordFiatUnlock({
-        stripeSessionId: session.id,
-        wallet,
-        escrowOpenTx,
-        externalId: externalIdForStripe(session.id),
-        wordAmount,
-        escrowStatus,
-      });
+      if (!alreadyExists) {
+        await recordFiatUnlock({
+          stripeSessionId: session.id,
+          wallet,
+          escrowOpenTx,
+          externalId: externalIdForStripe(session.id),
+          wordAmount,
+          escrowStatus,
+        });
+      }
     } else {
       // No wallet: bind premium to the browser session. The session key is
       // the only record until the user connects a wallet and migration runs.
