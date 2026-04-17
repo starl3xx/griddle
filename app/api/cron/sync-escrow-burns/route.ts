@@ -4,6 +4,7 @@ import { base } from 'viem/chains';
 import { griddlePremiumAbi } from '@/lib/contracts/griddlePremiumAbi';
 import { getGriddlePremiumAddress } from '@/lib/contracts/addresses';
 import { openEscrowForFiatSession, externalIdForStripe } from '@/lib/contracts/escrowSigner';
+import { getPremiumRowByWallet } from '@/lib/db/queries';
 import { kv } from '@/lib/kv';
 import { db } from '@/lib/db/client';
 import { premiumUsers } from '@/lib/db/schema';
@@ -71,6 +72,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   const summary = {
     retriesProcessed: 0,
     retriesSucceeded: 0,
+    retriesSkippedAlreadyPremium: 0,
     burnEventsApplied: 0,
     refundEventsApplied: 0,
   };
@@ -90,6 +92,30 @@ export async function GET(req: Request): Promise<NextResponse> {
       continue;
     }
     summary.retriesProcessed += 1;
+
+    // Mirror the webhook's duplicate-premium guard. Between the
+    // original failed webhook attempt and this retry, the wallet may
+    // have become premium via a different path (crypto unlock, admin
+    // grant, or a separate fiat session). If so, opening a new
+    // on-chain escrow would (a) pull stockpile $WORD unnecessarily
+    // and (b) overwrite the existing DB row's source-specific fields
+    // with fiat telemetry, corrupting the admin ledger. Drop the
+    // entry and log for ops — Stripe refund is manual out-of-band.
+    const existing = await getPremiumRowByWallet(entry.wallet);
+    if (existing) {
+      console.warn(
+        '[escrow-sync] wallet became premium via another path — dropping retry, manual Stripe refund required',
+        {
+          wallet: entry.wallet,
+          existingSource: existing.source,
+          existingUnlockedAt: existing.unlockedAt,
+          stripeSessionId: entry.stripeSessionId,
+        },
+      );
+      summary.retriesSkippedAlreadyPremium += 1;
+      continue;
+    }
+
     try {
       // The oracle can drift between the original webhook and this retry,
       // so re-quote $WORD fresh.
