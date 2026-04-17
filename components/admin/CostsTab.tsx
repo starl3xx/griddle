@@ -149,10 +149,19 @@ export function CostsTab() {
                 {(rows ?? []).map((r) => (
                   <tr key={r.id} className="border-t border-gray-100">
                     <td className="py-1 pr-2">
-                      <InlineInput value={r.category} onSave={(v) => updateRow(r.id, { category: v })} className="font-mono text-[11px]" />
+                      <InlineInput
+                        value={r.category}
+                        validate={(v) => v.trim().length > 0}
+                        onSave={(v) => updateRow(r.id, { category: v })}
+                        className="font-mono text-[11px]"
+                      />
                     </td>
                     <td className="py-1 px-2">
-                      <InlineInput value={r.label} onSave={(v) => updateRow(r.id, { label: v })} />
+                      <InlineInput
+                        value={r.label}
+                        validate={(v) => v.trim().length > 0}
+                        onSave={(v) => updateRow(r.id, { label: v })}
+                      />
                     </td>
                     <td className="py-1 px-2 text-right">
                       <InlineInput
