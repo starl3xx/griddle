@@ -11,9 +11,10 @@ import { UsersTab } from './UsersTab';
 import { PuzzlesTab } from './PuzzlesTab';
 import { TransactionsTab } from './TransactionsTab';
 import { CostsTab } from './CostsTab';
-import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins } from '@phosphor-icons/react';
+import { DeployTab } from './DeployTab';
+import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins, Rocket } from '@phosphor-icons/react';
 
-type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs';
+type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs' | 'deploy';
 
 interface AdminDashboardProps {
   /** Connected admin wallet — shown in the header for context. */
@@ -72,6 +73,8 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
         <TabGroup title="Settings">
           <TabButton active={activeTab === 'costs'} onClick={() => setActiveTab('costs')}
             icon={<Coins className="h-4 w-4" weight="bold" />} label="Costs" />
+          <TabButton active={activeTab === 'deploy'} onClick={() => setActiveTab('deploy')}
+            icon={<Rocket className="h-4 w-4" weight="bold" />} label="Deploy" />
         </TabGroup>
 
         <div className="mt-6">
@@ -84,6 +87,7 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
           {activeTab === 'anomalies' && <AnomaliesTab />}
           {activeTab === 'grant' && <GrantTab />}
           {activeTab === 'costs' && <CostsTab />}
+          {activeTab === 'deploy' && <DeployTab />}
         </div>
       </div>
     </div>
