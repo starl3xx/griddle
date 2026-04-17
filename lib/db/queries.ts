@@ -3589,6 +3589,30 @@ export async function getRevenueBreakdown(windowDays?: number): Promise<RevenueB
   return breakdown;
 }
 
+/**
+ * Gross realized USD for the current calendar month (month-to-date).
+ * Separate from the rolling 30-day series used by the trend chart
+ * because a 30-day window ending today misses day 1 on the 31st of
+ * long months — the Pulse net-margin math needs an exact MTD figure
+ * to match the MTD-prorated op-cost side.
+ */
+export async function getMtdGrossRevenue(): Promise<number> {
+  const rows = await db.execute<{ total: number }>(sql`
+    SELECT coalesce(sum(
+      case
+        when source = 'crypto'
+          then coalesce(usdc_amount, ${CRYPTO_FALLBACK_USD})
+        when source = 'fiat' and (escrow_status is null or escrow_status = 'burned')
+          then ${FIAT_PRICE_USD}
+        else 0
+      end
+    ), 0)::float AS total
+    FROM premium_users
+    WHERE unlocked_at >= date_trunc('month', now())
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+  return rows[0]?.total ?? 0;
+}
+
 export async function getRevenueSeries(days: number): Promise<Array<{ day: string; crypto: number; fiat: number }>> {
   const rows = await db.execute<{ day: string; crypto: number; fiat: number }>(sql`
     SELECT

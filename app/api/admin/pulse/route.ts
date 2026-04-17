@@ -7,6 +7,7 @@ import {
   getTodaysPuzzleHealth,
   getRevenueBreakdown,
   getRevenueSeries,
+  getMtdGrossRevenue,
   getOpCosts,
 } from '@/lib/db/queries';
 
@@ -38,13 +39,14 @@ export async function GET(): Promise<NextResponse> {
 
   // Run independent queries in parallel — each hits different tables
   // or different indexes so there's no meaningful contention.
-  const [pulse, dauWauMau, dailySeries, todaysPuzzle, revenue, revenueSeries, costs] = await Promise.all([
+  const [pulse, dauWauMau, dailySeries, todaysPuzzle, revenue, revenueSeries, mtdGross, costs] = await Promise.all([
     getAdminPulse(),
     getDauWauMau(),
     getDailyActiveSeries(30),
     getTodaysPuzzleHealth(),
     getRevenueBreakdown(30),
     getRevenueSeries(30),
+    getMtdGrossRevenue(),
     getOpCosts(),
   ]);
 
@@ -56,6 +58,7 @@ export async function GET(): Promise<NextResponse> {
     todaysPuzzle,
     revenue,
     revenueSeries,
+    mtdGross,
     opCostsMonthlyTotal,
   });
 }

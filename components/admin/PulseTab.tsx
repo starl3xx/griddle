@@ -60,6 +60,8 @@ interface PulsePayload {
     totalRealizedUsd: number;
   };
   revenueSeries: Array<{ day: string; crypto: number; fiat: number }>;
+  /** Gross realized USD since 1st of current calendar month, authoritative. */
+  mtdGross: number;
   opCostsMonthlyTotal: number;
 }
 
@@ -125,23 +127,17 @@ export function PulseTab() {
     ? (data.activity.mau - data.activity.prevMau) / data.activity.prevMau
     : null;
 
-  // MTD windows have to match on both sides of the net calculation.
-  // The API's `revenue` breakdown is a rolling 30-day window, so we
-  // can't use it here — subtracting MTD op-costs from 30d revenue
-  // systematically overstates profitability (day 1 of a month = 30d
-  // gross - 1d costs). Instead, sum the current calendar month's
-  // slice of `revenueSeries` for the gross, and prorate op-costs by
-  // days-elapsed / days-in-month. Both sides are now 1-to-N days of
-  // the current month, apples to apples.
+  // MTD net = (realized revenue since 1st of month) − (op-costs
+  // prorated to the same window). The API computes `mtdGross`
+  // server-side with a `date_trunc('month', now())` filter so it's
+  // authoritative regardless of how far back the rolling chart
+  // series goes (a 30-day series would miss day 1 on the 31st of
+  // a long month — had that bug in an earlier revision).
   const now = new Date();
-  const monthPrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-`;
-  const mtdGross = data.revenueSeries
-    .filter((d) => d.day.startsWith(monthPrefix))
-    .reduce((a, d) => a + (d.crypto ?? 0) + (d.fiat ?? 0), 0);
   const daysElapsed = now.getUTCDate();
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
   const opCostMtd = (data.opCostsMonthlyTotal * daysElapsed) / daysInMonth;
-  const netMtd = mtdGross - opCostMtd;
+  const netMtd = data.mtdGross - opCostMtd;
 
   return (
     <div className="space-y-6">
@@ -228,7 +224,7 @@ export function PulseTab() {
           <SparklineCard
             icon={<Coins className="h-4 w-4" weight="bold" />}
             label="Gross MTD"
-            value={`$${mtdGross.toFixed(0)}`}
+            value={`$${data.mtdGross.toFixed(0)}`}
             sub="realized revenue this month"
             tone="accent"
           />
