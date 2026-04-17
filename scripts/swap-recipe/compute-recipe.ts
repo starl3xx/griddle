@@ -54,6 +54,11 @@ const STATE_VIEW_ABI = [
 ] as const;
 
 // ---------- Main ----------
+const JSON_MODE = process.argv.includes('--json');
+const log = (...args: unknown[]) => {
+  if (!JSON_MODE) console.log(...args);
+};
+
 async function main() {
   const rpc = process.env.BASE_RPC_URL;
   if (!rpc) throw new Error('BASE_RPC_URL not set');
@@ -68,7 +73,7 @@ async function main() {
   ]);
   const v3SqrtPriceX96 = v3Slot0.sqrtPriceX96.toString();
   const v3Tick = v3Slot0.tick.toString();
-  console.log('V3 USDC/WETH pool:', {
+  log('V3 USDC/WETH pool:', {
     sqrtPriceX96: v3SqrtPriceX96,
     tick: v3Tick,
     liquidity: v3Liq.toString(),
@@ -85,14 +90,14 @@ async function main() {
       [c0, c1, WORD_FEE, WORD_TICK_SPACING, WORD_HOOK],
     ),
   );
-  console.log('WORD v4 poolId:', poolId);
+  log('WORD v4 poolId:', poolId);
 
   const stateView = new ethers.Contract(V4_STATE_VIEW, STATE_VIEW_ABI, provider);
   const [v4Slot0, v4Liq] = await Promise.all([
     stateView.getSlot0(poolId),
     stateView.getLiquidity(poolId),
   ]);
-  console.log('V4 WORD/WETH pool:', {
+  log('V4 WORD/WETH pool:', {
     sqrtPriceX96: v4Slot0.sqrtPriceX96.toString(),
     tick: v4Slot0.tick.toString(),
     liquidity: v4Liq.toString(),
@@ -115,9 +120,9 @@ async function main() {
   // WORD_out = wethIn / price = wethIn * 2^192 / sqrtP^2.
   const sq2 = BigInt(v4Slot0.sqrtPriceX96.toString());
   const wordOut = (wethOut * Q96 * Q96) / (sq2 * sq2);
-  console.log('\nEstimated route amounts:');
-  console.log('  5 USDC →', wethOut.toString(), 'WETH wei (~', Number(wethOut) / 1e18, 'ETH)');
-  console.log('           →', wordOut.toString(), 'WORD wei (~', Number(wordOut) / 1e18, 'WORD)');
+  log('\nEstimated route amounts:');
+  log('  5 USDC →', wethOut.toString(), 'WETH wei (~', Number(wethOut) / 1e18, 'ETH)');
+  log('           →', wordOut.toString(), 'WORD wei (~', Number(wordOut) / 1e18, 'WORD)');
 
   // 3b) Build a PartialClassicQuote representing USDC → WETH (v3) → WORD (v4)
   const quote: PartialClassicQuote = {
@@ -181,22 +186,29 @@ async function main() {
   const inputs: string[] = parsed.args.inputs;
   const deadline: string = parsed.args.deadline.toString();
 
-  console.log('\n=== Universal Router recipe ===\n');
-  console.log('commands:', commands);
-  console.log('inputs   (' + inputs.length + '):');
-  for (const i of inputs) console.log('  ', i);
-  console.log('deadline (sample): ', deadline);
+  log('\n=== Universal Router recipe ===\n');
+  log('commands:', commands);
+  log('inputs   (' + inputs.length + '):');
+  for (const i of inputs) log('  ', i);
+  log('deadline (sample): ', deadline);
 
-  console.log('\n=== Paste into contracts/test/GriddlePremiumFork.t.sol ===\n');
-  console.log(`bytes memory commands = hex"${commands.slice(2)}";`);
-  console.log(`bytes[] memory inputs = new bytes[](${inputs.length});`);
+  log('\n=== Paste into contracts/test/GriddlePremiumFork.t.sol ===\n');
+  log(`bytes memory commands = hex"${commands.slice(2)}";`);
+  log(`bytes[] memory inputs = new bytes[](${inputs.length});`);
   inputs.forEach((inp, idx) => {
-    console.log(`inputs[${idx}] = hex"${inp.slice(2)}";`);
+    log(`inputs[${idx}] = hex"${inp.slice(2)}";`);
   });
 
   // 6) Print expected minOut from SDK estimate
   const minOut = trade.minimumAmountOut(new Percent(500, 10_000)).quotient.toString();
-  console.log('\nminWordOut (5% slippage):', minOut, 'wei');
+  log('\nminWordOut (5% slippage):', minOut, 'wei');
+
+  // JSON mode: emit ONLY a clean JSON object to stdout so the runbook
+  // can jq it. All other output went to the muted `log()` fn.
+  if (JSON_MODE) {
+    const out = { commands, inputs, deadline, minWordOut: minOut };
+    process.stdout.write(JSON.stringify(out));
+  }
 }
 
 main().catch((e) => {
