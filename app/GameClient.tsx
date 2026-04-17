@@ -620,11 +620,11 @@ export default function GameClient({
 
   // Post-magic-link: /?auth=ok means the verify endpoint just bound a
   // session profile (and possibly merged it into a wallet profile, see
-  // /api/auth/verify). Apply any pending display name from localStorage,
-  // refetch the profile, THEN open Settings. Order matters: opening the
-  // modal before the refetch resolves flashes the anonymous CTA for a
-  // frame while the async GET is in flight. Strip the query param first
-  // so a reload can't re-pop this flow.
+  // /api/auth/verify). Refetch the profile, THEN open Settings so the
+  // user can pick a username. Order matters: opening the modal before
+  // the refetch resolves flashes the anonymous CTA for a frame while
+  // the async GET is in flight. Strip the query param first so a
+  // reload can't re-pop this flow.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
@@ -638,20 +638,7 @@ export default function GameClient({
       window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
     );
 
-    let pendingUsername: string | null = null;
-    try { pendingUsername = localStorage.getItem('griddle:pending-username'); } catch {/* ignore */}
-
     (async () => {
-      if (pendingUsername) {
-        try { localStorage.removeItem('griddle:pending-username'); } catch {/* ignore */}
-        try {
-          await fetch('/api/profile', {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ handle: pendingUsername }),
-          });
-        } catch {/* best-effort */}
-      }
       await refetchProfile();
       setShowSettings(true);
     })();
