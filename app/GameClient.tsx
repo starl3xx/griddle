@@ -853,7 +853,7 @@ export default function GameClient({ initialPuzzle, initialSessionWallet, initia
               {premium && (
                 <Crown
                   className="absolute bottom-full right-0 w-5 h-5 sm:w-6 sm:h-6 text-accent pointer-events-none"
-                  style={{ transform: 'translate(25%, 85%) rotate(18deg)' }}
+                  style={{ transform: 'translate(25%, 95%) rotate(18deg)' }}
                   weight="fill"
                   aria-hidden
                 />
