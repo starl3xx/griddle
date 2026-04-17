@@ -108,6 +108,8 @@ if [ -n "$ENV_FILE" ]; then
   done <<<""
   # Export each KEY=VALUE pair. bun emits null-terminated
   # "key\0value\0" so we don't need to escape shell metachars.
+  # Values with ${VAR} or $VAR references are expanded against
+  # already-loaded keys (dotenv-expand semantics — matches Next.js).
   while IFS= read -r -d '' key && IFS= read -r -d '' value; do
     export "$key=$value"
   done < <(
@@ -115,16 +117,30 @@ if [ -n "$ENV_FILE" ]; then
       import { readFileSync } from "node:fs";
       const f = process.argv[1];
       const txt = readFileSync(f, "utf8");
+      const loaded: Record<string, string> = {};
       for (const raw of txt.split(/\r?\n/)) {
         const line = raw.replace(/\s+$/, "");
         if (!line || line.startsWith("#")) continue;
         const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
         if (!m) continue;
         let v = m[2];
-        if ((v.startsWith(`"`) && v.endsWith(`"`)) || (v.startsWith(`'`) && v.endsWith(`'`))) {
+        let wasQuoted = false;
+        if ((v.startsWith(`"`) && v.endsWith(`"`))) {
           v = v.slice(1, -1);
+          wasQuoted = true;
+        } else if (v.startsWith(`'`) && v.endsWith(`'`)) {
+          // single-quoted: no expansion
+          v = v.slice(1, -1);
+          loaded[m[1]] = v;
+          process.stdout.write(m[1] + "\0" + v + "\0");
+          continue;
         }
-        // null-delimited key then value
+        // Expand ${VAR} and $VAR against previously-loaded or process env.
+        v = v.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, a, b) => {
+          const name = a || b;
+          return loaded[name] ?? process.env[name] ?? "";
+        });
+        loaded[m[1]] = v;
         process.stdout.write(m[1] + "\0" + v + "\0");
       }
     ' "$ENV_FILE"
