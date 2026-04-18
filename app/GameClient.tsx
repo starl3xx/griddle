@@ -940,6 +940,16 @@ export default function GameClient({
   // initial tab; they can switch between tabs inside the modal without
   // closing. Null = modal closed.
   const [browseTab, setBrowseTab] = useState<BrowseTab | null>(null);
+  // Optional override for the leaderboard tab's initial day. Used only
+  // by the post-solve nav: after an ARCHIVE solve the player expects
+  // to see the leaderboard for the puzzle they just solved, not
+  // today's. Cleared whenever the Browse modal closes so subsequent
+  // HomeTile opens fall back to today.
+  const [leaderboardInitialDay, setLeaderboardInitialDay] =
+    useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (browseTab === null) setLeaderboardInitialDay(undefined);
+  }, [browseTab]);
   const [showSettings, setShowSettings] = useState(false);
   const [showCreateProfile, setShowCreateProfile] = useState(false);
   const [premiumGate, setPremiumGate] =
@@ -1322,6 +1332,7 @@ export default function GameClient({
           setPremiumGate('premium');
         }}
         todayDayNumber={initialPuzzle.dayNumber}
+        leaderboardInitialDay={leaderboardInitialDay}
         onLoadPuzzle={loadArchivePuzzle}
       />
 
@@ -1413,6 +1424,12 @@ export default function GameClient({
           inMiniApp={inMiniApp}
           onClose={() => setSolveResult(null)}
           onOpenLeaderboard={() => {
+            // Seed the leaderboard tab with the puzzle that was just
+            // solved — critical for archive solves (would otherwise
+            // reset to today's leaderboard, which isn't what the user
+            // just completed). For today's solve this equals today so
+            // it's a no-op relative to the default.
+            setLeaderboardInitialDay(activePuzzle.dayNumber);
             setSolveResult(null);
             setBrowseTab('leaderboard');
           }}
