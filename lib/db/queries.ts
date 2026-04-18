@@ -302,16 +302,6 @@ export async function getDailyLeaderboard(
   `);
 
   const resolved = Array.isArray(rows) ? rows : (rows.rows ?? []);
-  // [debug] chasing the prod-returns-fewer-rows-than-DB bug (PR #93).
-  // Remove after root cause is identified.
-  console.log('[getDailyLeaderboard]', {
-    dayNumber,
-    puzzleId,
-    puzzleDate: String(puzzleDate),
-    puzzleDateType: typeof puzzleDate,
-    resolvedCount: resolved.length,
-    playerKeys: resolved.map((r) => r.player_key),
-  });
   if (resolved.length === 0) return [];
 
   // Batch-fetch every wordmark row for the current leaderboard's
@@ -374,8 +364,13 @@ export async function getDailyLeaderboard(
 export interface AnomalyRow {
   id: number;
   puzzleId: number;
-  /** User-visible puzzle number (puzzles.day_number); differs from puzzleId when the serial PK has drifted. */
-  dayNumber: number;
+  /**
+   * User-visible puzzle number (puzzles.day_number); differs from
+   * puzzleId when the serial PK has drifted. Nullable so a stale
+   * puzzle_id on a solve row doesn't silently drop the anomaly — we
+   * still surface the flagged solve and just show no day label.
+   */
+  dayNumber: number | null;
   wallet: string | null;
   sessionId: string;
   serverSolveMs: number | null;
@@ -410,7 +405,11 @@ export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
       avatarUrl: profiles.avatarUrl,
     })
     .from(solves)
-    .innerJoin(puzzles, eq(solves.puzzleId, puzzles.id))
+    // leftJoin rather than innerJoin: an anomaly is exactly the kind
+    // of row where the puzzle FK might be corrupt or the puzzle got
+    // removed — we still want to surface the flagged solve in the
+    // dashboard. dayNumber just falls back to null on those rows.
+    .leftJoin(puzzles, eq(solves.puzzleId, puzzles.id))
     .leftJoin(profiles, eq(solves.wallet, profiles.wallet))
     .where(isNotNull(solves.flag))
     .orderBy(sql`${solves.createdAt} DESC`)

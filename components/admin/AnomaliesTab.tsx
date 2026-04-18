@@ -17,7 +17,7 @@ import { CircleNotch, ArrowsClockwise } from '@phosphor-icons/react';
 interface AnomalyRow {
   id: number;
   puzzleId: number;
-  dayNumber: number;
+  dayNumber: number | null;
   wallet: string | null;
   sessionId: string;
   serverSolveMs: number | null;
@@ -140,7 +140,7 @@ export function AnomaliesTab() {
                     {new Date(e.createdAt).toISOString().replace('T', ' ').slice(0, 19)}
                   </TableCell>
                   <TableCell className="tabular-nums font-semibold">
-                    #{e.dayNumber}
+                    {e.dayNumber != null ? `#${e.dayNumber}` : '—'}
                   </TableCell>
                   <TableCell>
                     <FlagPill flag={e.flag} />

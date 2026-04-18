@@ -45,12 +45,5 @@ export async function GET(
   const dayNumber = Math.min(requested, today);
 
   const rows = await getDailyLeaderboard(dayNumber, 100);
-  // [debug] chasing the prod-returns-fewer-rows-than-DB bug (PR #93).
-  // Remove after root cause is identified.
-  console.log('[leaderboard]', {
-    dayNumber,
-    rowCount: rows.length,
-    playerKeys: rows.map((r) => r.playerKey),
-  });
   return NextResponse.json({ dayNumber, entries: rows });
 }
