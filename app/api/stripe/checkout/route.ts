@@ -3,6 +3,12 @@ import { getStripe, STRIPE_PRICE_ID } from '@/lib/stripe';
 import { SITE_URL } from '@/lib/site';
 import { isValidAddress } from '@/lib/address';
 import { getSessionId } from '@/lib/session';
+import { getSessionProfile } from '@/lib/session-profile';
+import { getSessionWallet } from '@/lib/wallet-session';
+import { db } from '@/lib/db/client';
+import { profiles } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
+import { isValidEmail } from '@/lib/email';
 
 /**
  * POST /api/stripe/checkout
@@ -61,6 +67,13 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const sessionId = await getSessionId();
 
+  // Prefill email when the user is already signed in. Resolve by
+  // session→profile binding first (magic-link / email-auth users),
+  // then fall back to the wallet→profile lookup. If nothing binds,
+  // leave customer_email unset and Stripe will still require the user
+  // to enter it on the checkout page.
+  const prefillEmail = await resolvePrefillEmail(sessionId, wallet);
+
   // Both modes share everything but ui_mode + completion routing.
   // Session metadata is the identity layer for the webhook; it must
   // not differ between modes or the fiat unlock path becomes
@@ -76,10 +89,19 @@ export async function POST(req: Request): Promise<NextResponse> {
   // would also surface delayed-notification methods (ACH, SEPA, Boleto)
   // that complete via the later `async_payment_succeeded` event, which
   // the webhook does NOT handle.
+  // `customer_creation: 'always'` ensures Stripe creates a durable
+  // Customer object for every checkout, and `customer_email` prefills
+  // the email field when we already know it. Users can override the
+  // prefilled value — we treat `session.customer_details.email` in the
+  // webhook as source of truth, not the metadata. This makes email a
+  // hard anchor even for anonymous buyers: the webhook always has
+  // somewhere to read it from.
   const sharedParams = {
     mode: 'payment' as const,
     line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
     payment_method_types: ['card', 'link'] as Array<'card' | 'link'>,
+    customer_creation: 'always' as const,
+    ...(prefillEmail ? { customer_email: prefillEmail } : {}),
     metadata: {
       sessionId,
       wallet: wallet ?? '',
@@ -139,4 +161,53 @@ export async function POST(req: Request): Promise<NextResponse> {
     url: session.url,
     sessionId: session.id,
   });
+}
+
+/**
+ * Look up the best email we can prefill into Stripe Checkout. Returns
+ * null when no profile is bound to the session + wallet — in that case
+ * Stripe's built-in required email field collects it.
+ *
+ * Preference order:
+ *   1. session → profile binding (magic-link / email-auth users)
+ *   2. wallet  → profile.email when the session has a connected wallet
+ *
+ * Falls back silently on DB errors; a prefill miss is a UX degradation,
+ * not a correctness bug (email still gets collected on the Stripe page).
+ */
+async function resolvePrefillEmail(
+  sessionId: string,
+  wallet: string | null,
+): Promise<string | null> {
+  try {
+    const profileId = await getSessionProfile(sessionId);
+    if (profileId !== null) {
+      const rows = await db
+        .select({ email: profiles.email })
+        .from(profiles)
+        .where(eq(profiles.id, profileId))
+        .limit(1);
+      const email = rows[0]?.email ?? null;
+      if (email && isValidEmail(email)) return email;
+    }
+
+    // No session→profile binding. Try wallet→profile if a wallet is
+    // both connected AND bound to the session (don't trust the client-
+    // supplied wallet alone — the checkout route doesn't authenticate
+    // the wallet ownership).
+    const sessionWallet = await getSessionWallet(sessionId);
+    const trusted = sessionWallet ?? (wallet === sessionWallet ? wallet : null);
+    if (trusted) {
+      const rows = await db
+        .select({ email: profiles.email })
+        .from(profiles)
+        .where(eq(profiles.wallet, trusted))
+        .limit(1);
+      const email = rows[0]?.email ?? null;
+      if (email && isValidEmail(email)) return email;
+    }
+  } catch (err) {
+    console.warn('[stripe/checkout] resolvePrefillEmail failed — continuing without prefill', err);
+  }
+  return null;
 }

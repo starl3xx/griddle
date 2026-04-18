@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAccount, usePublicClient, useSignTypedData, useWriteContract } from 'wagmi';
 import { Crown, CircleNotch } from '@phosphor-icons/react';
 import { griddlePremiumAbi, usdcAbi, wordOracleAbi } from '@/lib/contracts/griddlePremiumAbi';
@@ -10,6 +10,8 @@ import {
   CHAIN_ID,
 } from '@/lib/contracts/addresses';
 import { trackEvent } from '@/lib/funnel/client';
+import { validateUsername, suggestUsernameFromWallet } from '@/lib/username';
+import { EMAIL_RE } from '@/lib/email';
 
 interface PremiumCryptoFlowProps {
   /** Called once /api/premium/verify confirms the unlock server-side. */
@@ -19,21 +21,39 @@ interface PremiumCryptoFlowProps {
 }
 
 type Phase =
-  | 'idle' // waiting for user to click Unlock
-  | 'quoting' // fetching oracle price to floor minWordOut
-  | 'signing' // waiting for USDC permit signature
+  | 'identity'  // collecting handle (+ optional email) before tx
+  | 'idle'      // waiting for user to click Unlock
+  | 'quoting'   // fetching oracle price to floor minWordOut
+  | 'signing'   // waiting for USDC permit signature
   | 'submitting' // waiting for on-chain tx broadcast
   | 'verifying' // waiting for server to verify the tx
-  | 'done' // unlock confirmed
+  | 'done'      // unlock confirmed
   | 'error';
 
+interface IdentityDraft {
+  /** null when the client's /api/profile lookup says the profile
+   *  already carries a handle — we hide the form + pass null so the
+   *  server keeps the existing value. */
+  handle: string | null;
+  email: string | null;
+}
+
 /**
- * Crypto unlock flow (M5-usdc-premium). The user pays $5 USDC — the
- * contract atomically swaps USDC → $WORD via Uniswap Universal Router
- * and burns the $WORD in the same transaction. The player never needs
- * to hold $WORD directly.
+ * Crypto unlock flow (M5-usdc-premium + M6-premium-email-anchor).
  *
- * Steps:
+ * The user pays $5 USDC — the contract atomically swaps USDC → $WORD
+ * via Uniswap Universal Router and burns the $WORD in the same
+ * transaction. Premium is bound to the wallet via `premium_users`.
+ *
+ * Identity phase (M6): before the unlock tx fires, the user picks a
+ * handle. This gives us a second durable anchor alongside the wallet
+ * so the player still has an identity if they later lose the wallet
+ * key. Email is collected optionally in the same form — when provided
+ * it becomes a cross-device claim anchor for a later magic-link
+ * sign-in. Users who are already signed in (profile with a handle
+ * exists) skip straight to the tx.
+ *
+ * Tx steps:
  *   1. Quote — read WordOracle.getWordUsdPrice() client-side and floor
  *      `minWordOut` at 95% of the oracle-derived expected $WORD. The
  *      contract enforces the same 5% floor on-chain so the client only
@@ -44,9 +64,10 @@ type Phase =
  *   3. Submit — call `unlockWithUsdc(deadline, v, r, s, minWordOut)`.
  *      Contract pulls USDC, swaps to $WORD, burns the proceeds, flips
  *      isPremium.
- *   4. Verify — POST the tx hash to /api/premium/verify. The server
- *      reads the receipt, parses the UnlockedWithUsdcSwap event, and
- *      upserts the premium_users row with `usdc_amount` + `word_burned`.
+ *   4. Verify — POST `{txHash, handle, email}` to /api/premium/verify.
+ *      The server reads the receipt, parses UnlockedWithUsdcSwap,
+ *      validates the handle (profanity + shape), and upserts the
+ *      premium_users row + the profile with the new identity anchors.
  */
 export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowProps) {
   const { address, isConnected } = useAccount();
@@ -54,14 +75,74 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
   const { signTypedDataAsync } = useSignTypedData();
   const { writeContractAsync } = useWriteContract();
 
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<Phase>('identity');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Identity form state. `handle` is the input value; `identityDraft`
+  // is the submitted-to-unlock snapshot the tx path reads.
+  const [handleInput, setHandleInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
+  const [handleError, setHandleError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [identityDraft, setIdentityDraft] = useState<IdentityDraft | null>(null);
+  const [identityLoading, setIdentityLoading] = useState(true);
 
   const premiumAddress = getGriddlePremiumAddress();
   const usdcAddress = getUsdcAddress();
   const contractsReady = !!premiumAddress;
 
-  const handleUnlock = async () => {
+  // Guard against kicking off the unlock twice — StrictMode re-runs
+  // the identity-to-idle effect, and a network hiccup could re-trigger
+  // handleUnlock if we watched phase directly.
+  const unlockStartedRef = useRef(false);
+
+  // ────────────────────────────────────────────────────────────────
+  // Identity preflight: see if the user already has a handle.
+  // ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    let cancelled = false;
+    setIdentityLoading(true);
+    (async () => {
+      try {
+        const res = await fetch('/api/profile');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as {
+          profile: { handle: string | null; email: string | null } | null;
+        };
+        if (cancelled) return;
+        const existingHandle = data.profile?.handle?.trim() ?? null;
+        const existingEmail = data.profile?.email?.trim() ?? null;
+        if (existingHandle) {
+          // Already has a handle — skip the form.
+          setIdentityDraft({ handle: null, email: null });
+          setPhase('idle');
+        } else {
+          // Seed the handle suggestion from the wallet + prefill any
+          // email we already know about (signed-in-but-no-handle case).
+          setHandleInput(suggestUsernameFromWallet(address));
+          if (existingEmail) setEmailInput(existingEmail);
+          setPhase('identity');
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // Profile lookup failure shouldn't block the unlock — fall
+        // through to the identity form with a wallet-derived handle
+        // suggestion. The server will validate it on submit.
+        console.warn('[PremiumCryptoFlow] /api/profile failed — falling back to identity form', err);
+        setHandleInput(suggestUsernameFromWallet(address));
+        setPhase('identity');
+      } finally {
+        if (!cancelled) setIdentityLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isConnected, address]);
+
+  // ────────────────────────────────────────────────────────────────
+  // Unlock tx — runs once phase transitions to 'idle' with a draft.
+  // ────────────────────────────────────────────────────────────────
+  const handleUnlock = useCallback(async (draft: IdentityDraft) => {
     setErrorMessage(null);
 
     if (!isConnected || !address) {
@@ -199,11 +280,30 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         verifyResult = await fetch('/api/premium/verify', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ txHash }),
+          body: JSON.stringify({
+            txHash,
+            // Omit empty values so the server can tell "not provided"
+            // from "explicitly empty" (the latter would reject).
+            ...(draft.handle ? { handle: draft.handle } : {}),
+            ...(draft.email ? { email: draft.email } : {}),
+          }),
         });
         if (verifyResult.ok) break;
+        // 409 = handle taken. Bounce back to the form so the user can
+        // pick another — the on-chain burn already happened, premium
+        // is real; we just need a free handle.
+        if (verifyResult.status === 409) break;
         if (verifyResult.status !== 404) break;
         await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      if (verifyResult && verifyResult.status === 409) {
+        const body = (await verifyResult.json().catch(() => ({}))) as { error?: string };
+        setHandleError(body.error ?? 'That username is taken.');
+        // Reset flag so re-submit from form retries the verify.
+        unlockStartedRef.current = false;
+        setPhase('identity');
+        return;
       }
 
       if (!verifyResult || !verifyResult.ok) {
@@ -229,17 +329,46 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       trackEvent({ name: 'checkout_failed', method: 'crypto', reason });
       setPhase('error');
     }
-  };
+  }, [address, isConnected, onUnlocked, premiumAddress, publicClient, signTypedDataAsync, usdcAddress, writeContractAsync]);
 
+  // Kick off the unlock as soon as an identity draft is present and the
+  // wallet + contracts are ready. The unlockStartedRef guard prevents
+  // StrictMode's double-invoke from running the tx twice.
   useEffect(() => {
-    if (phase === 'idle') {
-      handleUnlock();
+    if (phase !== 'idle') return;
+    if (!identityDraft) return;
+    if (!isConnected || !contractsReady) return;
+    if (unlockStartedRef.current) return;
+    unlockStartedRef.current = true;
+    handleUnlock(identityDraft);
+  }, [phase, identityDraft, isConnected, contractsReady, handleUnlock]);
+
+  const handleIdentitySubmit = (ev: React.FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    setHandleError(null);
+    setEmailError(null);
+
+    const handle = handleInput.trim().toLowerCase();
+    const validation = validateUsername(handle);
+    if (!validation.valid) {
+      setHandleError(validation.error ?? 'invalid username');
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, contractsReady]);
+
+    const email = emailInput.trim();
+    if (email.length > 0 && !EMAIL_RE.test(email)) {
+      setEmailError('That email doesn’t look right.');
+      return;
+    }
+
+    setIdentityDraft({ handle, email: email.length > 0 ? email.toLowerCase() : null });
+    setPhase('idle');
+  };
 
   const statusText = (() => {
     switch (phase) {
+      case 'identity':
+        return 'Pick a username';
       case 'idle':
         return 'Preparing…';
       case 'quoting':
@@ -257,7 +386,98 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
     }
   })();
 
-  const inProgress = phase !== 'idle' && phase !== 'done' && phase !== 'error';
+  const inProgress =
+    phase !== 'identity' && phase !== 'idle' && phase !== 'done' && phase !== 'error';
+
+  if (phase === 'identity') {
+    return (
+      <div className="flex flex-col gap-4 p-4">
+        <div className="flex flex-col items-center gap-2">
+          <div className="w-12 h-12 rounded-full bg-accent/15 text-accent flex items-center justify-center">
+            <Crown className="w-6 h-6" weight="fill" aria-hidden />
+          </div>
+          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">
+            Choose your username
+          </h3>
+          <p className="text-xs font-medium text-gray-500 text-center">
+            Locks in your leaderboard identity before you pay. Add an email to claim premium on any device.
+          </p>
+        </div>
+
+        {identityLoading ? (
+          <div className="flex items-center justify-center py-4">
+            <CircleNotch className="w-5 h-5 animate-spin text-gray-400" weight="bold" aria-hidden />
+          </div>
+        ) : (
+          <form onSubmit={handleIdentitySubmit} className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                Username
+              </span>
+              <input
+                type="text"
+                value={handleInput}
+                onChange={(e) => {
+                  setHandleInput(e.target.value);
+                  setHandleError(null);
+                }}
+                required
+                autoFocus
+                inputMode="text"
+                autoCapitalize="none"
+                autoComplete="username"
+                spellCheck={false}
+                maxLength={32}
+                placeholder="griddle_pro"
+                className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              {handleError && (
+                <span className="text-[11px] font-semibold text-error-700">{handleError}</span>
+              )}
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                Email <span className="font-medium normal-case text-gray-400">(optional)</span>
+              </span>
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => {
+                  setEmailInput(e.target.value);
+                  setEmailError(null);
+                }}
+                autoComplete="email"
+                spellCheck={false}
+                maxLength={254}
+                placeholder="you@example.com"
+                className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              {emailError && (
+                <span className="text-[11px] font-semibold text-error-700">{emailError}</span>
+              )}
+            </label>
+
+            <div className="flex gap-2 mt-1">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="flex-1 rounded-md bg-accent text-white px-3 py-2 text-sm font-bold hover:bg-accent/90 transition-colors"
+              >
+                Continue to pay
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center gap-3 p-4">

@@ -5,6 +5,7 @@ import { setSessionPremium } from '@/lib/session-premium';
 import { recordFunnelEvent } from '@/lib/funnel/record';
 import { isValidSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
+import { isValidEmail, normalizeEmail } from '@/lib/email';
 import {
   openEscrowForFiatSession,
   externalIdForStripe,
@@ -86,6 +87,27 @@ export async function POST(req: Request): Promise<NextResponse> {
     typeof metadata.wallet === 'string' && isValidAddress(metadata.wallet)
       ? (metadata.wallet.toLowerCase() as Address)
       : null;
+
+  // Email source of truth — what the buyer actually entered on the
+  // Stripe page. `customer_details.email` is populated post-payment;
+  // fall back to the session-level `customer_email` we may have
+  // prefilled at checkout-create time. Both arrive already-validated
+  // by Stripe, but we re-check with our own RE so a malformed value
+  // can't corrupt the DB column.
+  const rawEmail = session.customer_details?.email ?? session.customer_email ?? null;
+  const email = isValidEmail(rawEmail) ? normalizeEmail(rawEmail) : null;
+  if (!email) {
+    // A payment without an email is a red flag — every Stripe Checkout
+    // Session collects one by default, so we only land here if the
+    // checkout config was changed out from under us. Log and fail hard
+    // so the retry cron (which reads live Stripe state) can recover
+    // rather than silently burying the row without its claim anchor.
+    console.error('[stripe/webhook] no email on completed session', {
+      stripeSessionId: session.id,
+      hasCustomerDetails: !!session.customer_details,
+    });
+    return NextResponse.json({ error: 'missing email on completed session' }, { status: 500 });
+  }
 
   if (!sessionId) {
     console.error('[stripe/webhook] missing or malformed sessionId in metadata', {
@@ -209,13 +231,34 @@ export async function POST(req: Request): Promise<NextResponse> {
         externalId: externalIdForStripe(session.id),
         wordAmount,
         escrowStatus,
+        email,
       });
     } else {
-      // No wallet: bind premium to the browser session. The session key is
-      // the only record until the user connects a wallet and migration runs.
-      // Escrow is deferred until the user connects + migrates; the retry
-      // cron handles back-filling when a wallet appears.
+      // No wallet: two complementary bindings.
+      //   (a) Session KV — immediate premium for the buyer's current
+      //       tab, no DB hit on the premium gate.
+      //   (b) Email-only profile (via recordFiatUnlock) — durable claim
+      //       anchor so a later magic-link sign-in from any device
+      //       lands on an already-premium profile without a migrate
+      //       step. Escrow still deferred to the retry cron / first
+      //       wallet migration; the profile row captures WHO paid.
+      //
+      // The `!wallet && !handle && email` branch inside recordFiatUnlock
+      // handles the profile write; we call it here with only email set
+      // so wallet/handle stay null and the right branch fires.
       await setSessionPremium(sessionId, session.id);
+      try {
+        await recordFiatUnlock({
+          stripeSessionId: session.id,
+          externalId: externalIdForStripe(session.id),
+          email,
+        });
+      } catch (err) {
+        console.error(
+          '[stripe/webhook] email-only profile write failed — session KV still grants premium on this device',
+          err,
+        );
+      }
     }
   } catch (err) {
     console.error('[stripe/webhook] failed to record unlock', err);

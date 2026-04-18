@@ -19,6 +19,7 @@ type SourceFilter = 'all' | 'crypto' | 'fiat' | 'admin_grant' | 'pending' | 'ref
 interface TxRow {
   wallet: string;
   handle: string | null;
+  email: string | null;
   source: string;
   txHash: string | null;
   stripeSessionId: string | null;
@@ -116,7 +117,7 @@ export function TransactionsTab() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search wallet or handle…"
+            placeholder="Search wallet, handle, or email…"
             className="pl-9"
           />
         </div>
@@ -141,6 +142,7 @@ export function TransactionsTab() {
           <TableHeader>
             <TableRow>
               <TableHead>Player</TableHead>
+              <TableHead>Email</TableHead>
               <TableHead>Source</TableHead>
               <TableHead className="text-right">USDC</TableHead>
               <TableHead className="text-right">$WORD burned</TableHead>
@@ -152,13 +154,13 @@ export function TransactionsTab() {
           <TableBody>
             {loading && !data ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   <CircleNotch className="inline h-4 w-4 animate-spin text-gray-400 dark:text-gray-500" weight="bold" />
                 </TableCell>
               </TableRow>
             ) : data && data.rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                <TableCell colSpan={8} className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
                   No transactions match.
                 </TableCell>
               </TableRow>
@@ -174,6 +176,13 @@ export function TransactionsTab() {
                         {shortWallet(row.wallet)}
                       </span>
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {row.email ? (
+                      <span className="text-xs text-gray-700 dark:text-gray-300 break-all">{row.email}</span>
+                    ) : (
+                      <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <SourceBadge source={row.source} />

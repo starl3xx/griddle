@@ -17,7 +17,10 @@ type SourceFilter = 'all' | 'crypto' | 'fiat' | 'admin_grant' | 'pending' | 'ref
  * payment telemetry (USDC amount, $WORD burned, escrow lifecycle).
  *
  * Query params:
- *   q        — search (wallet prefix or handle substring)
+ *   q        — search (wallet prefix, handle substring, or email
+ *              substring). Searches across premium_users.email and
+ *              profiles.email so an anonymous Stripe buyer whose
+ *              profile hasn't merged yet is still findable.
  *   filter   — 'all' | 'crypto' | 'fiat' | 'admin_grant' | 'pending'
  *              | 'refunded'
  *   page     — 1-indexed page number
@@ -45,12 +48,15 @@ export async function GET(req: Request): Promise<NextResponse> {
   const searchTerm = q ? `%${q}%` : null;
 
   // Build WHERE in two layers:
-  //   (a) search across wallet + handle
+  //   (a) search across wallet + handle + email (both the tx-row email
+  //       snapshot and the profile's durable email)
   //   (b) filter by source / escrow status
   const searchWhere = searchTerm
     ? or(
         ilike(premiumUsers.wallet, searchTerm),
         ilike(profiles.handle, searchTerm),
+        ilike(premiumUsers.email, searchTerm),
+        ilike(profiles.email, searchTerm),
       )
     : undefined;
 
@@ -80,6 +86,10 @@ export async function GET(req: Request): Promise<NextResponse> {
       .select({
         wallet: premiumUsers.wallet,
         handle: profiles.handle,
+        // Prefer the tx-row email (Stripe source of truth at purchase
+        // time), fall back to the profile's email for rows written
+        // before M6-premium-email-anchor.
+        email: sql<string | null>`coalesce(${premiumUsers.email}, ${profiles.email})`,
         source: premiumUsers.source,
         txHash: premiumUsers.txHash,
         stripeSessionId: premiumUsers.stripeSessionId,
@@ -112,6 +122,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     rows: rows.map((r) => ({
       wallet: r.wallet,
       handle: r.handle,
+      email: r.email,
       source: r.source,
       txHash: r.txHash,
       stripeSessionId: r.stripeSessionId,
