@@ -10,6 +10,15 @@ const nextConfig = {
   outputFileTracingIncludes: {
     '/api/admin/deploy/migrate-db': ['./drizzle/*.sql'],
   },
+  // Rewrites `import { X } from 'pkg'` into direct deep imports so
+  // unused exports get tree-shaken. Phosphor is imported in 26 files
+  // across the app; without this, each icon import pulls the whole
+  // icon set. Recharts gets the same treatment — only a handful of
+  // chart primitives are used (AreaChart/LineChart/BarChart/ScatterChart)
+  // but barrel imports otherwise ship the full library.
+  experimental: {
+    optimizePackageImports: ['@phosphor-icons/react', 'recharts'],
+  },
 };
 
 module.exports = nextConfig;

@@ -1,17 +1,25 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { PulseTab } from './PulseTab';
-import { FunnelTab } from './FunnelTab';
-import { RetentionTab } from './RetentionTab';
-import { AnomaliesTab } from './AnomaliesTab';
-import { GrantTab } from './GrantTab';
-import { UsersTab } from './UsersTab';
-import { PuzzlesTab } from './PuzzlesTab';
-import { TransactionsTab } from './TransactionsTab';
-import { CostsTab } from './CostsTab';
 import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins } from '@phosphor-icons/react';
+
+// Pulse is the default tab, so it's statically imported (the user sees
+// it on every admin page load). The remaining 8 tabs render only when
+// clicked — deferring their modules keeps Recharts (imported by
+// Funnel/Retention/Costs) and per-tab icon sets out of the initial
+// admin chunk. ssr: false because tabs are client-only and admin is
+// `force-dynamic` anyway.
+const FunnelTab = dynamic(() => import('./FunnelTab').then((m) => ({ default: m.FunnelTab })), { ssr: false });
+const RetentionTab = dynamic(() => import('./RetentionTab').then((m) => ({ default: m.RetentionTab })), { ssr: false });
+const AnomaliesTab = dynamic(() => import('./AnomaliesTab').then((m) => ({ default: m.AnomaliesTab })), { ssr: false });
+const GrantTab = dynamic(() => import('./GrantTab').then((m) => ({ default: m.GrantTab })), { ssr: false });
+const UsersTab = dynamic(() => import('./UsersTab').then((m) => ({ default: m.UsersTab })), { ssr: false });
+const PuzzlesTab = dynamic(() => import('./PuzzlesTab').then((m) => ({ default: m.PuzzlesTab })), { ssr: false });
+const TransactionsTab = dynamic(() => import('./TransactionsTab').then((m) => ({ default: m.TransactionsTab })), { ssr: false });
+const CostsTab = dynamic(() => import('./CostsTab').then((m) => ({ default: m.CostsTab })), { ssr: false });
 
 type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs';
 
