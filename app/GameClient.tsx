@@ -269,21 +269,45 @@ export default function GameClient({
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/crumbs?dayNumber=${activePuzzle.dayNumber}`)
-      .then((r) => (r.ok ? r.json() : { crumbs: [] }))
-      .then((data: { crumbs: string[] }) => {
+      .then(async (r) => {
+        if (!r.ok) {
+          // Surface, don’t swallow. An earlier silent `.catch(() => {})`
+          // let the "puzzle_crumbs table doesn’t exist" error go
+          // unnoticed for weeks. A loud console.error is the minimum
+          // signal — infra errors still don’t block gameplay (we fall
+          // back to an empty list), but they’re now visible in devtools
+          // and Sentry/Vercel log streams.
+          console.error('[crumbs] GET failed', r.status, await r.text().catch(() => ''));
+          return { crumbs: [] as string[] };
+        }
+        return r.json() as Promise<{ crumbs: string[] }>;
+      })
+      .then((data) => {
         if (!cancelled) setPersistedCrumbs(data.crumbs);
       })
-      .catch(() => { /* best-effort — empty list is fine */ });
+      .catch((err) => {
+        console.error('[crumbs] GET threw', err);
+      });
     return () => { cancelled = true; };
   }, [activePuzzle.dayNumber]);
 
   // Fire-and-forget POST when a new crumb is discovered during play.
+  // Errors are logged, not swallowed — see the GET effect above for the
+  // silent-failure post-mortem that motivated this.
   const handleCrumbFound = useCallback((word: string) => {
     fetch('/api/crumbs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dayNumber: activePuzzle.dayNumber, word }),
-    }).catch(() => { /* best-effort */ });
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          console.error('[crumbs] POST failed', r.status, await r.text().catch(() => ''));
+        }
+      })
+      .catch((err) => {
+        console.error('[crumbs] POST threw', err);
+      });
   }, [activePuzzle.dayNumber]);
 
 

@@ -293,20 +293,25 @@ export function useGriddle({
         // (typeLetter, backspace, reset) changes the effect deps and
         // fires the cleanup, which sets cancelled=true. The cancelled
         // check above is the complete staleness defense.
+        // Sync dedup against already-found crumbs via the ref. The
+        // previous implementation relied on an `isNew` flag mutated
+        // inside the setFoundWords updater, then read immediately
+        // after — but React 18 auto-batches setState inside async
+        // contexts (`.then`) and defers the updater, so `isNew` was
+        // still false when we read it. Net effect: onCrumbFound never
+        // fired and the POST to /api/crumbs never went out, leaving
+        // zero rows in puzzle_crumbs despite weeks of gameplay. The
+        // silent `.catch` on the client-side fetch hid it. Dedup via
+        // the ref is synchronous, survives StrictMode double-invoke
+        // (the ref write makes the second invocation short-circuit),
+        // and keeps the side effect outside the updater.
+        if (foundWordsRef.current.includes(candidate)) return;
+        foundWordsRef.current = [candidate, ...foundWordsRef.current];
         lastFoundWordRef.current = candidate;
-        // Persist the find for the duration of the attempt. Dedup via
-        // the state update callback so rapid re-finds of the same word
-        // don't create duplicate entries even under React batching.
-        // Side effect (onCrumbFound) lives OUTSIDE the updater — React
-        // StrictMode double-invokes updaters, so a side effect inside
-        // would fire twice per crumb.
-        let isNew = false;
-        setFoundWords((prev) => {
-          if (prev.includes(candidate)) return prev;
-          isNew = true;
-          return [candidate, ...prev];
-        });
-        if (isNew) onCrumbFoundRef.current?.(candidate);
+        setFoundWords((prev) =>
+          prev.includes(candidate) ? prev : [candidate, ...prev],
+        );
+        onCrumbFoundRef.current?.(candidate);
       })
       .catch(() => {
         // Dictionary chunk failed to load — silently skip.

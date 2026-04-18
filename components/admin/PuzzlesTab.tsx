@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X } from '@phosphor-icons/react';
+import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X, Eye, EyeSlash, ClockCounterClockwise } from '@phosphor-icons/react';
 import { formatMsCompact as formatMs } from '@/lib/format';
 import { ScatterCalibration, type CalibrationPoint } from './charts/ScatterCalibration';
 
@@ -26,6 +26,7 @@ interface PuzzlesPayload {
     topCrumbs: Array<{ word: string; count: number }>;
   } | null;
   upcoming: Array<{ puzzleId: number; dayNumber: number; date: string; answer: string; heuristicScore: number; tier: string }>;
+  past: Array<{ puzzleId: number; dayNumber: number; date: string; answer: string; solves: number; heuristicScore: number; tier: string }>;
   hardest: Array<{ puzzleId: number; dayNumber: number; date: string; answer: string; solves: number; avgMs: number; heuristicScore: number; tier: string }>;
   easiest: Array<{ puzzleId: number; dayNumber: number; date: string; answer: string; solves: number; avgMs: number; heuristicScore: number; tier: string }>;
   neverSolved: Array<{ puzzleId: number; dayNumber: number; date: string; answer: string }>;
@@ -61,6 +62,19 @@ export function PuzzlesTab() {
   const [data, setData] = useState<PuzzlesPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Answers the admin has explicitly chosen to reveal, keyed by puzzleId.
+  // Default-hidden so the admin doesn’t see today/upcoming solutions by
+  // accident — past answers are stale secrets, but still gated behind the
+  // same click-to-reveal so the UI stays consistent and skimmable.
+  const [revealed, setRevealed] = useState<Set<number>>(new Set());
+  const toggleReveal = useCallback((puzzleId: number) => {
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      if (next.has(puzzleId)) next.delete(puzzleId);
+      else next.add(puzzleId);
+      return next;
+    });
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -113,7 +127,12 @@ export function PuzzlesTab() {
           <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Answer</div>
-              <div className="text-2xl font-black tracking-widest text-gray-900">{data.today.answer.toUpperCase()}</div>
+              <SpoilerAnswer
+                answer={data.today.answer}
+                revealed={revealed.has(data.today.puzzleId)}
+                onToggle={() => toggleReveal(data.today!.puzzleId)}
+                size="lg"
+              />
               <div className="font-mono text-[11px] text-gray-500 mt-1">day #{data.today.dayNumber} · {data.today.date}</div>
               <div className="mt-2 flex items-center gap-2 text-[11px]">
                 <span className={`rounded px-1.5 py-0.5 font-bold ${TIER_TONE[data.today.tier] ?? 'bg-gray-100'}`}>{data.today.tier}</span>
@@ -161,9 +180,64 @@ export function PuzzlesTab() {
                   <tr key={p.puzzleId} className="border-t border-gray-100">
                     <td className="py-1 pr-2 tabular-nums">#{p.dayNumber}</td>
                     <td className="py-1 px-2 font-mono text-[11px] text-gray-500">{p.date}</td>
-                    <td className="py-1 px-2 font-mono tracking-wider text-gray-800">{p.answer}</td>
+                    <td className="py-1 px-2">
+                      <SpoilerAnswer
+                        answer={p.answer}
+                        revealed={revealed.has(p.puzzleId)}
+                        onToggle={() => toggleReveal(p.puzzleId)}
+                        size="sm"
+                      />
+                    </td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.heuristicScore}</td>
                     <td className="py-1 pl-2 text-right"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${TIER_TONE[p.tier] ?? 'bg-gray-100'}`}>{p.tier}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Past */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <ClockCounterClockwise className="w-4 h-4" weight="bold" />Past
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.past.length === 0 ? (
+            <p className="text-sm text-gray-500">No past puzzles yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                <tr>
+                  <th className="py-1 pr-2 text-left">Day</th>
+                  <th className="py-1 px-2 text-left">Date</th>
+                  <th className="py-1 px-2 text-left">Answer</th>
+                  <th className="py-1 px-2 text-right">Solves</th>
+                  <th className="py-1 px-2 text-right">Heuristic</th>
+                  <th className="py-1 pl-2 text-right">Tier</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.past.map((p) => (
+                  <tr key={p.puzzleId} className="border-t border-gray-100">
+                    <td className="py-1 pr-2 tabular-nums">#{p.dayNumber}</td>
+                    <td className="py-1 px-2 font-mono text-[11px] text-gray-500">{p.date}</td>
+                    <td className="py-1 px-2">
+                      <SpoilerAnswer
+                        answer={p.answer}
+                        revealed={revealed.has(p.puzzleId)}
+                        onToggle={() => toggleReveal(p.puzzleId)}
+                        size="sm"
+                      />
+                    </td>
+                    <td className="py-1 px-2 text-right tabular-nums">{p.solves.toLocaleString()}</td>
+                    <td className="py-1 px-2 text-right tabular-nums">{p.heuristicScore}</td>
+                    <td className="py-1 pl-2 text-right">
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${TIER_TONE[p.tier] ?? 'bg-gray-100'}`}>{p.tier}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -261,6 +335,69 @@ function formatSignedMs(ms: number): string {
   // stripping the sign internally — if that implementation detail ever
   // flips, this call site still emits a single correct prefix.
   return `${sign}${formatMs(Math.abs(ms))}`;
+}
+
+/**
+ * Click-to-reveal for puzzle answers. Modeled on Vercel’s env-var UI:
+ * hidden by default (so the admin doesn’t spoil today/upcoming by
+ * walking past the tab), revealed on explicit click, and the toggle
+ * is a button — not just hover — so the reveal survives a tap and
+ * can be toggled back off. Past answers share the same affordance
+ * for visual consistency, even though they’re no longer secrets.
+ */
+function SpoilerAnswer({
+  answer,
+  revealed,
+  onToggle,
+  size,
+}: {
+  answer: string;
+  revealed: boolean;
+  onToggle: () => void;
+  size: 'lg' | 'sm';
+}) {
+  const label = revealed ? 'Hide answer' : 'Reveal answer';
+  const Icon = revealed ? EyeSlash : Eye;
+  if (size === 'lg') {
+    return (
+      <div className="inline-flex items-center gap-2">
+        <span
+          className={`text-2xl font-black tracking-widest text-gray-900 transition-[filter,color] ${
+            revealed ? '' : 'blur-sm select-none text-gray-500'
+          }`}
+          aria-hidden={!revealed}
+        >
+          {answer.toUpperCase()}
+        </span>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={label}
+          title={label}
+          className="rounded-md p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+        >
+          <Icon className="w-4 h-4" weight="bold" />
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={label}
+      title={label}
+      className="group inline-flex items-center gap-1.5 font-mono tracking-wider text-gray-800"
+    >
+      <span
+        className={`transition-[filter] ${revealed ? '' : 'blur-sm select-none text-gray-500'}`}
+        aria-hidden={!revealed}
+      >
+        {answer}
+      </span>
+      <Icon className="w-3 h-3 text-gray-400 group-hover:text-gray-700 transition-colors" weight="bold" />
+    </button>
+  );
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
