@@ -309,7 +309,7 @@ function PodiumBar({
         className={`w-full rounded-t-sm flex items-start justify-center pt-1 ${colorClass}`}
         style={{ height: `${heightPct}%` }}
       >
-        <span className="text-xs font-black text-gray-900 dark:text-gray-100 tabular-nums">{count}</span>
+        <span className="text-xs font-black text-gray-900 tabular-nums">{count}</span>
       </div>
       <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 tabular-nums">
         {place === 1 ? '1st' : place === 2 ? '2nd' : '3rd'}
