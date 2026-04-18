@@ -96,6 +96,22 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
   // handleUnlock if we watched phase directly.
   const unlockStartedRef = useRef(false);
 
+  // Captures the on-chain txHash the moment `writeContractAsync`
+  // resolves. If `/api/premium/verify` later returns 409 (handle
+  // collision) we MUST NOT re-run the permit + swap + burn path —
+  // the contract has no double-unlock guard, so the buyer would pay
+  // $5 USDC twice. On 409 we bounce to the identity form but keep
+  // this ref, and the retry path only re-calls the verify endpoint
+  // with the new handle. A useRef (rather than useState) so a rapid
+  // re-render after 409 doesn't briefly read an old snapshot.
+  const paidTxHashRef = useRef<string | null>(null);
+
+  // Signals the user that the optional email they typed collided with
+  // an existing profile — premium is still active, but the email
+  // wasn't saved to their profile. Populated by the verify response;
+  // rendered in the success pane.
+  const [emailTakenNotice, setEmailTakenNotice] = useState(false);
+
   // ────────────────────────────────────────────────────────────────
   // Identity preflight: see if the user already has a handle.
   // ────────────────────────────────────────────────────────────────
@@ -138,6 +154,106 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
     })();
     return () => { cancelled = true; };
   }, [isConnected, address]);
+
+  // ────────────────────────────────────────────────────────────────
+  // Server-side verify, with the 404-retry loop and 409 short-circuit.
+  // Shared between:
+  //   (a) initial unlock — called with a fresh txHash from the just-
+  //       landed on-chain payment
+  //   (b) 409 recovery — called with the cached `paidTxHashRef` txHash
+  //       after the user picks a new handle; does NOT re-run the
+  //       payment flow (the burn already settled on the first pass).
+  // Returns a discriminated result so the caller can branch on
+  // handle-taken vs. success vs. generic failure without re-parsing
+  // the Response.
+  // ────────────────────────────────────────────────────────────────
+  const callVerify = useCallback(
+    async (
+      txHash: string,
+      draft: IdentityDraft,
+    ): Promise<
+      | { kind: 'ok'; wallet: string; emailTaken: boolean }
+      | { kind: 'handle_taken'; error: string }
+      | { kind: 'error'; error: string }
+    > => {
+      let verifyResult: Response | null = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        verifyResult = await fetch('/api/premium/verify', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            txHash,
+            ...(draft.handle ? { handle: draft.handle } : {}),
+            ...(draft.email ? { email: draft.email } : {}),
+          }),
+        });
+        if (verifyResult.ok) break;
+        if (verifyResult.status === 409) break;
+        if (verifyResult.status !== 404) break;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      if (!verifyResult) {
+        return { kind: 'error', error: 'no response' };
+      }
+
+      if (verifyResult.status === 409) {
+        const body = (await verifyResult.json().catch(() => ({}))) as {
+          error?: string; code?: string;
+        };
+        if (body.code === 'handle_taken') {
+          return { kind: 'handle_taken', error: body.error ?? 'That username is taken.' };
+        }
+        return { kind: 'error', error: body.error ?? 'Conflict during verify.' };
+      }
+
+      if (!verifyResult.ok) {
+        const text = await verifyResult.text().catch(() => 'verify failed');
+        return { kind: 'error', error: text };
+      }
+
+      const body = (await verifyResult.json()) as { wallet: string; emailTaken?: boolean };
+      return { kind: 'ok', wallet: body.wallet, emailTaken: !!body.emailTaken };
+    },
+    [],
+  );
+
+  // ────────────────────────────────────────────────────────────────
+  // 409 recovery — user picked a new handle after a collision. The
+  // payment has already landed on-chain (txHash is cached in
+  // paidTxHashRef), so we only need to re-hit the verify endpoint.
+  // ────────────────────────────────────────────────────────────────
+  const retryVerify = useCallback(async (draft: IdentityDraft) => {
+    const txHash = paidTxHashRef.current;
+    if (!txHash) {
+      // Shouldn't happen — the identity submit handler guards this —
+      // but defend against a rogue state by bailing loudly.
+      setErrorMessage('Lost track of the payment. Refresh to retry.');
+      setPhase('error');
+      return;
+    }
+    setPhase('verifying');
+    const result = await callVerify(txHash, draft);
+    if (result.kind === 'ok') {
+      setEmailTakenNotice(result.emailTaken);
+      paidTxHashRef.current = null;
+      setPhase('done');
+      onUnlocked(result.wallet);
+      return;
+    }
+    if (result.kind === 'handle_taken') {
+      setHandleError(result.error);
+      // unlockStartedRef stays true — the on-chain tx is non-repeatable;
+      // this flag's only job was to gate the effect from calling
+      // handleUnlock again, and we never want it to do that anyway
+      // now that paidTxHashRef is set.
+      setPhase('identity');
+      return;
+    }
+    setErrorMessage(result.error);
+    setPhase('error');
+    trackEvent({ name: 'checkout_failed', method: 'crypto', reason: 'verify_failed' });
+  }, [callVerify, onUnlocked]);
 
   // ────────────────────────────────────────────────────────────────
   // Unlock tx — runs once phase transitions to 'idle' with a draft.
@@ -271,49 +387,33 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         args: [deadline, v, r, s, minWordOut],
       });
 
+      // Cache the hash BEFORE the verify call so a 409 never loses it.
+      // From this point on any re-submit from the identity form takes
+      // the retryVerify path — handleUnlock will never run again for
+      // this component instance (guarded by the paidTxHashRef check
+      // in the phase effect below).
+      paidTxHashRef.current = txHash;
+
       // --- Step 4: verify server-side -----------------------------------
       currentPhase = 'verifying';
       setPhase('verifying');
 
-      let verifyResult: Response | null = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        verifyResult = await fetch('/api/premium/verify', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            txHash,
-            // Omit empty values so the server can tell "not provided"
-            // from "explicitly empty" (the latter would reject).
-            ...(draft.handle ? { handle: draft.handle } : {}),
-            ...(draft.email ? { email: draft.email } : {}),
-          }),
-        });
-        if (verifyResult.ok) break;
-        // 409 = handle taken. Bounce back to the form so the user can
-        // pick another — the on-chain burn already happened, premium
-        // is real; we just need a free handle.
-        if (verifyResult.status === 409) break;
-        if (verifyResult.status !== 404) break;
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
+      const result = await callVerify(txHash, draft);
 
-      if (verifyResult && verifyResult.status === 409) {
-        const body = (await verifyResult.json().catch(() => ({}))) as { error?: string };
-        setHandleError(body.error ?? 'That username is taken.');
-        // Reset flag so re-submit from form retries the verify.
-        unlockStartedRef.current = false;
+      if (result.kind === 'handle_taken') {
+        setHandleError(result.error);
         setPhase('identity');
         return;
       }
 
-      if (!verifyResult || !verifyResult.ok) {
-        const errBody = verifyResult ? await verifyResult.text() : 'no response';
-        throw new Error(`Server verify failed: ${errBody}`);
+      if (result.kind === 'error') {
+        throw new Error(`Server verify failed: ${result.error}`);
       }
 
-      const verified = (await verifyResult.json()) as { wallet: string };
+      setEmailTakenNotice(result.emailTaken);
+      paidTxHashRef.current = null;
       setPhase('done');
-      onUnlocked(verified.wallet);
+      onUnlocked(result.wallet);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unlock failed';
       setErrorMessage(message);
@@ -329,19 +429,32 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       trackEvent({ name: 'checkout_failed', method: 'crypto', reason });
       setPhase('error');
     }
-  }, [address, isConnected, onUnlocked, premiumAddress, publicClient, signTypedDataAsync, usdcAddress, writeContractAsync]);
+  }, [address, isConnected, onUnlocked, premiumAddress, publicClient, signTypedDataAsync, usdcAddress, writeContractAsync, callVerify]);
 
-  // Kick off the unlock as soon as an identity draft is present and the
-  // wallet + contracts are ready. The unlockStartedRef guard prevents
-  // StrictMode's double-invoke from running the tx twice.
+  // Effect that reacts to phase='idle' with an identity draft:
+  //
+  //   - First submit: no txHash cached → run the full handleUnlock
+  //     (quote → permit → swap → verify). unlockStartedRef prevents
+  //     StrictMode's double-invoke from submitting twice.
+  //
+  //   - After 409: paidTxHashRef already holds the on-chain hash →
+  //     retryVerify only. This is the invariant that prevents the
+  //     double-charge: handleUnlock is NEVER called once paidTxHashRef
+  //     is set.
   useEffect(() => {
     if (phase !== 'idle') return;
     if (!identityDraft) return;
     if (!isConnected || !contractsReady) return;
+    if (paidTxHashRef.current) {
+      // Retry path — the payment already landed. Fire and forget;
+      // retryVerify manages its own phase transitions.
+      retryVerify(identityDraft);
+      return;
+    }
     if (unlockStartedRef.current) return;
     unlockStartedRef.current = true;
     handleUnlock(identityDraft);
-  }, [phase, identityDraft, isConnected, contractsReady, handleUnlock]);
+  }, [phase, identityDraft, isConnected, contractsReady, handleUnlock, retryVerify]);
 
   const handleIdentitySubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -489,6 +602,11 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         )}
       </div>
       <p className="text-sm font-medium text-gray-700 text-center">{statusText}</p>
+      {phase === 'done' && emailTakenNotice && (
+        <p className="text-[11px] font-medium text-gray-500 text-center max-w-xs">
+          Your email was already on another Griddle account, so we didn’t save it to this profile. You can still claim premium here.
+        </p>
+      )}
       {phase === 'error' && (
         <button type="button" onClick={onCancel} className="btn-secondary text-sm">
           Close

@@ -165,33 +165,73 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'event user is not a valid address' }, { status: 400 });
   }
 
+  // Attempt the unlock with the supplied identity anchors. Two
+  // distinct unique-index collisions can surface here, and they need
+  // opposite treatment:
+  //
+  //   - `profiles_handle_lower_idx`: another profile owns this handle.
+  //     Surface as 409 so the client re-opens the identity form with
+  //     the already-landed txHash preserved — subsequent retries only
+  //     re-call this verify route, never the on-chain payment.
+  //
+  //   - `profiles_email_lower_idx`: another profile owns this email.
+  //     Retrying the form can't fix it (the buyer can keep picking
+  //     handles forever), so we retry server-side with email=null
+  //     so the handle still lands on the profile. The `premium_users`
+  //     row already captured the email as a transaction snapshot
+  //     (no unique constraint there), so the audit trail survives
+  //     even though the profile doesn't adopt the collided email.
+  //     Client is told via `emailTaken: true` so the UI can explain.
+  //
+  // Matching on 23505 alone (the generic unique-violation SQLSTATE)
+  // conflates the two and sends email collisions down the handle
+  // recovery path — a user-facing infinite loop. Match the index
+  // name explicitly.
+  let emailTaken = false;
   try {
-    await recordCryptoUnlock({
-      wallet,
-      txHash,
-      usdcAmount: usdcIn,
-      wordBurned,
-      handle,
-      email,
-    });
+    await recordCryptoUnlock({ wallet, txHash, usdcAmount: usdcIn, wordBurned, handle, email });
   } catch (err) {
-    // Handle collisions (another profile owns the requested handle) show
-    // up here as a Postgres unique-violation from upsertProfile. Surface
-    // as a 409 so the client can ask the user to pick a different
-    // username without failing the whole unlock — the on-chain burn
-    // already happened, so premium is real either way.
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('profiles_handle_lower_idx') || msg.includes('23505')) {
+    if (msg.includes('profiles_handle_lower_idx')) {
       return NextResponse.json(
         { error: 'That username is taken.', code: 'handle_taken', wallet, txHash },
         { status: 409 },
       );
     }
-    console.error('[premium/verify] recordCryptoUnlock failed', err);
-    return NextResponse.json(
-      { error: 'failed to record unlock' },
-      { status: 500 },
-    );
+    if (msg.includes('profiles_email_lower_idx')) {
+      console.warn(
+        '[premium/verify] email already owned by another profile; retrying without email',
+        { wallet, txHash },
+      );
+      emailTaken = true;
+      try {
+        await recordCryptoUnlock({
+          wallet,
+          txHash,
+          usdcAmount: usdcIn,
+          wordBurned,
+          handle,
+          email: null,
+        });
+      } catch (retryErr) {
+        // Second failure is unexpected — the only other unique index
+        // that could fire (handle) was absent the first time. Surface
+        // as 500 with the original error for logs; the on-chain burn
+        // still landed, so a re-verify on next page load picks up
+        // premium via the wallet-keyed read.
+        console.error('[premium/verify] retry-without-email also failed', retryErr);
+        return NextResponse.json(
+          { error: 'failed to record unlock' },
+          { status: 500 },
+        );
+      }
+    } else {
+      console.error('[premium/verify] recordCryptoUnlock failed', err);
+      return NextResponse.json(
+        { error: 'failed to record unlock' },
+        { status: 500 },
+      );
+    }
   }
 
   try {
@@ -203,5 +243,5 @@ export async function POST(req: Request): Promise<NextResponse> {
     console.warn('[premium/verify] funnel telemetry emit failed', err);
   }
 
-  return NextResponse.json({ premium: true, wallet, txHash });
+  return NextResponse.json({ premium: true, wallet, txHash, emailTaken });
 }

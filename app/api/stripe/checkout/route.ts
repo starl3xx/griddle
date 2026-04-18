@@ -191,17 +191,20 @@ async function resolvePrefillEmail(
       if (email && isValidEmail(email)) return email;
     }
 
-    // No session→profile binding. Try wallet→profile if a wallet is
-    // both connected AND bound to the session (don't trust the client-
-    // supplied wallet alone — the checkout route doesn't authenticate
-    // the wallet ownership).
+    // No session→profile binding. Try wallet→profile using the
+    // session-bound wallet only. The client-supplied `wallet` arg
+    // isn't authenticated here, so it can't be the lookup key — we'd
+    // be vulnerable to a caller prefilling someone else's email into
+    // their own Stripe session. If `wallet === sessionWallet` the
+    // sessionWallet path already covers it; if they differ, the
+    // client value is untrusted and we ignore it.
     const sessionWallet = await getSessionWallet(sessionId);
-    const trusted = sessionWallet ?? (wallet === sessionWallet ? wallet : null);
-    if (trusted) {
+    void wallet; // checkout metadata; intentionally not used for prefill lookup
+    if (sessionWallet) {
       const rows = await db
         .select({ email: profiles.email })
         .from(profiles)
-        .where(eq(profiles.wallet, trusted))
+        .where(eq(profiles.wallet, sessionWallet))
         .limit(1);
       const email = rows[0]?.email ?? null;
       if (email && isValidEmail(email)) return email;
