@@ -1,19 +1,24 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { Crown } from '@phosphor-icons/react/dist/ssr';
 import { getDailyLeaderboard } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatMs, formatPlayerName } from '@/lib/format';
 import { Avatar } from '@/components/Avatar';
 import { WordmarkBadges } from '@/components/WordmarkBadges';
+import { getSessionId } from '@/lib/session';
+import { isSessionPremium } from '@/lib/premium-check';
 
 /**
  * Daily leaderboard page. Server component — fetches directly via
  * Drizzle, no client-side data fetching needed.
  *
+ * Premium-gated at the page level: non-premium visitors redirect to
+ * `/`, where the Leaderboard tile surfaces the upgrade CTA. Prior
+ * behavior left this route public, which leaked ranked times to anyone
+ * with a direct link and undercut the in-app panel's premium gate.
+ *
  * Day param is clamped to today so future puzzles aren't reachable.
- * Past days are fine (premium archive will gate them client-side
- * later, but the public route returns whatever's there).
  */
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +30,10 @@ export default async function LeaderboardPage({
   const { day } = await params;
   const requested = parseInt(day, 10);
   if (!Number.isFinite(requested) || requested < 1) notFound();
+
+  const sessionId = await getSessionId();
+  const premium = await isSessionPremium(sessionId);
+  if (!premium) redirect('/');
 
   const today = getCurrentDayNumber();
   const dayNumber = Math.min(requested, today);

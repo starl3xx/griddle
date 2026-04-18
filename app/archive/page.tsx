@@ -1,16 +1,21 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getArchiveList } from '@/lib/db/queries';
+import { getSessionId } from '@/lib/session';
+import { isSessionPremium } from '@/lib/premium-check';
 
 /**
- * Past puzzles index. Public route — premium gating for access lives
- * on the home-page tile click, so a user who shares an /archive link
- * or lands here directly isn't silently redirected. The individual
- * per-day leaderboard pages remain open already, so there's no new
- * data exposure here vs. what /leaderboard/[day] already ships.
+ * Past puzzles index. Premium-gated at the page level: non-premium
+ * visitors redirect to `/`, matching the /leaderboard/[day] gate. The
+ * home-page tile remains the single upsell surface.
  */
 export const dynamic = 'force-dynamic';
 
 export default async function ArchivePage() {
+  const sessionId = await getSessionId();
+  const premium = await isSessionPremium(sessionId);
+  if (!premium) redirect('/');
+
   const entries = await getArchiveList(60);
 
   return (

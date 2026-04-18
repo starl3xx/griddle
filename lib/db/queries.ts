@@ -364,6 +364,8 @@ export async function getDailyLeaderboard(
 export interface AnomalyRow {
   id: number;
   puzzleId: number;
+  /** User-visible puzzle number (puzzles.day_number); differs from puzzleId when the serial PK has drifted. */
+  dayNumber: number;
   wallet: string | null;
   sessionId: string;
   serverSolveMs: number | null;
@@ -384,6 +386,7 @@ export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
     .select({
       id: solves.id,
       puzzleId: solves.puzzleId,
+      dayNumber: puzzles.dayNumber,
       wallet: solves.wallet,
       sessionId: solves.sessionId,
       serverSolveMs: solves.serverSolveMs,
@@ -397,6 +400,7 @@ export async function getRecentAnomalies(limit = 200): Promise<AnomalyRow[]> {
       avatarUrl: profiles.avatarUrl,
     })
     .from(solves)
+    .innerJoin(puzzles, eq(solves.puzzleId, puzzles.id))
     .leftJoin(profiles, eq(solves.wallet, profiles.wallet))
     .where(isNotNull(solves.flag))
     .orderBy(sql`${solves.createdAt} DESC`)
@@ -3780,7 +3784,7 @@ export interface UserDossier {
   };
   solves: Array<{ puzzleId: number; dayNumber: number; answer: string; serverSolveMs: number | null; flag: string | null; createdAt: Date }>;
   funnelEvents: Array<{ eventName: string; metadata: Record<string, unknown>; createdAt: Date }>;
-  wordmarks: Array<{ wordmarkId: string; earnedAt: Date; puzzleId: number | null }>;
+  wordmarks: Array<{ wordmarkId: string; earnedAt: Date; puzzleId: number | null; dayNumber: number | null }>;
   totalSolves: number;
 }
 
@@ -3863,20 +3867,34 @@ export async function getUserDossier(input: { profileId?: number; sessionId?: st
     LIMIT 20
   `).then((r) => Array.isArray(r) ? r : r.rows);
 
-  // Wordmarks — only if we have a profile/wallet identity.
-  let wmRows: Array<{ wordmarkId: string; earnedAt: Date; puzzleId: number | null }> = [];
+  // Wordmarks — only if we have a profile/wallet identity. Join puzzles
+  // to surface the user-visible day_number (puzzles.id is a serial PK
+  // that drifts from the displayed puzzle number once test data fills
+  // the sequence).
+  let wmRows: Array<{ wordmarkId: string; earnedAt: Date; puzzleId: number | null; dayNumber: number | null }> = [];
   if (input.profileId || wallet) {
     const wmFilter = input.profileId
-      ? sql`profile_id = ${input.profileId}`
-      : sql`wallet = ${wallet}`;
-    const raw = await db.execute<{ wordmark_id: string; earned_at: Date; puzzle_id: number | null }>(sql`
-      SELECT wordmark_id, earned_at, puzzle_id
-      FROM wordmarks
+      ? sql`w.profile_id = ${input.profileId}`
+      : sql`w.wallet = ${wallet}`;
+    const raw = await db.execute<{
+      wordmark_id: string;
+      earned_at: Date;
+      puzzle_id: number | null;
+      day_number: number | null;
+    }>(sql`
+      SELECT w.wordmark_id, w.earned_at, w.puzzle_id, p.day_number
+      FROM wordmarks w
+      LEFT JOIN puzzles p ON p.id = w.puzzle_id
       WHERE ${wmFilter}
-      ORDER BY earned_at DESC
+      ORDER BY w.earned_at DESC
       LIMIT 30
     `).then((r) => Array.isArray(r) ? r : r.rows);
-    wmRows = raw.map((r) => ({ wordmarkId: r.wordmark_id, earnedAt: new Date(r.earned_at), puzzleId: r.puzzle_id }));
+    wmRows = raw.map((r) => ({
+      wordmarkId: r.wordmark_id,
+      earnedAt: new Date(r.earned_at),
+      puzzleId: r.puzzle_id,
+      dayNumber: r.day_number,
+    }));
   }
 
   return {

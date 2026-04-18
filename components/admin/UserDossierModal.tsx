@@ -28,7 +28,7 @@ interface DossierData {
     createdAt: string;
   }>;
   funnelEvents: Array<{ eventName: string; metadata: Record<string, unknown>; createdAt: string }>;
-  wordmarks: Array<{ wordmarkId: string; earnedAt: string; puzzleId: number | null }>;
+  wordmarks: Array<{ wordmarkId: string; earnedAt: string; puzzleId: number | null; dayNumber: number | null }>;
   totalSolves: number;
 }
 
@@ -223,7 +223,7 @@ function WordmarksSection({ d }: { d: DossierData }) {
         {d.wordmarks.map((w, i) => (
           <span key={i} className="inline-flex items-center gap-1 text-[11px] font-bold rounded-full bg-brand-100 text-brand-800 px-2 py-0.5">
             {w.wordmarkId}
-            {w.puzzleId && <span className="text-[9px] text-brand-600/80 font-normal">#{w.puzzleId}</span>}
+            {w.dayNumber != null && <span className="text-[9px] text-brand-600/80 font-normal">#{w.dayNumber}</span>}
           </span>
         ))}
       </div>
