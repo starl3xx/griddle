@@ -3074,22 +3074,6 @@ export async function updateStreakForSolve(
  * in README Code Style — the same pattern that bit us on wallet has
  * been observed here too on dynamic routes.
  */
-/**
- * Read-only streak lookup for an identity. Returns `0` for fully
- * anonymous callers and for identities that haven't yet earned a
- * streak row. Does NOT advance or mutate the streak — callers on the
- * replay path use this in place of `updateStreakForSolve` so a post-
- * refresh re-trigger of the solve modal doesn't corrupt the table.
- */
-export async function getCurrentStreakForIdentity(
-  identity: StatsIdentity,
-): Promise<number> {
-  const playerKey = playerKeyFor(identity);
-  if (playerKey == null) return 0;
-  const row = await selectStreakRow(playerKey);
-  return row?.currentStreak ?? 0;
-}
-
 async function selectStreakRow(playerKey: string): Promise<{
   currentStreak: number;
   longestStreak: number;
@@ -3120,6 +3104,22 @@ async function selectStreakRow(playerKey: string): Promise<{
     lastSolvedDayNumber: r.lastSolvedDayNumber,
     updatedAt: r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt),
   };
+}
+
+/**
+ * Read-only streak lookup for an identity. Returns `0` for fully
+ * anonymous callers and for identities that haven't yet earned a
+ * streak row. Does NOT advance or mutate the streak — callers on the
+ * replay path use this in place of `updateStreakForSolve` so a post-
+ * refresh re-trigger of the solve modal doesn't corrupt the table.
+ */
+export async function getCurrentStreakForIdentity(
+  identity: StatsIdentity,
+): Promise<number> {
+  const playerKey = playerKeyFor(identity);
+  if (playerKey == null) return 0;
+  const row = await selectStreakRow(playerKey);
+  return row?.currentStreak ?? 0;
 }
 
 /**
@@ -3548,10 +3548,27 @@ export async function getPostSolveSummary(
   const rankResolved = Array.isArray(rankRows) ? rankRows : (rankRows.rows ?? []);
   const { rank, total } = rankResolved[0] ?? { rank: null, total: 0 };
 
-  const percentileRank =
-    rank != null && total > 0
-      ? Math.max(0, Math.min(100, Math.round(((total - rank) / total) * 100)))
-      : null;
+  // Percentile expresses "beat X% of the rest of the field", so the
+  // denominator is (total - 1), not total. With `/total` the fastest
+  // solver (rank=1, total=200) hits 99.5 → rounds to 100 and the UI
+  // claims they're "faster than 100% of solvers" (impossible); the
+  // sole solver (rank=1, total=1) divides by 1 and lands at 0 which
+  // reads as "faster than 0%" despite there being nobody to beat.
+  //
+  // Three null-outs keep the UI copy honest:
+  //   - anonymous or not-in-field → rank null
+  //   - sole solver → total <= 1 (no field to compare against)
+  //   - slowest solver → raw would be 0%; "faster than 0%" is
+  //     technically true but a dispiriting celebration moment, so
+  //     we omit the row entirely and let the modal collapse it.
+  // We also clamp the top to 99 so the fastest solver gets a
+  // visible-but-plausible "faster than 99%" instead of rounding up
+  // past the logical ceiling.
+  let percentileRank: number | null = null;
+  if (rank != null && total > 1) {
+    const raw = Math.round(((total - rank) / (total - 1)) * 100);
+    percentileRank = raw > 0 ? Math.min(99, raw) : null;
+  }
 
   return {
     averageMs: avgRows[0]?.averageMs ?? null,
