@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { getSessionWallet } from '@/lib/wallet-session';
-import { getSessionProfile } from '@/lib/session-profile';
+import { resolveSessionIdentity } from '@/lib/session-identity';
 import { getWordmarksForPlayer } from '@/lib/db/queries';
 
 /**
@@ -22,10 +21,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse> {
   const sessionId = await getSessionId();
-  const [wallet, profileId] = await Promise.all([
-    getSessionWallet(sessionId),
-    getSessionProfile(sessionId),
-  ]);
+  const { wallet, profileId } = await resolveSessionIdentity(sessionId);
 
   const entries = await getWordmarksForPlayer({ profileId, wallet });
   return NextResponse.json({

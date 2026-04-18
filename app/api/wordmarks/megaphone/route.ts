@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { getSessionWallet } from '@/lib/wallet-session';
-import { getSessionProfile } from '@/lib/session-profile';
+import { resolveSessionIdentity } from '@/lib/session-identity';
 import { insertWordmarksIfNew, solveBelongsTo } from '@/lib/db/queries';
 import { db } from '@/lib/db/client';
 import { solves } from '@/lib/db/schema';
@@ -33,18 +32,14 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(): Promise<NextResponse> {
   const sessionId = await getSessionId();
-  const [wallet, profileId] = await Promise.all([
-    getSessionWallet(sessionId),
-    getSessionProfile(sessionId),
-  ]);
+  const identity = await resolveSessionIdentity(sessionId);
+  const { wallet, profileId } = identity;
   if (!wallet && profileId == null) {
     return NextResponse.json(
       { error: 'identity required to earn wordmarks' },
       { status: 401 },
     );
   }
-
-  const identity = { profileId, wallet, sessionId };
 
   // Guard: the user must have at least one successful solve to earn
   // Megaphone. Without this, a direct POST (curl) could mint the badge

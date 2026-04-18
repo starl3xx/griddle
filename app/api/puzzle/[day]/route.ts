@@ -6,8 +6,7 @@ import {
   getPuzzleStartedAt,
   recordPuzzleLoad,
 } from '@/lib/db/queries';
-import { getSessionProfile } from '@/lib/session-profile';
-import { getSessionWallet } from '@/lib/wallet-session';
+import { resolveSessionIdentity } from '@/lib/session-identity';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 
 /**
@@ -54,10 +53,9 @@ export async function GET(
   // player has previously started (or solved) hydrates the post-
   // solve UI state (frozen timer, crumb lock) without flashing a
   // wrongly-ticking timer or re-arming crumb discovery.
-  const [startedAt, sessionWallet, profileId] = await Promise.all([
+  const [startedAt, { wallet: sessionWallet, profileId }] = await Promise.all([
     getPuzzleStartedAt(sessionId, puzzle.dayNumber),
-    getSessionWallet(sessionId),
-    getSessionProfile(sessionId),
+    resolveSessionIdentity(sessionId),
   ]);
   const previousSolveMs = await getPreviousSolveMsForPuzzle(
     { sessionId, wallet: sessionWallet, profileId },

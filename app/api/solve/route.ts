@@ -12,8 +12,7 @@ import {
   getCurrentStreakForIdentity,
 } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
-import { getSessionWallet } from '@/lib/wallet-session';
-import { getSessionProfile } from '@/lib/session-profile';
+import { resolveSessionIdentity } from '@/lib/session-identity';
 import { awardWordmarks } from '@/lib/wordmarks/award';
 import { isSessionPremium } from '@/lib/premium-check';
 
@@ -194,13 +193,13 @@ export async function POST(
   // canonical identity for stats (new in this PR) so handle-only and
   // email-auth users — who may never bind a wallet — still see their
   // own solves. A solve can carry both, one, or neither.
-  const [puzzle, loadAndStart, wallet, profileId, isPremium] = await Promise.all([
+  const [puzzle, loadAndStart, identity, isPremium] = await Promise.all([
     getPuzzleWordByDayNumber(body.dayNumber),
     getPuzzleLoadAndStart(sessionId, body.dayNumber),
-    getSessionWallet(sessionId),
-    getSessionProfile(sessionId),
+    resolveSessionIdentity(sessionId),
     isSessionPremium(sessionId),
   ]);
+  const { wallet, profileId } = identity;
 
   if (!puzzle) {
     return NextResponse.json({ error: 'puzzle not found' }, { status: 404 });
@@ -217,7 +216,6 @@ export async function POST(
   // session-only solves fall through to the normal insert path because
   // they carry no cross-device identity to dedupe against.
   const identifiable = wallet != null || profileId != null;
-  const identity = { profileId, wallet };
   if (solved && identifiable) {
     const prior = await getFirstSuccessfulSolveForPuzzle(identity, puzzle.id);
     if (prior != null) {
