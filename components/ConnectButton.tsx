@@ -80,8 +80,14 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
       </button>
 
       {pickerOpen && (
+        // z-[60] sits one tier above every other modal (all z-50) so the
+        // picker always paints on top when chained from another modal —
+        // e.g. "Pay with crypto" in PremiumGateModal triggers this picker
+        // while the gate modal stays mounted. With equal z the picker
+        // lost to whichever modal rendered later in the DOM, since
+        // LazyConnectFlow is mounted early for wagmi auto-reconnect.
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 animate-fade-in"
           onClick={() => setPickerOpen(false)}
         >
           <div
