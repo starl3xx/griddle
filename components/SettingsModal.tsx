@@ -23,7 +23,7 @@ import { FaqAccordion } from './FaqAccordion';
 import { OtpCodeInput } from './OtpCodeInput';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { suggestUsernameFromWallet, validateUsername } from '@/lib/username';
-import { getDefaultAvatarDataUri } from '@/lib/default-avatar';
+import { getDefaultAvatarDataUri, pickAvatarSeed } from '@/lib/default-avatar';
 
 /**
  * Shape of the profile object surfaced by GET /api/profile. Kept narrow
@@ -229,8 +229,14 @@ export function SettingsModal({
 
   if (!open) return null;
 
-  // Identity resolution for the header.
-  const headerSeed = profile?.handle ?? sessionWallet ?? profile?.email ?? null;
+  // Identity resolution for the header. Pulled through the shared
+  // `pickAvatarSeed` helper so the gear button, this header, and the
+  // StatsPanel header all derive the same monogram for the same user.
+  const headerSeed = pickAvatarSeed({
+    handle: profile?.handle,
+    wallet: sessionWallet,
+    email: profile?.email,
+  });
   const headerLabel =
     profile?.handle?.trim()
     || (mode === 'onboarding'
@@ -350,7 +356,11 @@ export function SettingsModal({
             />
             <EditablePhotoRow
               avatarUrl={profile.avatarUrl}
-              seed={profile.handle ?? profile.wallet ?? profile.email ?? 'guest'}
+              seed={pickAvatarSeed({
+                handle: profile.handle,
+                wallet: profile.wallet,
+                email: profile.email,
+              }) ?? 'guest'}
               premium={premium}
               onSaved={onProfileChanged}
               onUpgrade={onUpgrade}

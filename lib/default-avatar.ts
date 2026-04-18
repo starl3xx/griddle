@@ -40,6 +40,25 @@ function pickInitial(seed: string): string {
 }
 
 /**
+ * Single source of truth for the avatar-seed fallback chain. Every
+ * surface that renders the same user's avatar must pass identical
+ * inputs here, otherwise `<Avatar>` derives different monograms on
+ * different screens for the same person (e.g. an email-only user
+ * showing as a generic guest tile in StatsPanel but an email-derived
+ * tile in the gear button — the bug Bugbot caught on PR #91).
+ *
+ * Order: handle (most stable, user-chosen) → wallet → email → null.
+ * Callers fall back to `'guest'` when the result is null.
+ */
+export function pickAvatarSeed(opts: {
+  handle?: string | null;
+  wallet?: string | null;
+  email?: string | null;
+}): string | null {
+  return opts.handle || opts.wallet || opts.email || null;
+}
+
+/**
  * Returns a `data:image/svg+xml,…` URI for a 64×64 monogram tile.
  * Callers should treat the output as opaque and pass it as the avatar
  * URL. Sized at 64px to stay crisp at every Avatar.tsx preset; the SVG

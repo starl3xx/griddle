@@ -21,6 +21,13 @@ interface BrowseModalProps {
   profileLoaded: boolean;
   pfpUrl: string | null;
   username: string | null;
+  /**
+   * Bound profile email, if any. Forwarded to StatsPanel so its
+   * avatar fallback chain (handle → wallet → email) matches the gear
+   * button — without it, an email-only user would render two
+   * different monograms in the same session.
+   */
+  email: string | null;
   onCreateProfile: () => void;
   onUpgrade: () => void;
 
@@ -55,6 +62,7 @@ export function BrowseModal({
   profileLoaded,
   pfpUrl,
   username,
+  email,
   onCreateProfile,
   onUpgrade,
   todayDayNumber,
@@ -103,6 +111,7 @@ export function BrowseModal({
               profileLoaded={profileLoaded}
               pfpUrl={pfpUrl}
               username={username}
+              email={email}
               onCreateProfile={onCreateProfile}
               onUpgrade={onUpgrade}
               onClose={onClose}

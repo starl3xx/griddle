@@ -5,6 +5,7 @@ import { formatMs } from '@/lib/format';
 import { Avatar } from '../Avatar';
 import { LexiconGrid } from './LexiconGrid';
 import { PremiumStatsSection } from './PremiumStatsSection';
+import { pickAvatarSeed } from '@/lib/default-avatar';
 import type { WalletStats } from '@/lib/db/queries';
 
 interface StatsResponse {
@@ -25,6 +26,12 @@ interface StatsPanelProps {
   pfpUrl: string | null;
   /** User's display name from the bound profile (or Farcaster fallback). */
   username: string | null;
+  /**
+   * Bound profile email, if any. Feeds into the avatar seed fallback
+   * chain so an email-only user (no handle, no wallet) renders the
+   * same monogram here as in the gear button.
+   */
+  email: string | null;
   /** Fires when an anonymous user taps the Sign in CTA. */
   onCreateProfile: () => void;
   /** Opens the premium gate modal. */
@@ -59,6 +66,7 @@ export function StatsPanel({
   profileLoaded,
   pfpUrl,
   username,
+  email,
   onCreateProfile,
   onUpgrade,
   onClose,
@@ -98,7 +106,10 @@ export function StatsPanel({
     <>
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Avatar pfpUrl={pfpUrl} seed={username ?? wallet} />
+        <Avatar
+          pfpUrl={pfpUrl}
+          seed={pickAvatarSeed({ handle: username, wallet, email })}
+        />
         <div className="min-w-0">
           <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 truncate">
             {label}
