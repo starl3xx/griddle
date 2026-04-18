@@ -96,10 +96,10 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
             className="modal-sheet animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-xl font-bold tracking-tight text-gray-900">
+            <h2 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
               Connect a wallet
             </h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Connect once to claim solves and unlock Premium.
             </p>
 
@@ -115,7 +115,7 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
                   className="btn-secondary text-left flex items-center gap-3"
                 >
                   <WalletIcon connector={connector} />
-                  <span className="font-semibold text-gray-900">{connectorLabel(connector)}</span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">{connectorLabel(connector)}</span>
                 </button>
               ))}
             </div>
@@ -123,7 +123,7 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
             <button
               type="button"
               onClick={() => setPickerOpen(false)}
-              className="mt-4 text-sm text-gray-400 hover:text-gray-600"
+              className="mt-4 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             >
               cancel
             </button>
