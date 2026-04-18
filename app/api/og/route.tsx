@@ -29,12 +29,14 @@ export const runtime = 'edge';
 
 const SIZE = { width: 1200, height: 630 } as const;
 const BRAND = '#2D68C7';
-const GRAY_200 = '#e5e7eb';
-const GRAY_100 = '#f3f4f6';
 const GRAY_500 = '#6b7280';
 const GRAY_900 = '#111827';
-const SUCCESS_50 = '#f0fdf4';
-const SUCCESS_200 = '#bbf7d0';
+// Tile colors mirror the app icon's palette (public/icon.svg) so the OG
+// card reads as the same "brand stamp" as the home-screen icon.
+const TILE_MINT_FILL = '#D1FAE5';
+const TILE_MINT_STROKE = '#86EFAC';
+const TILE_EDGE_FILL = '#F1F3F5';
+const TILE_EDGE_STROKE = '#D9D9D9';
 
 type CellState = 'available' | 'blocked' | 'current';
 
@@ -207,8 +209,8 @@ function TileCell({ state }: { state: CellState }) {
 }
 
 const TILE_STYLES: Record<CellState, { bg: string; border: string }> = {
-  available: { bg: SUCCESS_50, border: SUCCESS_200 },
-  blocked: { bg: GRAY_100, border: GRAY_200 },
+  available: { bg: TILE_MINT_FILL, border: TILE_MINT_STROKE },
+  blocked: { bg: TILE_EDGE_FILL, border: TILE_EDGE_STROKE },
   current: { bg: BRAND, border: BRAND },
 };
 

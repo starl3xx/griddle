@@ -12,7 +12,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:check": "bun scripts/check-migrations.ts"
+    "db:check": "bun scripts/check-migrations.ts",
+    "icons:png": "bun scripts/export-icon-pngs.ts"
   },
   "dependencies": {
     "@farcaster/miniapp-sdk": "^0.3.0",
@@ -48,6 +49,7 @@
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "postcss": "^8.4.39",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.5.3"
   }

@@ -18,7 +18,7 @@
     "ogDescription": "Find the hidden 9-letter word. Consecutive letters can’t be neighbors.",
     "ogImageUrl": "https://griddle.fun/api/og",
     "splashImageUrl": "https://griddle.fun/icon.svg",
-    "splashBackgroundColor": "#2D68C7",
+    "splashBackgroundColor": "#FFFFFF",
     "homeUrl": "https://griddle.fun",
     "primaryCategory": "games",
     "tags": ["game", "wordgame", "puzzle", "daily", "base"]

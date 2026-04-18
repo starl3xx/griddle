@@ -69,8 +69,8 @@ function TinyGridIllustration() {
   ] as const;
 
   const cls: Record<(typeof state)[number], string> = {
-    available: 'bg-success-50 dark:bg-success-900/30 border-success-200 dark:border-success-700',
-    blocked: 'bg-gray-100 dark:bg-gray-700 border-gray-200 dark:border-gray-600',
+    available: 'bg-success-100 dark:bg-success-900/30 border-success-300 dark:border-success-700',
+    blocked: 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600',
     current: 'bg-brand border-brand',
   };
 
