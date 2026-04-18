@@ -33,6 +33,13 @@ interface BrowseModalProps {
 
   /** Today's day number — default view for the leaderboard tab. */
   todayDayNumber: number;
+  /**
+   * Day to seed the leaderboard tab with on a closed→open transition.
+   * When undefined, the tab opens on `todayDayNumber`. Set from the
+   * post-solve nav so a player who solves an ARCHIVE puzzle lands on
+   * the leaderboard for THAT puzzle instead of today's.
+   */
+  leaderboardInitialDay?: number;
   /** Loads an archive puzzle into the main game grid and closes the modal. */
   onLoadPuzzle: (dayNumber: number) => void;
 }
@@ -66,14 +73,21 @@ export function BrowseModal({
   onCreateProfile,
   onUpgrade,
   todayDayNumber,
+  leaderboardInitialDay,
   onLoadPuzzle,
 }: BrowseModalProps) {
   // The leaderboard panel lets the user scroll through past days. The
   // active day is kept in modal-level state so switching tabs and
   // coming back preserves the selection within one open session.
-  const [leaderboardDay, setLeaderboardDay] = useState(todayDayNumber);
+  const [leaderboardDay, setLeaderboardDay] = useState(
+    leaderboardInitialDay ?? todayDayNumber,
+  );
 
-  // Reset leaderboard day to today ONLY on a closed → open transition.
+  // Reset leaderboard day on a closed → open transition. Defaults to
+  // today, but the parent can override via `leaderboardInitialDay` so
+  // a post-archive-solve hand-off lands on the leaderboard for the
+  // puzzle that was just solved (not today's).
+  //
   // Gating on `openTab !== null` directly in the effect would fire
   // every tab switch (each changes `openTab`), which would overwrite
   // a day just selected by the archive → leaderboard hand-off:
@@ -84,10 +98,10 @@ export function BrowseModal({
   useEffect(() => {
     const isOpen = openTab !== null;
     if (isOpen && !wasOpenRef.current) {
-      setLeaderboardDay(todayDayNumber);
+      setLeaderboardDay(leaderboardInitialDay ?? todayDayNumber);
     }
     wasOpenRef.current = isOpen;
-  }, [openTab, todayDayNumber]);
+  }, [openTab, todayDayNumber, leaderboardInitialDay]);
 
   if (openTab === null) return null;
 
