@@ -1,6 +1,11 @@
 import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
 import { requireAdminWallet } from '@/lib/admin';
 import { AdminDashboard } from '@/components/admin';
+
+export const metadata: Metadata = {
+  title: 'Griddle | Admin',
+};
 
 /**
  * Admin dashboard root. Server component — the wallet-bound session

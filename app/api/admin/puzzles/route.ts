@@ -3,6 +3,7 @@ import { requireAdminWallet } from '@/lib/admin';
 import {
   getTodaysPuzzleHealth,
   getUpcomingPuzzles,
+  getPastPuzzles,
   getPuzzleDifficulty,
   getNeverSolvedPuzzles,
   getPuzzleCalibration,
@@ -22,14 +23,15 @@ export async function GET(): Promise<NextResponse> {
   const admin = await requireAdminWallet();
   if (!admin) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
-  const [today, upcoming, hardest, easiest, neverSolved, calibration] = await Promise.all([
+  const [today, upcoming, past, hardest, easiest, neverSolved, calibration] = await Promise.all([
     getTodaysPuzzleHealth(),
     getUpcomingPuzzles(10),
+    getPastPuzzles(20),
     getPuzzleDifficulty({ order: 'hardest', limit: 20, minSolves: 10 }),
     getPuzzleDifficulty({ order: 'easiest', limit: 20, minSolves: 10 }),
     getNeverSolvedPuzzles(),
     getPuzzleCalibration(10),
   ]);
 
-  return NextResponse.json({ today, upcoming, hardest, easiest, neverSolved, calibration });
+  return NextResponse.json({ today, upcoming, past, hardest, easiest, neverSolved, calibration });
 }

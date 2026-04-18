@@ -3502,6 +3502,55 @@ export async function getUpcomingPuzzles(n = 10): Promise<UpcomingPuzzleRow[]> {
   });
 }
 
+export interface PastPuzzleRow {
+  puzzleId: number;
+  dayNumber: number;
+  date: string;
+  answer: string;
+  solves: number;
+  heuristicScore: number;
+  tier: string;
+}
+
+/**
+ * Past puzzles for the admin Puzzles tab history section. Orders
+ * newest-first, excludes today (today has its own health card).
+ * Solve counts are denormalized so the admin sees "was this one hard?"
+ * alongside the answer.
+ */
+export async function getPastPuzzles(n = 20): Promise<PastPuzzleRow[]> {
+  const today = getCurrentDayNumber();
+  const rows = await db.execute<{
+    puzzle_id: number;
+    day_number: number;
+    date: string;
+    word: string;
+    solves: number;
+  }>(sql`
+    SELECT p.id AS puzzle_id, p.day_number,
+           to_char(p.date, 'YYYY-MM-DD') AS date, p.word,
+           count(s.id) filter (where s.solved = true)::int AS solves
+    FROM puzzles p
+    LEFT JOIN solves s ON s.puzzle_id = p.id
+    WHERE p.day_number < ${today}
+    GROUP BY p.id, p.day_number, p.date, p.word
+    ORDER BY p.day_number DESC
+    LIMIT ${n}
+  `).then((r) => Array.isArray(r) ? r : r.rows);
+  return rows.map((r) => {
+    const h = scoreWord(r.word);
+    return {
+      puzzleId: r.puzzle_id,
+      dayNumber: r.day_number,
+      date: r.date,
+      answer: r.word,
+      solves: r.solves,
+      heuristicScore: h.score,
+      tier: h.tier,
+    };
+  });
+}
+
 export async function getNeverSolvedPuzzles(): Promise<Array<{ puzzleId: number; dayNumber: number; date: string; answer: string }>> {
   const today = getCurrentDayNumber();
   const rows = await db.execute<{ puzzle_id: number; day_number: number; date: string; word: string }>(sql`
@@ -4007,7 +4056,9 @@ export async function getFunnelEntryPoints(window: '24h' | '7d' | '30d' | 'all' 
  */
 export async function getFunnelTimeToStage(window: '24h' | '7d' | '30d' | 'all' = '7d'): Promise<FunnelTimeToStage> {
   const since = windowIntervalSql(window);
-  const timeBound = since ? sql`created_at >= ${since}` : sql`true`;
+  // Bare `created_at` would be ambiguous across the fa/fb self-join — same
+  // hazard getFunnelStats calls out. Name the alias explicitly.
+  const timeBound = since ? sql`fa.created_at >= ${since}` : sql`true`;
 
   // Helper: median ms between min(event_a) and min(event_b) per session.
   async function median(a: string, b: string): Promise<number | null> {
