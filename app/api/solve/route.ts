@@ -325,17 +325,16 @@ export async function POST(
       // solves. Milestone + skill wordmarks still fire (botFlagged
       // already suppresses speed wordmarks inside awardWordmarks).
       //
-      // The post-solve summary runs in parallel with streak update +
-      // lifetime count: all three are read-mostly and independent.
-      const [streakResult, lifetimeSolves, summaryResult] = await Promise.all([
+      // Streak + lifetime feed awardWordmarks and must succeed together
+      // or fail together; keeping them in their own Promise.all
+      // preserves the original wordmark pipeline's blast radius.
+      const [streakResult, lifetimeSolves] = await Promise.all([
         flag === null
           ? updateStreakForSolve(identity, body.dayNumber)
           : Promise.resolve({ currentStreak: 0, longestStreak: 0 }),
         getLifetimeSolveCount(identity),
-        getPostSolveSummary(identity, body.dayNumber, { isPremium }),
       ]);
       currentStreak = streakResult.currentStreak;
-      summary = summaryResult;
       earnedWordmarks = await awardWordmarks({
         wallet,
         profileId,
@@ -351,12 +350,22 @@ export async function POST(
         botFlagged: flag !== null,
       });
     } catch (err) {
-      // Wordmark / summary computation is best-effort — a failure
-      // MUST NOT surface as a 500. The solve row is already
-      // committed above and the player's primary feedback (solved +
-      // time) is what matters. Log and return with null stats.
-      console.error('[solve] post-solve pipeline failed', err);
+      // Wordmark awarding is best-effort — a failure MUST NOT surface
+      // as a 500. The solve row is already committed above and the
+      // player's primary feedback (solved + time) is what matters.
+      console.error('[solve] wordmark awarding failed', err);
       earnedWordmarks = [];
+    }
+
+    // Post-solve summary is a pure display concern. Kept in its own
+    // try/catch so a stats query failure can't roll back the wordmark
+    // awarding above — a previous version bundled them into the same
+    // Promise.all and a summary crash would permanently deny the user
+    // their earned wordmarks.
+    try {
+      summary = await getPostSolveSummary(identity, body.dayNumber, { isPremium });
+    } catch (err) {
+      console.error('[solve] post-solve summary failed', err);
     }
   }
 
