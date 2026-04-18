@@ -1358,7 +1358,6 @@ export default function GameClient({
         <SolveModal
           dayNumber={activePuzzle.dayNumber}
           word={solveResult.word}
-          grid={activePuzzle.grid}
           solveMs={solveResult.solveMs}
           unassisted={solveResult.unassisted}
           earnedWordmarks={solveResult.earnedWordmarks}

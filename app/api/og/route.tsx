@@ -1,6 +1,4 @@
 import { ImageResponse } from 'next/og';
-import { sql } from 'drizzle-orm';
-import { db } from '@/lib/db/client';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatSeconds } from '@/lib/format';
 import { SITE_HOST } from '@/lib/site';
@@ -10,39 +8,50 @@ export const runtime = 'edge';
 /**
  * Dynamic OG image for Griddle share cards.
  *
+ * Spoiler-safe by design: the grid letters are NEVER rendered here,
+ * because rich link previews (iMessage, Slack, Twitter, Farcaster)
+ * would leak the grid to recipients before they've tapped START —
+ * breaking the equal-footing blur-on-open flow. Instead we render a
+ * branded 3×3 tile pattern in the same visual language as the
+ * How-to-Play illustration: corners green (available), edges gray
+ * (blocked), center brand blue (current). Instantly recognizable as
+ * Griddle, zero letters leaked.
+ *
  * Query params (all optional):
- *   puzzle=NNN      day number (defaults to today’s puzzle)
- *   grid=ecduotian  9-letter grid string (defaults to the day’s grid)
- *   solved=true     render the solved-state variant
- *   time=204        solve time in seconds (used when solved=true)
+ *   puzzle=NNN     day number (defaults to today's puzzle), shown in
+ *                  the subtitle
+ *   solved=true    render the solved-state variant
+ *   time=204       solve time in seconds (used when solved=true)
  *
- * The target word is never an input — OG images only ever show the grid
- * letters the player would see, never the answer. This matches the same
- * "share the puzzle, not the solution" rule the share text follows.
- *
- * Rendered at 1200×630 (Twitter/OG standard). Runs on the Edge runtime for
- * ~50ms cold start. Font files are co-located with this route and loaded
- * via `new URL(..., import.meta.url)` so the Next.js bundler picks them up.
+ * Rendered at 1200×630 (Twitter/OG standard). Runs on the Edge
+ * runtime so cold start stays under ~50ms.
  */
 
 const SIZE = { width: 1200, height: 630 } as const;
 const BRAND = '#2D68C7';
-const GRAY_300 = '#d1d5db';
+const GRAY_200 = '#e5e7eb';
+const GRAY_100 = '#f3f4f6';
 const GRAY_500 = '#6b7280';
 const GRAY_900 = '#111827';
+const SUCCESS_50 = '#f0fdf4';
+const SUCCESS_200 = '#bbf7d0';
+
+type CellState = 'available' | 'blocked' | 'current';
+
+// Mirrors the TinyGridIllustration in TutorialModal: center is the
+// "current" cell, the four orthogonal neighbors are "blocked" (off-
+// limits), and the four diagonal corners are "available" (go). Same
+// visual story as the real game grid — recognizable without letters.
+const TILE_PATTERN: readonly CellState[] = [
+  'available', 'blocked',  'available',
+  'blocked',   'current',  'blocked',
+  'available', 'blocked',  'available',
+];
 
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url);
 
   const dayNumber = clampDayNumber(searchParams.get('puzzle'));
-  const rawGrid = searchParams.get('grid');
-  // Grid fallback: if the caller didn't pass `?grid=`, look it up in
-  // the DB. The grid for a given day is public (it's what every player
-  // sees), but it's only known at runtime — the in-repo PUZZLE_BANK
-  // was removed so future puzzles can't be derived from the codebase.
-  // On any failure (DB down, row missing) we degrade to an empty grid
-  // and render 9 blank cells rather than 500 the share image.
-  const grid = normalizeGrid(rawGrid) ?? (await fetchGridForDay(dayNumber)) ?? '';
   const solved = searchParams.get('solved') === 'true';
   const time = parseTime(searchParams.get('time'));
 
@@ -103,17 +112,17 @@ export async function GET(req: Request): Promise<Response> {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '10px',
+            gap: '12px',
             marginTop: '22px',
           }}
         >
           {[0, 3, 6].map((rowStart) => (
             <div
               key={rowStart}
-              style={{ display: 'flex', flexDirection: 'row', gap: '10px' }}
+              style={{ display: 'flex', flexDirection: 'row', gap: '12px' }}
             >
               {[0, 1, 2].map((col) => (
-                <GridCell key={col} letter={grid[rowStart + col] ?? ''} />
+                <TileCell key={col} state={TILE_PATTERN[rowStart + col]} />
               ))}
             </div>
           ))}
@@ -182,59 +191,33 @@ export async function GET(req: Request): Promise<Response> {
   );
 }
 
-function GridCell({ letter }: { letter: string }) {
+function TileCell({ state }: { state: CellState }) {
+  const { bg, border } = TILE_STYLES[state];
   return (
     <div
       style={{
         width: '100px',
         height: '100px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'white',
-        border: `4px solid ${GRAY_300}`,
+        backgroundColor: bg,
+        border: `4px solid ${border}`,
         borderRadius: '12px',
-        fontSize: '60px',
-        fontWeight: 800,
-        color: GRAY_900,
-        textTransform: 'uppercase',
       }}
-    >
-      {letter.toUpperCase()}
-    </div>
+    />
   );
 }
+
+const TILE_STYLES: Record<CellState, { bg: string; border: string }> = {
+  available: { bg: SUCCESS_50, border: SUCCESS_200 },
+  blocked: { bg: GRAY_100, border: GRAY_200 },
+  current: { bg: BRAND, border: BRAND },
+};
 
 function clampDayNumber(raw: string | null): number {
   const today = getCurrentDayNumber();
   if (raw === null) return today;
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 1) return today;
-  // Clamp to today so /api/og?puzzle=500 can’t leak a future puzzle’s grid
-  // to anyone willing to brute-force the URL. Past puzzles are fine —
-  // future archive access will be its own route in M5.
   return Math.min(n, today);
-}
-
-function normalizeGrid(raw: string | null): string | null {
-  if (!raw) return null;
-  const cleaned = raw.toLowerCase().replace(/[^a-z]/g, '');
-  if (cleaned.length !== 9) return null;
-  return cleaned;
-}
-
-async function fetchGridForDay(dayNumber: number): Promise<string | null> {
-  try {
-    const rows = await db.execute<{ grid: string }>(sql`
-      SELECT grid FROM puzzles WHERE day_number = ${dayNumber} LIMIT 1
-    `);
-    const resolved = Array.isArray(rows) ? rows : (rows.rows ?? []);
-    const grid = resolved[0]?.grid;
-    return typeof grid === 'string' && grid.length === 9 ? grid.toLowerCase() : null;
-  } catch (err) {
-    console.warn('[og] grid lookup failed, falling back to blank cells', err);
-    return null;
-  }
 }
 
 function parseTime(raw: string | null): number | null {
@@ -243,4 +226,3 @@ function parseTime(raw: string | null): number | null {
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.min(n, 86_400);
 }
-
