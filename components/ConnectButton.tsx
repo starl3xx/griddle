@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
+import { WalletIcon, connectorLabel } from './WalletIcon';
 
 interface ConnectButtonProps {
   /** Called once a wallet successfully connects, with the address. */
@@ -16,7 +17,8 @@ interface ConnectButtonProps {
  *
  * UX:
  *   - Disconnected: pill button "Connect" → click opens a small connector
- *     picker (Farcaster / Coinbase / Injected, depending on env)
+ *     picker (Farcaster / Coinbase / Browser wallet, with brand icons
+ *     + friendly labels via WalletIcon / connectorLabel)
  *   - Connecting: spinner
  *   - Connected: shows truncated address `0x1234…abcd`, click to disconnect
  *
@@ -112,7 +114,8 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
                   }}
                   className="btn-secondary text-left flex items-center gap-3"
                 >
-                  <span className="font-semibold text-gray-900">{connector.name}</span>
+                  <WalletIcon connector={connector} />
+                  <span className="font-semibold text-gray-900">{connectorLabel(connector)}</span>
                 </button>
               ))}
             </div>
