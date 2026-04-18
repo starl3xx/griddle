@@ -176,7 +176,7 @@ function SolvesSection({ d }: { d: DossierData }) {
                 <td className="py-1.5 px-2 font-mono tracking-wider text-gray-800 dark:text-gray-200"><PuzzlePiece className="inline w-3 h-3 mr-1 text-gray-400 dark:text-gray-500" weight="bold" />{s.answer}</td>
                 <td className="py-1.5 px-2 text-right tabular-nums">{s.serverSolveMs ? formatMs(s.serverSolveMs) : '—'}</td>
                 <td className="py-1.5 px-2">
-                  {s.flag ? <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${s.flag === 'ineligible' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700'}`}>{s.flag}</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                  {s.flag ? <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${s.flag === 'ineligible' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400'}`}>{s.flag}</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
                 </td>
                 <td className="py-1.5 px-2 text-right tabular-nums text-gray-500 dark:text-gray-400">{new Date(s.createdAt).toLocaleDateString()}</td>
               </tr>
