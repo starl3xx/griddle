@@ -11,7 +11,6 @@ import { WORDMARK_BY_ID, WORDMARK_THEMES, isWordmarkId } from '@/lib/wordmarks/c
 interface SolveModalProps {
   dayNumber: number;
   word: string;
-  grid: string;
   solveMs: number;
   unassisted?: boolean;
   /**
@@ -34,7 +33,6 @@ interface SolveModalProps {
 export function SolveModal({
   dayNumber,
   word,
-  grid,
   solveMs,
   unassisted = false,
   earnedWordmarks = [],
@@ -68,7 +66,6 @@ export function SolveModal({
   const handleShare = async () => {
     const text = formatShareText({
       dayNumber,
-      grid,
       solved: true,
       timeMs: solveMs,
       unassisted,
