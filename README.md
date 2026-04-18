@@ -231,15 +231,17 @@ Phases: **M1** Core game · **M2** Polish + deploy · **M3** Social surface · *
 ## Design decisions to preserve
 
 1. The target word is never sent to the client — all solve validation is server-side.
-2. Share cards show the actual grid letters — people can try to solve from a screenshot.
-3. The non-adjacency rule is the only rule. Nothing else.
-4. Every cell is used exactly once.
-5. UI help is ON by default (blocked cells dimmed). Premium users can turn it OFF for an “unassisted” solve marker.
-6. Wallet connection is never required to play.
-7. $5 flat, one-time, forever — not a subscription.
-8. Unassisted solves are marked separately on the leaderboard.
-9. No first-to-solve jackpot — speed doesn’t pay, so bots gain nothing by cheating. Rewards come from streak milestones and share bounties, both immune to speed-cheat.
-10. Anti-bot telemetry has been captured from day one.
+2. Share cards never show grid letters — rich link previews and plain-text shares stay spoiler-safe so every recipient still hits the blur-on-open START gate. The grid is revealed only *after* a player presses Start at griddle.fun.
+3. Equal-footing start. Every player opens to the same blurred grid + Start button, regardless of when they see the puzzle or which share brought them there. The clock begins on their intentional Start press, never on page load.
+4. The non-adjacency rule is the only rule. Nothing else.
+5. Every cell is used exactly once.
+6. UI help is ON by default (blocked cells dimmed). Premium users can turn it OFF for an “unassisted” solve marker.
+7. Wallet connection is never required to play.
+8. Identity has no single anchor. `profile_id` is the canonical key, but wallet, email, and handle are all independent claim anchors that converge on the same profile row. A user can sign in via any one and their history follows — no “reset when you connect a wallet” cliff.
+9. Progress belongs to the player, not the wallet. Solves, streaks, and wordmarks are scoped to `profile_id`, so handle-only users get full history and a later wallet connection joins the record (never wipes and restarts).
+10. The game is always free. Premium is a one-time **$5 unlock** — not a subscription — and opens daily ranked leaderboards, the full archive, streak protection, stats, unassisted mode, and wordmark tracking. Two payment paths: crypto (EIP-2612 permit + burn of $WORD on Base) or fiat (Stripe / Apple Pay); both land in the same `premium_users` ledger.
+11. Unassisted solves are marked separately on the leaderboard.
+12. Anti-bot telemetry has been captured from day one.
 
 ---
 
