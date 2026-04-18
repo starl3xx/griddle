@@ -479,7 +479,7 @@ export function SettingsModal({
             description={
               zen
                 ? 'Timer hidden — just you and the grid'
-                : 'Hide the timer while you play (Zen mode)'
+                : 'Hide the timer while you play'
             }
             checked={zen}
             disabled={false}

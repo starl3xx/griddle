@@ -4034,23 +4034,35 @@ export async function getMtdGrossRevenue(): Promise<number> {
 }
 
 export async function getRevenueSeries(days: number): Promise<Array<{ day: string; crypto: number; fiat: number }>> {
+  // LEFT JOIN against a generate_series so every day in the window
+  // gets a row — days without any unlock land at $0 instead of being
+  // absent. Without this, the Recharts stacked bar renders a gap-ridden
+  // chart that shows only the 2-3 days with actual revenue.
   const rows = await db.execute<{ day: string; crypto: number | string; fiat: number | string }>(sql`
+    WITH day_series AS (
+      SELECT generate_series(
+        date_trunc('day', now()) - (${days - 1}::int || ' days')::interval,
+        date_trunc('day', now()),
+        '1 day'::interval
+      ) AS day
+    )
     SELECT
-      to_char(date_trunc('day', unlocked_at), 'YYYY-MM-DD') AS day,
-      sum(
-        case when source = 'crypto'
-             then coalesce(usdc_amount, ${CRYPTO_FALLBACK_USD})
+      to_char(ds.day, 'YYYY-MM-DD') AS day,
+      coalesce(sum(
+        case when pu.source = 'crypto'
+             then coalesce(pu.usdc_amount, ${CRYPTO_FALLBACK_USD})
              else 0 end
-      )::float AS crypto,
-      sum(
-        case when source = 'fiat' and (escrow_status is null or escrow_status = 'burned')
+      ), 0)::float AS crypto,
+      coalesce(sum(
+        case when pu.source = 'fiat' and (pu.escrow_status is null or pu.escrow_status = 'burned')
              then ${FIAT_PRICE_USD}
              else 0 end
-      )::float AS fiat
-    FROM premium_users
-    WHERE unlocked_at >= now() - (${days}::int || ' days')::interval
-    GROUP BY 1
-    ORDER BY 1 ASC
+      ), 0)::float AS fiat
+    FROM day_series ds
+    LEFT JOIN premium_users pu
+      ON date_trunc('day', pu.unlocked_at) = ds.day
+    GROUP BY ds.day
+    ORDER BY ds.day ASC
   `).then((r) => Array.isArray(r) ? r : r.rows);
   // Drizzle's Neon driver returns Postgres `float` as a JS number in
   // practice, but `sum(numeric)::float` can round-trip as a string
