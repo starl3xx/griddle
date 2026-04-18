@@ -7,6 +7,7 @@ import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X, ClockC
 import { formatMsCompact as formatMs, formatMsClock } from '@/lib/format';
 import { ScatterCalibration, type CalibrationPoint } from './charts/ScatterCalibration';
 import { SpoilerAnswer } from './SpoilerAnswer';
+import { TIER_TONE } from './tierTone';
 
 interface PuzzlesPayload {
   today: {
@@ -39,14 +40,6 @@ interface PuzzlesPayload {
     residualStdDev: number;
   };
 }
-
-const TIER_TONE: Record<string, string> = {
-  Gentle: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300',
-  Easy: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
-  Medium: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300',
-  Hard: 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-300',
-  Brutal: 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300',
-};
 
 /**
  * Puzzles tab — content-ops view. Four sections:

@@ -21,6 +21,7 @@ import { SparklineCard } from './charts/SparklineCard';
 import { TrendLine } from './charts/TrendLine';
 import { StackedBar } from './charts/StackedBar';
 import { SpoilerAnswer } from './SpoilerAnswer';
+import { TIER_TONE } from './tierTone';
 
 interface PulsePayload {
   headline: {
@@ -317,13 +318,6 @@ function HardestWordTile({ today }: { today: PulsePayload['todaysPuzzle'] }) {
       </Card>
     );
   }
-  const tierTone: Record<string, string> = {
-    Gentle: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300',
-    Easy: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
-    Medium: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300',
-    Hard: 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-300',
-    Brutal: 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300',
-  };
   return (
     <Card>
       <CardContent className="flex flex-col gap-1">
@@ -338,7 +332,7 @@ function HardestWordTile({ today }: { today: PulsePayload['todaysPuzzle'] }) {
           size="lg"
         />
         <div className="flex items-center gap-2 text-[11px]">
-          <span className={`rounded px-1.5 py-0.5 font-bold ${tierTone[today.tier] ?? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}>
+          <span className={`rounded px-1.5 py-0.5 font-bold ${TIER_TONE[today.tier] ?? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}>
             {today.tier}
           </span>
           <span className="text-gray-500 dark:text-gray-400">heuristic {today.heuristicScore}</span>

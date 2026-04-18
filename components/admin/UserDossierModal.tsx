@@ -169,7 +169,7 @@ function SolvesSection({ d }: { d: DossierData }) {
               <th className="py-1.5 px-2 text-right">When</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {d.solves.map((s, i) => (
               <tr key={`${s.puzzleId}-${i}`}>
                 <td className="py-1.5 px-2 tabular-nums text-gray-600 dark:text-gray-400">#{s.dayNumber}</td>

@@ -184,7 +184,7 @@ export function UsersTab() {
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">No players found.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-          <table className="min-w-full divide-y divide-gray-100 text-sm">
+          <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-800 text-sm">
             <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Identity</th>
@@ -195,7 +195,7 @@ export function UsersTab() {
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 bg-white dark:bg-gray-900">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 bg-white dark:bg-gray-900">
               {users.map((u) => (
                 u.kind === 'registered' ? (
                   <RegisteredTr key={`r-${u.id}`} u={u} onEdit={() => setEditingUser(u)} onOpen={() => openDossier(u)} />
