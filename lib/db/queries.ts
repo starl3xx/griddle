@@ -860,6 +860,26 @@ export async function getProfileByStripeSessionId(
 }
 
 /**
+ * Lookup by email, case-insensitive. Uses `lower(email)` to hit the
+ * `profiles_email_lower_idx` unique index.
+ *
+ * Pairs with the anti-hijack logic in `upsertProfile`: email is a
+ * user-typed claim, not a verified identity, so we need to surface
+ * existing email ownership as a typed error rather than letting the
+ * caller silently merge into a stranger's row.
+ */
+export async function getProfileByEmail(email: string): Promise<ProfileRow | null> {
+  const normalized = email.trim().toLowerCase();
+  if (normalized.length === 0) return null;
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.email}) = ${normalized}`)
+    .limit(1);
+  return rows.length === 0 ? null : toProfileRow(rows[0]);
+}
+
+/**
  * Upsert a profile. Used by both premium unlock paths:
  *
  *   - **Crypto**: `upsertProfile({ wallet, premiumSource: 'crypto' })`  - 
@@ -946,6 +966,65 @@ export class MergeConflictError extends Error {
 }
 
 /**
+ * Thrown by `upsertProfile` when the supplied handle already belongs
+ * to a profile owned by a different verified identity (wallet, session,
+ * email-verified, or FID). Surfaces the takeover attempt cleanly so the
+ * caller (e.g. /api/premium/verify) can return a 409 rather than
+ * silently overwriting the victim's row. Verified-identity check is
+ * the trust boundary — orphan handle-only profiles remain mergeable
+ * by the legacy claim path.
+ */
+export class HandleTakenError extends Error {
+  constructor(
+    public readonly profileId: number,
+    public readonly handle: string,
+  ) {
+    super(`upsertProfile: handle '${handle}' already belongs to profile ${profileId}`);
+    this.name = 'HandleTakenError';
+  }
+}
+
+/**
+ * Thrown by `upsertProfile` when the supplied email already belongs to
+ * a profile owned by a different verified identity. Same trust-boundary
+ * rationale as `HandleTakenError`; caller decides whether to retry
+ * without the email (crypto path) or reject outright.
+ */
+export class EmailTakenError extends Error {
+  constructor(
+    public readonly profileId: number,
+    public readonly email: string,
+  ) {
+    super(`upsertProfile: email '${email}' already belongs to profile ${profileId}`);
+    this.name = 'EmailTakenError';
+  }
+}
+
+/**
+ * A profile has a verified identity anchor if someone has already
+ * proven ownership via a non-form-input signal. This is the trust
+ * boundary that separates "unclaimed profile — merge safely" from
+ * "belongs to someone else — refuse to take over".
+ *
+ *   - `wallet`             → proved by an on-chain event (crypto unlock,
+ *                            wallet-link signature flow)
+ *   - `stripeSessionId`    → set by the Stripe webhook from a signed
+ *                            event payload
+ *   - `emailVerifiedAt`    → user clicked a magic link to their inbox
+ *   - `farcasterFid`       → Farcaster mini-app connector attested the FID
+ *
+ * A profile with none of these is "orphan" — legacy handle-only rows,
+ * freshly webhook-created email rows awaiting magic-link claim. These
+ * remain mergeable under the existing claim model.
+ */
+function hasVerifiedIdentity(p: ProfileRow): boolean {
+  return p.wallet !== null
+    || p.stripeSessionId !== null
+    || p.emailVerifiedAt !== null
+    || p.farcasterFid !== null;
+}
+
+/**
  * Normalize a possibly-empty / whitespace-only string to null. Used so
  * `upsertProfile({ handle: '' })` is treated the same as omitting
  * `handle` entirely  -  an empty string is never a valid identity, so
@@ -998,33 +1077,24 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // runs, we want to UPDATE that existing row (setting wallet) rather
   // than INSERT a new one — a bare insert would collide on the
   // stripe_session_idx unique index.
-  const [byWallet, byHandle, bySession] = await Promise.all([
+  const [byWallet, byHandle, bySession, byEmail] = await Promise.all([
     wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
     handle ? getProfileByHandle(handle) : Promise.resolve(null),
     typeof stripeSessionId === 'string' && stripeSessionId.length > 0
       ? getProfileByStripeSessionId(stripeSessionId)
       : Promise.resolve(null),
+    typeof email === 'string' && email.length > 0
+      ? getProfileByEmail(email)
+      : Promise.resolve(null),
   ]);
 
-  // Cross-row merge detection. Any two of {byWallet, byHandle, bySession}
-  // pointing at different profile rows is a merge conflict we refuse to
-  // silently resolve — the stateless neon-http driver can't run a
-  // proper CTE merge, so the options are either (a) half-merge and
+  // Cross-row merge detection. Any two of {byWallet, byHandle, bySession,
+  // byEmail} pointing at different profile rows is a merge conflict we
+  // refuse to silently resolve — the stateless neon-http driver can't
+  // run a proper CTE merge, so the options are either (a) half-merge and
   // corrupt identity, or (b) surface a typed error and let the caller
   // decide. We pick (b).
-  //
-  // Pairwise over three lookups:
-  //   byWallet  vs byHandle   — original merge case (handle-only fiat
-  //                             profile + later-linked wallet profile)
-  //   byWallet  vs bySession  — wallet buyer whose stripe session id is
-  //                             already attached to a different profile
-  //                             (e.g. webhook wrote to the email row,
-  //                             but the wallet already owns a profile)
-  //   byHandle  vs bySession  — equivalent case for handle-path fiat
-  //
-  // The earlier byWallet/byHandle-only check is a special case of this
-  // loop; unifying them keeps the pairwise semantics explicit.
-  const candidates = [byWallet, byHandle, bySession];
+  const candidates = [byWallet, byHandle, bySession, byEmail];
   const seenIds = new Set<number>();
   let conflictA: number | null = null;
   let conflictB: number | null = null;
@@ -1039,6 +1109,33 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   }
   if (conflictA !== null && conflictB !== null) {
     throw new MergeConflictError(conflictA, conflictB);
+  }
+
+  // Trust-boundary guard against identity takeover.
+  //
+  // The pairwise check above collapses when only ONE of the four
+  // candidates is non-null — and that's exactly the takeover case we
+  // need to catch. A crypto buyer typing a victim's handle has:
+  //   byWallet  = null   (attacker is new to the site)
+  //   byHandle  = P_victim (verified wallet)
+  //   bySession = null   (crypto path)
+  //   byEmail   = null or mismatched
+  // All pairs involving a null collapse, so the pairwise loop finds
+  // no conflict, and the fall-through merge would overwrite P_victim's
+  // wallet with the attacker's. Same shape for byEmail-only takeover.
+  //
+  // Rule: a weak-signal lookup (byHandle / byEmail) is only a safe
+  // merge target if (a) a verified lookup (byWallet / bySession) agrees,
+  // or (b) the matched profile has no verified identity of its own
+  // (it's an unclaimed / legacy handle-only row).
+  const verifiedMatch = byWallet ?? bySession;
+  if (!verifiedMatch) {
+    if (byHandle && hasVerifiedIdentity(byHandle)) {
+      throw new HandleTakenError(byHandle.id, handle ?? '(unknown)');
+    }
+    if (byEmail && hasVerifiedIdentity(byEmail)) {
+      throw new EmailTakenError(byEmail.id, email ?? '(unknown)');
+    }
   }
 
   // Session-id row merge: bySession points at the same row as any
@@ -1059,9 +1156,11 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
     });
   }
 
-  // Single-row update: either wallet or handle matched an existing row,
-  // OR they both matched the same row. Update in place.
-  const existing = byWallet ?? byHandle;
+  // Single-row update. Prefer byWallet (verified) so a returning user
+  // without a handle change doesn't adopt an unrelated orphan. Fall
+  // through to byHandle / byEmail only when they're orphans (guarded
+  // by the trust-boundary check above).
+  const existing = byWallet ?? byHandle ?? byEmail;
   if (existing) {
     return updateProfileInPlace(existing.id, {
       wallet: wallet ?? existing.wallet,
@@ -1113,17 +1212,33 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // into `upsertProfile`  -  recursion would double the lookup + risk
   // re-entering the merge-conflict branch if the race winner happened
   // to combine wallet+handle differently than we expected.
-  // Also re-query bySession so a concurrent webhook write (or a
-  // session-id collision the initial lookup missed) is recovered
-  // rather than surfaced as "insert rejected but no row findable".
-  const [retryByWallet, retryByHandle, retryBySession] = await Promise.all([
+  //
+  // Re-query ALL FOUR candidate keys. The critical addition is byEmail:
+  // if the insert collided specifically on `profiles_email_lower_idx`
+  // (because another profile already owns this email), the other
+  // lookups all miss and the old code would throw a generic "not
+  // findable" error. Surface the email collision explicitly so the
+  // caller (crypto verify route) can retry without email.
+  const [retryByWallet, retryByHandle, retryBySession, retryByEmail] = await Promise.all([
     wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
     handle ? getProfileByHandle(handle) : Promise.resolve(null),
     typeof stripeSessionId === 'string' && stripeSessionId.length > 0
       ? getProfileByStripeSessionId(stripeSessionId)
       : Promise.resolve(null),
+    typeof email === 'string' && email.length > 0
+      ? getProfileByEmail(email)
+      : Promise.resolve(null),
   ]);
-  const raceWinner = retryByWallet ?? retryByHandle ?? retryBySession;
+  // If the insert failed solely because this email belongs to another
+  // profile (no match on wallet/handle/session), throw the typed
+  // EmailTakenError so the caller retries without email rather than
+  // seeing an opaque internal error.
+  if (
+    !retryByWallet && !retryByHandle && !retryBySession && retryByEmail
+  ) {
+    throw new EmailTakenError(retryByEmail.id, email ?? '(unknown)');
+  }
+  const raceWinner = retryByWallet ?? retryByHandle ?? retryBySession ?? retryByEmail;
   if (!raceWinner) {
     throw new Error(
       'upsertProfile: insert rejected by unique constraint but row not findable on re-query',
@@ -1139,6 +1254,18 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   ) {
     throw new MergeConflictError(retryByWallet.id, retryByHandle.id);
   }
+  // Same trust boundary as the primary path: don't let a race-recovery
+  // weak-signal match take over a profile with verified identity.
+  const retryVerified = retryByWallet ?? retryBySession;
+  if (!retryVerified) {
+    if (retryByHandle && hasVerifiedIdentity(retryByHandle)) {
+      throw new HandleTakenError(retryByHandle.id, handle ?? '(unknown)');
+    }
+    if (retryByEmail && hasVerifiedIdentity(retryByEmail)) {
+      throw new EmailTakenError(retryByEmail.id, email ?? '(unknown)');
+    }
+  }
+
   return updateProfileInPlace(raceWinner.id, {
     wallet: wallet ?? raceWinner.wallet,
     handle: handle ?? raceWinner.handle,
