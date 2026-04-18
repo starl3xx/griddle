@@ -17,11 +17,14 @@ export const SOLVE_OPENERS: readonly string[] = [
 
 /**
  * Pick one opener pseudo-randomly. Deterministic w.r.t. `seed` when
- * provided so tests and SSR can pin the choice; otherwise uses
+ * provided (integers map 1:1 via modulo; fractional seeds floor
+ * first) so tests and SSR can pin the choice; otherwise uses
  * `Math.random()` for live usage.
  */
 export function pickOpener(seed?: number): string {
-  const r = seed == null ? Math.random() : ((seed % 1) + 1) % 1;
-  const i = Math.floor(r * SOLVE_OPENERS.length) % SOLVE_OPENERS.length;
+  const i =
+    seed == null
+      ? Math.floor(Math.random() * SOLVE_OPENERS.length)
+      : Math.abs(Math.floor(seed)) % SOLVE_OPENERS.length;
   return SOLVE_OPENERS[i];
 }

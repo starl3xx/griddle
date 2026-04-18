@@ -225,10 +225,23 @@ export async function POST(
       // anyway so the modal looks the same whether it's a fresh solve
       // or a post-refresh re-trigger. Skip the streak update (this
       // isn't a new solve) but still report the stored streak.
-      const [summary, currentStreak] = await Promise.all([
-        getPostSolveSummary(identity, body.dayNumber, { isPremium }),
-        getCurrentStreakForIdentity(identity),
-      ]);
+      //
+      // Wrapped in try/catch for the same reason the fresh-solve pipe
+      // is: the replay itself has already "succeeded" (the original
+      // solve row stands) so a transient stats failure must not 500
+      // the response — just serve nulls and let the modal degrade.
+      let summary = { averageMs: null as number | null, percentileRank: null as number | null, dailyRank: null as number | null };
+      let currentStreak: number | null = null;
+      try {
+        const [summaryResult, streakResult] = await Promise.all([
+          getPostSolveSummary(identity, body.dayNumber, { isPremium }),
+          getCurrentStreakForIdentity(identity),
+        ]);
+        summary = summaryResult;
+        currentStreak = streakResult;
+      } catch (err) {
+        console.error('[solve] replay-path summary failed', err);
+      }
       return NextResponse.json({
         solved: true,
         serverSolveMs: prior.serverSolveMs,
