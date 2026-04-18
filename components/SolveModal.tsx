@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Crown, Medal, ShareNetwork } from '@phosphor-icons/react';
+import { useEffect, useMemo, useState } from 'react';
+import { Crown, Flame, Medal, ShareNetwork, Trophy } from '@phosphor-icons/react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
 import { SITE_URL } from '@/lib/site';
 import { WORDMARK_BY_ID, WORDMARK_THEMES, isWordmarkId } from '@/lib/wordmarks/catalog';
+import { pickOpener } from '@/lib/opener-phrases';
 
 interface SolveModalProps {
   dayNumber: number;
@@ -20,8 +21,19 @@ interface SolveModalProps {
    */
   earnedWordmarks?: readonly string[];
   /**
+   * Post-solve summary from /api/solve. Every field is null-safe: a
+   * missing datum just hides the affected row rather than failing the
+   * modal render. Anonymous callers see `null` for streak / average /
+   * ranks and the modal collapses to the lean share-first layout.
+   */
+  currentStreak: number | null;
+  averageMs: number | null;
+  percentileRank: number | null;
+  dailyRank: number | null;
+  isPremium: boolean;
+  /**
    * True when the app is running inside a Farcaster mini-app container.
-   * Passed down from page.tsx’s single `useFarcaster()` call so we don’t
+   * Passed down from page.tsx's single `useFarcaster()` call so we don't
    * re-run the async detection cycle on modal mount (which would leave
    * `inMiniApp=false` for the first ~2s after solving — exactly when the
    * user hits Share).
@@ -30,15 +42,37 @@ interface SolveModalProps {
   onClose: () => void;
 }
 
+// `35s`, `1m 12s`, `2m` — reads naturally in comparison copy like
+// "12s faster than your average". Unlike formatMsCompact (which
+// returns `12.3s` / `2.1m`) this drops the decimal and uses a
+// minute-second split so small deltas stay literal.
+function formatDurationShort(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r === 0 ? `${m}m` : `${m}m ${r}s`;
+}
+
 export function SolveModal({
   dayNumber,
   word,
   solveMs,
   unassisted = false,
   earnedWordmarks = [],
+  currentStreak,
+  averageMs,
+  percentileRank,
+  dailyRank,
+  isPremium,
   inMiniApp,
   onClose,
 }: SolveModalProps) {
+  // Pin the opener phrase to this modal instance. `useMemo` with [] keeps
+  // it stable across re-renders so the wording doesn't flicker if a prop
+  // changes (e.g. wordmarks hydrate a tick late).
+  const opener = useMemo(() => pickOpener(), []);
+
   // Narrow the raw id list to typed catalog entries. Unknown ids
   // (future-compat or stale rows) are dropped silently.
   const earnedBadges = earnedWordmarks
@@ -72,7 +106,7 @@ export function SolveModal({
     });
     const embedUrl = `${SITE_URL}/?puzzle=${dayNumber}`;
 
-    // Priority 1: Farcaster cast composer when we’re inside a Farcaster
+    // Priority 1: Farcaster cast composer when we're inside a Farcaster
     // mini-app container. The embed becomes a playable Griddle frame in
     // the cast, so recipients can tap and play without leaving Farcaster.
     if (inMiniApp) {
@@ -80,7 +114,7 @@ export function SolveModal({
       if (result === 'cast') { awardMegaphone(); return; }
       if (result === 'cancelled') return;
       // result === 'failed' → SDK threw or unavailable. Fall through to
-      // the Web Share / clipboard chain so there’s still a share surface.
+      // the Web Share / clipboard chain so there's still a share surface.
     }
 
     // Priority 2: Web Share API — OS handles the UX, no status needed.
@@ -114,7 +148,22 @@ export function SolveModal({
   };
 
   const shareLabel =
-    shareStatus === 'copied' ? 'Copied!' : shareStatus === 'error' ? 'Copy failed' : 'Share';
+    shareStatus === 'copied' ? 'Copied!' : shareStatus === 'error' ? 'Copy failed' : 'Share your score';
+
+  // Average comparison: only meaningful when there's *another* solve to
+  // compare against. A single-solve average equals this solve's time, so
+  // the delta would be 0 — suppress that trivial case to avoid the
+  // "0s faster than your average" nonsense.
+  const avgDelta =
+    averageMs != null && Math.abs(solveMs - averageMs) >= 1000
+      ? solveMs - averageMs
+      : null;
+
+  const showStats =
+    (currentStreak != null && currentStreak > 0) ||
+    avgDelta != null ||
+    percentileRank != null ||
+    (isPremium && dailyRank != null);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
@@ -123,36 +172,34 @@ export function SolveModal({
           <Medal className="w-12 h-12 text-brand" weight="fill" />
         </div>
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
-          Solved!
+          {opener}
         </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 tabular-nums">
-          Griddle #{dayNumber.toString().padStart(3, '0')}
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          You solved{' '}
+          <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+            Griddle #{dayNumber.toString().padStart(3, '0')}
+          </span>{' '}
+          in{' '}
+          <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+            {formatMs(solveMs)}
+          </span>
+          {unassisted && (
+            <span
+              className="text-accent ml-1 inline-flex items-center align-middle"
+              title="Unassisted solve"
+              aria-label="unassisted"
+            >
+              <Crown className="w-3.5 h-3.5" weight="fill" aria-hidden />
+            </span>
+          )}
         </p>
 
         <p className="mt-4 text-3xl sm:text-4xl font-bold uppercase tracking-wider text-brand">
           {word}
         </p>
 
-        <div className="mt-4 flex items-baseline justify-center gap-2">
-          <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-            Time
-          </span>
-          <span className="text-3xl font-black text-gray-900 dark:text-gray-100 tabular-nums">
-            {formatMs(solveMs)}
-          </span>
-          {unassisted && (
-            <span
-              className="text-accent ml-1 inline-flex items-center"
-              title="Unassisted solve"
-              aria-label="unassisted"
-            >
-              <Crown className="w-4 h-4" weight="fill" aria-hidden />
-            </span>
-          )}
-        </div>
-
         {/* Wordmarks earned on THIS solve. Small pill strip beneath
-            the time; absent when nothing new was earned. A user who
+            the word; absent when nothing new was earned. A user who
             already holds every wordmark solves and sees nothing new
             here — correct and intentional. */}
         {earnedBadges.length > 0 && (
@@ -176,10 +223,63 @@ export function SolveModal({
           </div>
         )}
 
+        {showStats && (
+          <div className="mt-5 space-y-2">
+            {currentStreak != null && currentStreak > 0 && (
+              <div className="inline-flex items-center gap-1.5 rounded-pill bg-warning-50 dark:bg-warning-900/30 ring-1 ring-warning-200 dark:ring-warning-700 px-3 py-1 text-xs font-bold text-warning-700 dark:text-warning-300">
+                <Flame className="w-3.5 h-3.5" weight="fill" aria-hidden />
+                {currentStreak}-day streak
+              </div>
+            )}
+
+            {(avgDelta != null || percentileRank != null) && (
+              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                {avgDelta != null && (
+                  <>
+                    <span className="tabular-nums font-semibold">
+                      {formatDurationShort(Math.abs(avgDelta))}
+                    </span>{' '}
+                    {avgDelta < 0 ? 'faster' : 'slower'} than your average
+                  </>
+                )}
+                {avgDelta != null && percentileRank != null && (
+                  <span className="mx-1.5 text-gray-300 dark:text-gray-600">·</span>
+                )}
+                {percentileRank != null && (
+                  <>
+                    Faster than{' '}
+                    <span className="tabular-nums font-semibold">{percentileRank}%</span>{' '}
+                    of solvers
+                  </>
+                )}
+              </p>
+            )}
+
+            {isPremium && dailyRank != null && (
+              <div className="inline-flex items-center gap-1.5 rounded-pill bg-brand-50 dark:bg-brand-900/30 ring-1 ring-brand-200 dark:ring-brand-700 px-3 py-1 text-xs font-bold text-brand-700 dark:text-brand-300">
+                <Trophy className="w-3.5 h-3.5" weight="fill" aria-hidden />
+                Rank #{dailyRank} today
+              </div>
+            )}
+          </div>
+        )}
+
+        <a
+          href="/archive"
+          className="mt-5 block rounded-card border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-left transition-colors duration-fast hover:bg-gray-100 dark:hover:bg-gray-800"
+        >
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">
+            Want to play another?
+          </p>
+          <p className="mt-0.5 text-sm font-semibold text-brand">
+            Visit the Archive →
+          </p>
+        </a>
+
         <button
           type="button"
           onClick={handleShare}
-          className="btn-primary mt-6 w-full relative inline-flex items-center justify-center gap-2"
+          className="btn-primary mt-5 w-full relative inline-flex items-center justify-center gap-2"
           aria-live="polite"
         >
           <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
