@@ -427,11 +427,11 @@ function EditUserModal({
         <div className="space-y-4">
           <Field label="Username">
             <input type="text" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="(unset)"
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand" />
           </Field>
           <Field label="Email">
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="(unset)"
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand" />
           </Field>
 
           <label className="flex items-center gap-3 cursor-pointer">
@@ -449,7 +449,7 @@ function EditUserModal({
               <input type="text" value={reason} onChange={(e) => setReason(e.target.value)}
                 placeholder="e.g. launch contributor, support comp, Farcaster giveaway"
                 maxLength={200}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand" />
               <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Appears in the Grant tab’s Recent Grants audit list.</p>
             </Field>
           )}

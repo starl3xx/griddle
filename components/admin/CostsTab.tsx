@@ -246,7 +246,7 @@ function InlineInput({
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         if (e.key === 'Escape') setDraft(value);
       }}
-      className={`w-full bg-transparent border border-transparent hover:border-gray-200 focus:border-brand focus:bg-white focus:outline-none rounded px-1.5 py-0.5 text-sm ${className ?? ''}`}
+      className={`w-full bg-transparent text-gray-900 dark:text-gray-100 border border-transparent hover:border-gray-200 dark:hover:border-gray-700 focus:border-brand focus:bg-white dark:focus:bg-gray-800 focus:outline-none rounded px-1.5 py-0.5 text-sm ${className ?? ''}`}
     />
   );
 }
