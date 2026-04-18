@@ -7,7 +7,7 @@ import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X, ClockC
 import { formatMsCompact as formatMs, formatMsClock } from '@/lib/format';
 import { ScatterCalibration, type CalibrationPoint } from './charts/ScatterCalibration';
 import { SpoilerAnswer } from './SpoilerAnswer';
-import { TIER_TONE } from './tierTone';
+import { tierTone } from './tierTone';
 
 interface PuzzlesPayload {
   today: {
@@ -129,7 +129,7 @@ export function PuzzlesTab() {
               />
               <div className="font-mono text-[11px] text-gray-500 dark:text-gray-400 mt-1">day #{data.today.dayNumber} · {data.today.date}</div>
               <div className="mt-2 flex items-center gap-2 text-[11px]">
-                <span className={`rounded px-1.5 py-0.5 font-bold ${TIER_TONE[data.today.tier] ?? 'bg-gray-100 dark:bg-gray-800'}`}>{data.today.tier}</span>
+                <span className={`rounded px-1.5 py-0.5 font-bold ${tierTone(data.today.tier)}`}>{data.today.tier}</span>
                 <span className="text-gray-500 dark:text-gray-400">heuristic {data.today.heuristicScore}</span>
               </div>
             </div>
@@ -183,7 +183,7 @@ export function PuzzlesTab() {
                       />
                     </td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.heuristicScore}</td>
-                    <td className="py-1 pl-2 text-right"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${TIER_TONE[p.tier] ?? 'bg-gray-100 dark:bg-gray-800'}`}>{p.tier}</span></td>
+                    <td className="py-1 pl-2 text-right"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tierTone(p.tier)}`}>{p.tier}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -223,7 +223,7 @@ export function PuzzlesTab() {
                     <td className="py-1 px-2 text-right tabular-nums">{p.solves.toLocaleString()}</td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.heuristicScore}</td>
                     <td className="py-1 pl-2 text-right">
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${TIER_TONE[p.tier] ?? 'bg-gray-100 dark:bg-gray-800'}`}>{p.tier}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tierTone(p.tier)}`}>{p.tier}</span>
                     </td>
                   </tr>
                 ))}

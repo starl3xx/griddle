@@ -21,7 +21,7 @@ import { SparklineCard } from './charts/SparklineCard';
 import { TrendLine } from './charts/TrendLine';
 import { StackedBar } from './charts/StackedBar';
 import { SpoilerAnswer } from './SpoilerAnswer';
-import { TIER_TONE } from './tierTone';
+import { tierTone } from './tierTone';
 
 interface PulsePayload {
   headline: {
@@ -332,7 +332,7 @@ function HardestWordTile({ today }: { today: PulsePayload['todaysPuzzle'] }) {
           size="lg"
         />
         <div className="flex items-center gap-2 text-[11px]">
-          <span className={`rounded px-1.5 py-0.5 font-bold ${TIER_TONE[today.tier] ?? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}>
+          <span className={`rounded px-1.5 py-0.5 font-bold ${tierTone(today.tier)}`}>
             {today.tier}
           </span>
           <span className="text-gray-500 dark:text-gray-400">heuristic {today.heuristicScore}</span>
