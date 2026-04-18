@@ -911,8 +911,8 @@ export default function GameClient({
   // True while the user has tapped "Pay with crypto" without a wallet
   // yet — we opened the connect flow, and when sessionWallet flips
   // non-null we auto-open the crypto flow so the tap feels continuous.
-  // Cleared on crypto-flow open, on gate modal close, or on explicit
-  // cancel of the connect picker.
+  // Cleared when the gate modal closes for ANY reason (see the effect
+  // below) so a later unrelated connect can't surprise-pop the flow.
   const pendingCryptoAfterConnectRef = useRef(false);
 
   const handleUnlockCrypto = useCallback(() => {
@@ -930,16 +930,30 @@ export default function GameClient({
     setShowCryptoFlow(true);
   }, [sessionWallet, triggerConnect]);
 
+  // Clear pending crypto intent whenever the gate modal is closed,
+  // regardless of the path that closed it (explicit close, fiat
+  // checkout complete, crypto unlock complete). Keeping this in a
+  // single effect rather than piggy-backing on every setPremiumGate(null)
+  // callsite means new paths that close the gate stay safe by default.
+  useEffect(() => {
+    if (premiumGate === null) {
+      pendingCryptoAfterConnectRef.current = false;
+    }
+  }, [premiumGate]);
+
   // Auto-resume: if the user tapped "Pay with crypto" before
   // connecting, open the crypto flow as soon as the wallet binding
-  // lands. The effect only fires when sessionWallet transitions from
-  // null → value AND the pending ref is set.
+  // lands. The `!premium` guard prevents a stale intent from surfacing
+  // the crypto modal to someone who has already paid via fiat — the
+  // pending ref is cleared on gate close, but the extra check is
+  // cheap insurance against any race where the ref outlives that.
   useEffect(() => {
     if (!sessionWallet) return;
     if (!pendingCryptoAfterConnectRef.current) return;
+    if (premium) return;
     pendingCryptoAfterConnectRef.current = false;
     setShowCryptoFlow(true);
-  }, [sessionWallet]);
+  }, [sessionWallet, premium]);
 
   const handleUpgradeClickedFiat = useCallback(() => {
     trackEvent({ name: 'upgrade_clicked', method: 'fiat' });
@@ -1307,10 +1321,7 @@ export default function GameClient({
           feature={premiumGate}
           sessionWallet={sessionWallet}
           forceHostedFiat={inMiniApp}
-          onClose={() => {
-            pendingCryptoAfterConnectRef.current = false;
-            setPremiumGate(null);
-          }}
+          onClose={() => setPremiumGate(null)}
           onUnlockCrypto={handleUnlockCrypto}
           onUnlockFiat={handleUnlockFiatHosted}
           onUpgradeClickedFiat={handleUpgradeClickedFiat}
