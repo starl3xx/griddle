@@ -199,7 +199,7 @@ export function SolveModal({
         <button
           type="button"
           onClick={onClose}
-          className="mt-3 text-sm text-gray-400 hover:text-gray-600 transition-colors duration-fast"
+          className="mt-3 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-fast"
         >
           close
         </button>

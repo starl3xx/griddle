@@ -601,9 +601,9 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
           <Crown className="w-6 h-6" weight="fill" aria-hidden />
         )}
       </div>
-      <p className="text-sm font-medium text-gray-700 text-center">{statusText}</p>
+      <p className="text-sm font-medium text-gray-700 dark:text-gray-300 text-center">{statusText}</p>
       {phase === 'done' && emailTakenNotice && (
-        <p className="text-[11px] font-medium text-gray-500 text-center max-w-xs">
+        <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 text-center max-w-xs">
           Your email was already on another Griddle account, so we didn’t save it to this profile. You can still claim premium here.
         </p>
       )}
