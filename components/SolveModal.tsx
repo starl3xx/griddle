@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Crown, Flame, Medal, ShareNetwork, Trophy } from '@phosphor-icons/react';
+import { CalendarBlank, Crown, Flame, Medal, ShareNetwork, Trophy } from '@phosphor-icons/react';
 import { formatShareText } from '@/lib/share';
 import { formatMs } from '@/lib/format';
 import { composeCast } from '@/lib/farcaster';
@@ -40,6 +40,16 @@ interface SolveModalProps {
    */
   inMiniApp: boolean;
   onClose: () => void;
+  /**
+   * Opens the Browse modal on the Leaderboard tab (today's day). The
+   * parent is responsible for closing this SolveModal first so the two
+   * surfaces don't stack. Replaces the old `/leaderboard/[day]` page
+   * navigation — the Browse modal is the primary leaderboard surface
+   * everywhere else in the app and the post-solve link now matches.
+   */
+  onOpenLeaderboard: () => void;
+  /** Same deal as onOpenLeaderboard, but opens the Archive tab. */
+  onOpenArchive: () => void;
 }
 
 // `35s`, `1m 12s`, `2m` — reads naturally in comparison copy like
@@ -67,6 +77,8 @@ export function SolveModal({
   isPremium,
   inMiniApp,
   onClose,
+  onOpenLeaderboard,
+  onOpenArchive,
 }: SolveModalProps) {
   // Pin the opener phrase to this modal instance. `useMemo` with [] keeps
   // it stable across re-renders so the wording doesn't flicker if a prop
@@ -174,27 +186,26 @@ export function SolveModal({
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
           {opener}
         </h2>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+        <p className="mt-3 text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200">
           You solved{' '}
-          <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+          <span className="tabular-nums">
             Griddle #{dayNumber.toString().padStart(3, '0')}
-          </span>{' '}
-          in{' '}
-          <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
-            {formatMs(solveMs)}
           </span>
+        </p>
+        <p className="mt-2 flex items-baseline justify-center gap-2 text-5xl sm:text-6xl font-black tabular-nums text-gray-900 dark:text-gray-100">
+          {formatMs(solveMs)}
           {unassisted && (
             <span
-              className="text-accent ml-1 inline-flex items-center align-middle"
+              className="text-accent inline-flex items-center"
               title="Unassisted solve"
               aria-label="unassisted"
             >
-              <Crown className="w-3.5 h-3.5" weight="fill" aria-hidden />
+              <Crown className="w-6 h-6 sm:w-7 sm:h-7" weight="fill" aria-hidden />
             </span>
           )}
         </p>
 
-        <p className="mt-4 text-3xl sm:text-4xl font-bold uppercase tracking-wider text-brand">
+        <p className="mt-3 text-xl font-bold uppercase tracking-widest text-brand">
           {word}
         </p>
 
@@ -264,17 +275,25 @@ export function SolveModal({
           </div>
         )}
 
-        <a
-          href="/archive"
-          className="mt-5 block rounded-card border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-left transition-colors duration-fast hover:bg-gray-100 dark:hover:bg-gray-800"
+        <button
+          type="button"
+          onClick={onOpenArchive}
+          className="mt-5 w-full flex items-center gap-3 rounded-card border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-left transition-colors duration-fast hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">
-            Want to play another?
-          </p>
-          <p className="mt-0.5 text-sm font-semibold text-brand">
-            Visit the Archive →
-          </p>
-        </a>
+          <CalendarBlank
+            className="w-8 h-8 text-brand flex-shrink-0"
+            weight="duotone"
+            aria-hidden
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">
+              Want to play another?
+            </p>
+            <p className="mt-0.5 text-sm font-semibold text-brand">
+              Visit the Archive →
+            </p>
+          </div>
+        </button>
 
         <button
           type="button"
@@ -286,12 +305,13 @@ export function SolveModal({
           {shareLabel}
         </button>
 
-        <a
-          href={`/leaderboard/${dayNumber}`}
-          className="block mt-4 text-sm font-semibold text-brand hover:text-brand-700 transition-colors duration-fast"
+        <button
+          type="button"
+          onClick={onOpenLeaderboard}
+          className="block w-full mt-4 text-sm font-semibold text-brand hover:text-brand-700 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded"
         >
           View today’s leaderboard →
-        </a>
+        </button>
 
         <button
           type="button"

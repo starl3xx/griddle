@@ -1412,6 +1412,14 @@ export default function GameClient({
           isPremium={solveResult.isPremium}
           inMiniApp={inMiniApp}
           onClose={() => setSolveResult(null)}
+          onOpenLeaderboard={() => {
+            setSolveResult(null);
+            setBrowseTab('leaderboard');
+          }}
+          onOpenArchive={() => {
+            setSolveResult(null);
+            setBrowseTab('archive');
+          }}
         />
       )}
     </>
