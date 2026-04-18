@@ -267,12 +267,25 @@ export function useGriddle({
   // the async /api/crumbs fetch resolves.
   const seedFoundWords = useCallback((words: string[]) => {
     if (words.length === 0) return;
+    // Sync foundWordsRef first — the crumb-detection effect reads it
+    // for its dedup check, and a dictionary resolution can land in the
+    // window between setFoundWords below and the ref-sync effect at
+    // the top of the hook, false-passing the dedup for a word that
+    // was already persisted server-side and firing a duplicate POST.
+    // Server is idempotent (ON CONFLICT DO NOTHING) so nothing breaks,
+    // but the ref-as-source-of-truth invariant the rest of this flow
+    // depends on has to hold here too.
+    const known = new Set(foundWordsRef.current);
+    const additions = words.filter((w) => !known.has(w));
+    if (additions.length === 0) return;
+    foundWordsRef.current = [...foundWordsRef.current, ...additions];
     setFoundWords((prev) => {
-      const existing = new Set(prev);
-      const newOnes = words.filter((w) => !existing.has(w));
-      if (newOnes.length === 0) return prev;
-      // Append persisted crumbs after any newly found ones (newest-first)
-      return [...prev, ...newOnes];
+      // Recompute against the latest committed state — prev can diverge
+      // from the ref if a crumb-detection update is queued but hasn’t
+      // flushed yet.
+      const prevSet = new Set(prev);
+      const toAdd = words.filter((w) => !prevSet.has(w));
+      return toAdd.length === 0 ? prev : [...prev, ...toAdd];
     });
   }, []);
 
