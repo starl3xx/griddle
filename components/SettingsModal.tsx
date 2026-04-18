@@ -1036,7 +1036,7 @@ function EditablePhotoRow({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mt-5 first:mt-0 border-t border-gray-100 dark:border-gray-800 first:border-t-0 pt-4 first:pt-0 space-y-3">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{title}</p>
+      <p className="text-sm font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{title}</p>
       {children}
     </div>
   );
