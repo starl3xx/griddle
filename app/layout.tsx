@@ -8,7 +8,7 @@ import {
   SITE_SHORT_DESCRIPTION,
 } from '@/lib/site';
 
-const TITLE_DEFAULT = `${SITE_NAME} — daily 3×3 word puzzle`;
+const TITLE_DEFAULT = `${SITE_NAME} | Daily 3×3 word puzzle`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
