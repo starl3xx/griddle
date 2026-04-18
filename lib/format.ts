@@ -24,6 +24,17 @@ export function formatMsCompact(ms: number): string {
 }
 
 /**
+ * Zero-padded clock format for admin tables where the column is
+ * comparing averages — `formatMsCompact` renders `450ms` / `2.1m` /
+ * `1.9h` which don't align well in a column and force the reader to
+ * re-parse units row-by-row. `HH:MM:SS` lets the eye scan straight
+ * down and compare like against like.
+ */
+export function formatMsClock(ms: number): string {
+  return formatCountdown(Math.max(0, Math.round(Math.abs(ms) / 1000)));
+}
+
+/**
  * Human solve time. Short solves stay compact (`M:SS`) so the common
  * case — a sub-minute to ~45 min finish — reads tight. Anything past an
  * hour switches to `H:MM:SS` so a 13-hour session doesn't render as
