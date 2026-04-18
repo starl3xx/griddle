@@ -8,11 +8,14 @@ import {
   updateStreakForSolve,
   getLifetimeSolveCount,
   getFirstSuccessfulSolveForPuzzle,
+  getPostSolveSummary,
+  getCurrentStreakForIdentity,
 } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { getSessionWallet } from '@/lib/wallet-session';
 import { getSessionProfile } from '@/lib/session-profile';
 import { awardWordmarks } from '@/lib/wordmarks/award';
+import { isSessionPremium } from '@/lib/premium-check';
 
 /**
  * POST /api/solve
@@ -87,6 +90,17 @@ interface SolveResponseBody {
    * Used by the SolveModal earn toast.
    */
   earnedWordmarks?: string[];
+  /**
+   * Post-solve stats payload consumed by the revamped SolveModal. All
+   * fields null-safe so the modal degrades gracefully: anonymous / old-
+   * client / query-failure paths just hide the affected section rather
+   * than failing the whole solve response.
+   */
+  currentStreak: number | null;
+  averageMs: number | null;
+  percentileRank: number | null;
+  dailyRank: number | null;
+  isPremium: boolean;
 }
 
 export async function POST(
@@ -180,11 +194,12 @@ export async function POST(
   // canonical identity for stats (new in this PR) so handle-only and
   // email-auth users — who may never bind a wallet — still see their
   // own solves. A solve can carry both, one, or neither.
-  const [puzzle, loadAndStart, wallet, profileId] = await Promise.all([
+  const [puzzle, loadAndStart, wallet, profileId, isPremium] = await Promise.all([
     getPuzzleWordByDayNumber(body.dayNumber),
     getPuzzleLoadAndStart(sessionId, body.dayNumber),
     getSessionWallet(sessionId),
     getSessionProfile(sessionId),
+    isSessionPremium(sessionId),
   ]);
 
   if (!puzzle) {
@@ -202,18 +217,29 @@ export async function POST(
   // session-only solves fall through to the normal insert path because
   // they carry no cross-device identity to dedupe against.
   const identifiable = wallet != null || profileId != null;
+  const identity = { profileId, wallet };
   if (solved && identifiable) {
-    const prior = await getFirstSuccessfulSolveForPuzzle(
-      { profileId, wallet },
-      puzzle.id,
-    );
+    const prior = await getFirstSuccessfulSolveForPuzzle(identity, puzzle.id);
     if (prior != null) {
+      // Replay path: the solve row already exists. Surface the stats
+      // anyway so the modal looks the same whether it's a fresh solve
+      // or a post-refresh re-trigger. Skip the streak update (this
+      // isn't a new solve) but still report the stored streak.
+      const [summary, currentStreak] = await Promise.all([
+        getPostSolveSummary(identity, body.dayNumber, { isPremium }),
+        getCurrentStreakForIdentity(identity),
+      ]);
       return NextResponse.json({
         solved: true,
         serverSolveMs: prior.serverSolveMs,
         flag: prior.flag,
         word: puzzle.word,
         earnedWordmarks: [],
+        currentStreak,
+        averageMs: summary.averageMs,
+        percentileRank: summary.percentileRank,
+        dailyRank: summary.dailyRank,
+        isPremium,
       });
     }
   }
@@ -263,8 +289,13 @@ export async function POST(
   // identity (wallet OR profile_id). Anonymous session-only solves
   // bypass the pipeline since they have nowhere to store the award.
   let earnedWordmarks: string[] = [];
-  const identity = { profileId, wallet };
-  if (solved && (wallet != null || profileId != null)) {
+  let currentStreak: number | null = null;
+  let summary: { averageMs: number | null; percentileRank: number | null; dailyRank: number | null } = {
+    averageMs: null,
+    percentileRank: null,
+    dailyRank: null,
+  };
+  if (solved && identifiable) {
     try {
       // Flagged solves (ineligible / suspicious) must not advance the
       // streak — a bot chaining flagged solves could otherwise farm
@@ -272,12 +303,18 @@ export async function POST(
       // currentStreak=0 so streak wordmarks are unreachable for flagged
       // solves. Milestone + skill wordmarks still fire (botFlagged
       // already suppresses speed wordmarks inside awardWordmarks).
-      const [{ currentStreak }, lifetimeSolves] = await Promise.all([
+      //
+      // The post-solve summary runs in parallel with streak update +
+      // lifetime count: all three are read-mostly and independent.
+      const [streakResult, lifetimeSolves, summaryResult] = await Promise.all([
         flag === null
           ? updateStreakForSolve(identity, body.dayNumber)
           : Promise.resolve({ currentStreak: 0, longestStreak: 0 }),
         getLifetimeSolveCount(identity),
+        getPostSolveSummary(identity, body.dayNumber, { isPremium }),
       ]);
+      currentStreak = streakResult.currentStreak;
+      summary = summaryResult;
       earnedWordmarks = await awardWordmarks({
         wallet,
         profileId,
@@ -289,15 +326,15 @@ export async function POST(
         resetCount,
         foundWords,
         lifetimeSolves,
-        currentStreak,
+        currentStreak: streakResult.currentStreak,
         botFlagged: flag !== null,
       });
     } catch (err) {
-      // Wordmark awarding is a best-effort side channel. A failure
-      // MUST NOT surface as a 500 — the solve row is already
+      // Wordmark / summary computation is best-effort — a failure
+      // MUST NOT surface as a 500. The solve row is already
       // committed above and the player's primary feedback (solved +
-      // time) is what matters. Log for debugging and return empty.
-      console.error('[solve] wordmark awarding failed', err);
+      // time) is what matters. Log and return with null stats.
+      console.error('[solve] post-solve pipeline failed', err);
       earnedWordmarks = [];
     }
   }
@@ -308,6 +345,11 @@ export async function POST(
     flag,
     word: solved ? puzzle.word : undefined,
     earnedWordmarks,
+    currentStreak,
+    averageMs: summary.averageMs,
+    percentileRank: summary.percentileRank,
+    dailyRank: summary.dailyRank,
+    isPremium,
   });
 }
 

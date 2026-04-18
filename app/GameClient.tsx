@@ -53,6 +53,18 @@ interface InitialPuzzle {
   grid: string;
 }
 
+interface SolveResult {
+  solveMs: number;
+  unassisted: boolean;
+  word: string;
+  earnedWordmarks: string[];
+  currentStreak: number | null;
+  averageMs: number | null;
+  percentileRank: number | null;
+  dailyRank: number | null;
+  isPremium: boolean;
+}
+
 interface GameClientProps {
   initialPuzzle: InitialPuzzle;
   /**
@@ -347,12 +359,7 @@ export default function GameClient({
   // action — we deliberately don't re-arm the first-visit flag.
   const openTutorial = useCallback(() => setShowTutorial(true), []);
 
-  const [solveResult, setSolveResult] = useState<{
-    solveMs: number;
-    unassisted: boolean;
-    word: string;
-    earnedWordmarks: string[];
-  } | null>(null);
+  const [solveResult, setSolveResult] = useState<SolveResult | null>(null);
 
   // Solve reveal is a two-step handoff: /api/solve verdict lands first
   // and populates `pendingSolveResultRef`, then Grid fires
@@ -360,12 +367,7 @@ export default function GameClient({
   // the pending result into state to open SolveModal. Decoupled via ref
   // so a stale SolveModal never opens if the user triggered a reset
   // between verdict and settle.
-  const pendingSolveResultRef = useRef<{
-    solveMs: number;
-    unassisted: boolean;
-    word: string;
-    earnedWordmarks: string[];
-  } | null>(null);
+  const pendingSolveResultRef = useRef<SolveResult | null>(null);
 
   /**
    * Authoritative server-computed solve duration (ms) from the most
@@ -389,6 +391,26 @@ export default function GameClient({
    * adjacent data here to preserve it across the async boundary.
    */
   const earnedWordmarksRef = useRef<string[]>([]);
+  /**
+   * Post-solve summary from /api/solve — streak / average / percentile
+   * / daily rank / premium flag. Same async-handoff reason as the refs
+   * above: the verdict body is captured in handleSolveAttempt, but
+   * only consumed in handleSolved → pendingSolveResultRef two async
+   * beats later.
+   */
+  const solveSummaryRef = useRef<{
+    currentStreak: number | null;
+    averageMs: number | null;
+    percentileRank: number | null;
+    dailyRank: number | null;
+    isPremium: boolean;
+  }>({
+    currentStreak: null,
+    averageMs: null,
+    percentileRank: null,
+    dailyRank: null,
+    isPremium: false,
+  });
 
   /**
    * POST the claimed word to the server. The server compares it against
@@ -422,6 +444,11 @@ export default function GameClient({
           word?: string;
           serverSolveMs?: number | null;
           earnedWordmarks?: string[];
+          currentStreak?: number | null;
+          averageMs?: number | null;
+          percentileRank?: number | null;
+          dailyRank?: number | null;
+          isPremium?: boolean;
         };
         // Capture the server-computed duration for the SolveModal
         // display. Null if the session submitted without loading first
@@ -433,6 +460,15 @@ export default function GameClient({
         earnedWordmarksRef.current = Array.isArray(data.earnedWordmarks)
           ? data.earnedWordmarks
           : [];
+        // Capture the post-solve summary so the revamped modal has
+        // streak / avg / rank by the time it opens.
+        solveSummaryRef.current = {
+          currentStreak: typeof data.currentStreak === 'number' ? data.currentStreak : null,
+          averageMs: typeof data.averageMs === 'number' ? data.averageMs : null,
+          percentileRank: typeof data.percentileRank === 'number' ? data.percentileRank : null,
+          dailyRank: typeof data.dailyRank === 'number' ? data.dailyRank : null,
+          isPremium: data.isPremium === true,
+        };
         // Strict contract: only return solved=true if the server also
         // returned a string `word`. Anything else is a verification
         // failure from the client’s perspective, which causes a shake
@@ -472,6 +508,7 @@ export default function GameClient({
         unassisted: payload.unassisted,
         word: payload.word,
         earnedWordmarks: earnedWordmarksRef.current,
+        ...solveSummaryRef.current,
       };
       // Lock in the displayed time immediately — the visible grid
       // timer freezes here, before the reveal animation even starts,
@@ -487,6 +524,13 @@ export default function GameClient({
       }
       serverSolveMsRef.current = null;
       earnedWordmarksRef.current = [];
+      solveSummaryRef.current = {
+        currentStreak: null,
+        averageMs: null,
+        percentileRank: null,
+        dailyRank: null,
+        isPremium: false,
+      };
     },
     [initialPuzzle.dayNumber],
   );
@@ -1361,6 +1405,11 @@ export default function GameClient({
           solveMs={solveResult.solveMs}
           unassisted={solveResult.unassisted}
           earnedWordmarks={solveResult.earnedWordmarks}
+          currentStreak={solveResult.currentStreak}
+          averageMs={solveResult.averageMs}
+          percentileRank={solveResult.percentileRank}
+          dailyRank={solveResult.dailyRank}
+          isPremium={solveResult.isPremium}
           inMiniApp={inMiniApp}
           onClose={() => setSolveResult(null)}
         />

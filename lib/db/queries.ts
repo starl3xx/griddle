@@ -3074,6 +3074,22 @@ export async function updateStreakForSolve(
  * in README Code Style — the same pattern that bit us on wallet has
  * been observed here too on dynamic routes.
  */
+/**
+ * Read-only streak lookup for an identity. Returns `0` for fully
+ * anonymous callers and for identities that haven't yet earned a
+ * streak row. Does NOT advance or mutate the streak — callers on the
+ * replay path use this in place of `updateStreakForSolve` so a post-
+ * refresh re-trigger of the solve modal doesn't corrupt the table.
+ */
+export async function getCurrentStreakForIdentity(
+  identity: StatsIdentity,
+): Promise<number> {
+  const playerKey = playerKeyFor(identity);
+  if (playerKey == null) return 0;
+  const row = await selectStreakRow(playerKey);
+  return row?.currentStreak ?? 0;
+}
+
 async function selectStreakRow(playerKey: string): Promise<{
   currentStreak: number;
   longestStreak: number;
@@ -3454,6 +3470,95 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
       third: Number(p.third ?? 0),
       topTen: Number(p.top_ten ?? 0),
     },
+  };
+}
+
+// ─── Post-solve summary ────────────────────────────────────────────
+
+export interface PostSolveSummary {
+  /** Personal average solve_ms across all eligible solves (includes today). Null for anonymous or first-ever solvers. */
+  averageMs: number | null;
+  /** 0–100 where 100 = fastest of the field for the given puzzle. Null when caller is anonymous or sole solver. */
+  percentileRank: number | null;
+  /** Absolute position on the day's leaderboard (1 = first). Premium-gated to match `/api/leaderboard/[day]` — null otherwise. */
+  dailyRank: number | null;
+}
+
+/**
+ * Lightweight companion to `getPremiumStats`, scoped to the data the
+ * post-solve modal wants: personal average + today's percentile + today's
+ * rank. Shares the same eligibility rules (solved, wallet-or-profile,
+ * flag null|suspicious, same-day-as-puzzle-date) so the numbers match
+ * what the public leaderboard shows.
+ *
+ * Designed to run on the /api/solve hot path — two parallel queries, no
+ * trend or calendar computation. Returns all-nulls for fully anonymous
+ * callers.
+ */
+export async function getPostSolveSummary(
+  identity: StatsIdentity,
+  dayNumber: number,
+  { isPremium }: { isPremium: boolean },
+): Promise<PostSolveSummary> {
+  const callerKey = playerKeyFor(identity);
+  if (callerKey == null) {
+    return { averageMs: null, percentileRank: null, dailyRank: null };
+  }
+
+  const [avgRows, rankRows] = await Promise.all([
+    db
+      .select({
+        averageMs: sql<number | null>`avg(${solves.serverSolveMs})::int`,
+      })
+      .from(solves)
+      .where(
+        and(
+          solveBelongsTo(identity),
+          eq(solves.solved, true),
+          sql`(${solves.flag} IS NULL OR ${solves.flag} = 'suspicious')`,
+          isNotNull(solves.serverSolveMs),
+        ),
+      ),
+    db.execute<{ rank: number | null; total: number }>(sql`
+      WITH eligible AS (
+        SELECT
+          COALESCE('p:' || s.profile_id::text, s.wallet) AS player_key,
+          MIN(s.server_solve_ms) AS best_ms
+        FROM solves s
+        JOIN puzzles p ON p.id = s.puzzle_id
+        WHERE p.day_number = ${dayNumber}
+          AND s.solved = true
+          AND (s.flag IS NULL OR s.flag = 'suspicious')
+          AND (s.wallet IS NOT NULL OR s.profile_id IS NOT NULL)
+          AND s.server_solve_ms IS NOT NULL
+          AND s.created_at::date = p.date::date
+        GROUP BY player_key
+      )
+      SELECT
+        CASE
+          WHEN EXISTS (SELECT 1 FROM eligible WHERE player_key = ${callerKey}) THEN
+            (SELECT count(*) + 1 FROM eligible
+              WHERE best_ms < (SELECT best_ms FROM eligible WHERE player_key = ${callerKey}))::int
+          ELSE NULL
+        END AS rank,
+        (SELECT count(*) FROM eligible)::int AS total
+    `),
+  ]);
+
+  const rankResolved = Array.isArray(rankRows) ? rankRows : (rankRows.rows ?? []);
+  const { rank, total } = rankResolved[0] ?? { rank: null, total: 0 };
+
+  const percentileRank =
+    rank != null && total > 0
+      ? Math.max(0, Math.min(100, Math.round(((total - rank) / total) * 100)))
+      : null;
+
+  return {
+    averageMs: avgRows[0]?.averageMs ?? null,
+    percentileRank,
+    // Absolute rank is premium-gated (leaderboard mirror); percentile
+    // stays free since it's derived, non-identifying, and motivating.
+    dailyRank: isPremium && rank != null ? rank : null,
   };
 }
 
