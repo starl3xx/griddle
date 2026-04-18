@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X, Eye, EyeSlash, ClockCounterClockwise } from '@phosphor-icons/react';
-import { formatMsCompact as formatMs } from '@/lib/format';
+import { formatMsCompact as formatMs, formatMsClock } from '@/lib/format';
 import { ScatterCalibration, type CalibrationPoint } from './charts/ScatterCalibration';
 
 interface PuzzlesPayload {
@@ -142,7 +142,7 @@ export function PuzzlesTab() {
             <div className="grid grid-cols-2 gap-3">
               <Metric label="Solves" value={data.today.solves.toLocaleString()} />
               <Metric label="Solve rate" value={data.today.solveRate != null ? `${(data.today.solveRate * 100).toFixed(0)}%` : '—'} sub={`${data.today.starts} starts / ${data.today.loads} loads`} />
-              <Metric label="Avg solve" value={data.today.avgServerMs ? formatMs(data.today.avgServerMs) : '—'} sub={data.today.avgClientMs ? `client ${formatMs(data.today.avgClientMs)}` : undefined} />
+              <Metric label="Avg solve" value={data.today.avgServerMs ? formatMsClock(data.today.avgServerMs) : '—'} sub={data.today.avgClientMs ? `client ${formatMsClock(data.today.avgClientMs)}` : undefined} />
               <Metric label="Wordmarks" value={data.today.wordmarksEarned.toLocaleString()} />
             </div>
             <div>
@@ -225,14 +225,7 @@ export function PuzzlesTab() {
                   <tr key={p.puzzleId} className="border-t border-gray-100">
                     <td className="py-1 pr-2 tabular-nums">#{p.dayNumber}</td>
                     <td className="py-1 px-2 font-mono text-[11px] text-gray-500">{p.date}</td>
-                    <td className="py-1 px-2">
-                      <SpoilerAnswer
-                        answer={p.answer}
-                        revealed={revealed.has(p.puzzleId)}
-                        onToggle={() => toggleReveal(p.puzzleId)}
-                        size="sm"
-                      />
-                    </td>
+                    <td className="py-1 px-2 font-mono tracking-wider text-gray-800">{p.answer}</td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.solves.toLocaleString()}</td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.heuristicScore}</td>
                     <td className="py-1 pl-2 text-right">
@@ -340,11 +333,12 @@ function formatSignedMs(ms: number): string {
 /**
  * Click-to-reveal for puzzle answers. Modeled on Vercel’s env-var UI:
  * hidden by default (so the admin doesn’t spoil today/upcoming by
- * walking past the tab), revealed on explicit click, and the toggle
- * is a button — not just hover — so the reveal survives a tap and
- * can be toggled back off. Past answers share the same affordance
- * for visual consistency, even though they’re no longer secrets.
+ * walking past the tab), revealed on explicit click. Bullet substitution
+ * (not blur) is used for the hidden state — blurred bold text still leaks
+ * word shape, and bullets also hide the exact letter count since every
+ * puzzle is padded to the same width (`MAX_WIDTH`).
  */
+const MAX_WIDTH = 12;
 function SpoilerAnswer({
   answer,
   revealed,
@@ -358,16 +352,15 @@ function SpoilerAnswer({
 }) {
   const label = revealed ? 'Hide answer' : 'Reveal answer';
   const Icon = revealed ? EyeSlash : Eye;
+  const hidden = '•'.repeat(MAX_WIDTH);
   if (size === 'lg') {
     return (
       <div className="inline-flex items-center gap-2">
         <span
-          className={`text-2xl font-black tracking-widest text-gray-900 transition-[filter,color] ${
-            revealed ? '' : 'blur-sm select-none text-gray-500'
-          }`}
+          className="text-2xl font-black tracking-widest text-gray-900"
           aria-hidden={!revealed}
         >
-          {answer.toUpperCase()}
+          {revealed ? answer.toUpperCase() : hidden}
         </span>
         <button
           type="button"
@@ -389,11 +382,8 @@ function SpoilerAnswer({
       title={label}
       className="group inline-flex items-center gap-1.5 font-mono tracking-wider text-gray-800"
     >
-      <span
-        className={`transition-[filter] ${revealed ? '' : 'blur-sm select-none text-gray-500'}`}
-        aria-hidden={!revealed}
-      >
-        {answer}
+      <span aria-hidden={!revealed}>
+        {revealed ? answer : hidden}
       </span>
       <Icon className="w-3 h-3 text-gray-400 group-hover:text-gray-700 transition-colors" weight="bold" />
     </button>
@@ -427,7 +417,7 @@ function DifficultyList({ title, rows }: {
                 <th className="py-1 pr-2 text-left">Day</th>
                 <th className="py-1 px-2 text-left">Answer</th>
                 <th className="py-1 px-2 text-right">Solves</th>
-                <th className="py-1 px-2 text-right">Avg ms</th>
+                <th className="py-1 px-2 text-right">Avg solve</th>
                 <th className="py-1 pl-2 text-right">Heuristic</th>
               </tr>
             </thead>
@@ -437,7 +427,7 @@ function DifficultyList({ title, rows }: {
                   <td className="py-1 pr-2 tabular-nums text-gray-600">#{r.dayNumber}</td>
                   <td className="py-1 px-2 font-mono tracking-wider text-gray-800">{r.answer}</td>
                   <td className="py-1 px-2 text-right tabular-nums">{r.solves}</td>
-                  <td className="py-1 px-2 text-right tabular-nums font-bold">{formatMs(r.avgMs)}</td>
+                  <td className="py-1 px-2 text-right tabular-nums font-bold">{formatMsClock(r.avgMs)}</td>
                   <td className="py-1 pl-2 text-right tabular-nums">{r.heuristicScore}</td>
                 </tr>
               ))}
