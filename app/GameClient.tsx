@@ -909,6 +909,13 @@ export default function GameClient({
    */
   const [showCryptoFlow, setShowCryptoFlow] = useState(false);
 
+  // True while the user has tapped "Pay with crypto" without a wallet
+  // yet — we opened the connect flow, and when sessionWallet flips
+  // non-null we auto-open the crypto flow so the tap feels continuous.
+  // Cleared when the gate modal closes for ANY reason (see the effect
+  // below) so a later unrelated connect can't surprise-pop the flow.
+  const pendingCryptoAfterConnectRef = useRef(false);
+
   const handleUnlockCrypto = useCallback(() => {
     trackEvent({ name: 'upgrade_clicked', method: 'crypto' });
     // checkout_started fires from PremiumCryptoFlow at the actual
@@ -916,8 +923,38 @@ export default function GameClient({
     // would be redundant with upgrade_clicked in the same tick and
     // would blend different semantics with the fiat path (which
     // fires started only after Stripe session creation succeeds).
+    if (!sessionWallet) {
+      pendingCryptoAfterConnectRef.current = true;
+      triggerConnect();
+      return;
+    }
     setShowCryptoFlow(true);
-  }, []);
+  }, [sessionWallet, triggerConnect]);
+
+  // Clear pending crypto intent whenever the gate modal is closed,
+  // regardless of the path that closed it (explicit close, fiat
+  // checkout complete, crypto unlock complete). Keeping this in a
+  // single effect rather than piggy-backing on every setPremiumGate(null)
+  // callsite means new paths that close the gate stay safe by default.
+  useEffect(() => {
+    if (premiumGate === null) {
+      pendingCryptoAfterConnectRef.current = false;
+    }
+  }, [premiumGate]);
+
+  // Auto-resume: if the user tapped "Pay with crypto" before
+  // connecting, open the crypto flow as soon as the wallet binding
+  // lands. The `!premium` guard prevents a stale intent from surfacing
+  // the crypto modal to someone who has already paid via fiat — the
+  // pending ref is cleared on gate close, but the extra check is
+  // cheap insurance against any race where the ref outlives that.
+  useEffect(() => {
+    if (!sessionWallet) return;
+    if (!pendingCryptoAfterConnectRef.current) return;
+    if (premium) return;
+    pendingCryptoAfterConnectRef.current = false;
+    setShowCryptoFlow(true);
+  }, [sessionWallet, premium]);
 
   const handleUpgradeClickedFiat = useCallback(() => {
     trackEvent({ name: 'upgrade_clicked', method: 'fiat' });
