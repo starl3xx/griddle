@@ -166,7 +166,7 @@ export function LeaderboardPanel({
                 <span className="text-xs font-bold text-gray-400 tabular-nums w-8">
                   #{e.rank}
                 </span>
-                <Avatar pfpUrl={e.avatarUrl} size="xs" />
+                <Avatar pfpUrl={e.avatarUrl} seed={e.handle ?? e.playerKey} size="xs" />
                 {/* Name + wordmark badges share a flex-1 shrinkable
                     container so the name truncates instead of pushing
                     the badges off-row on tight widths. min-w-0 is

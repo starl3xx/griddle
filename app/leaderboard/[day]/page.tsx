@@ -56,7 +56,7 @@ export default async function LeaderboardPage({
                 <span className="text-xs font-bold text-gray-400 tabular-nums w-8">
                   #{e.rank}
                 </span>
-                <Avatar pfpUrl={e.avatarUrl} size="xs" />
+                <Avatar pfpUrl={e.avatarUrl} seed={e.handle ?? e.playerKey} size="xs" />
                 <div className="flex-1 min-w-0 flex items-center gap-2">
                   <span
                     className={`text-sm truncate ${

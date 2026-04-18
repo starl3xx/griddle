@@ -1012,6 +1012,7 @@ export default function GameClient({
         onClick={() => setShowSettings(true)}
         avatarUrl={profile?.avatarUrl ?? null}
         pfpUrl={pfpUrl}
+        seed={profile?.handle ?? sessionWallet ?? profile?.email ?? null}
       />
 
       <main className="flex-1 flex flex-col items-center px-4 pt-4 pb-6 gap-6">

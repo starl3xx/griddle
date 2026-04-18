@@ -98,7 +98,7 @@ export function StatsPanel({
     <>
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Avatar pfpUrl={pfpUrl} />
+        <Avatar pfpUrl={pfpUrl} seed={username ?? wallet} />
         <div className="min-w-0">
           <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 truncate">
             {label}

@@ -85,3 +85,22 @@ export function slugifyUsername(raw: string): string {
   }
   return s;
 }
+
+/**
+ * Suggest a starter username for a wallet-first signup. The wallet
+ * address has no human-meaningful component, so we surface a stable
+ * `griddle_<6 hex>` shape derived from the address suffix — the user
+ * can keep it or edit it before submitting. Output is guaranteed to
+ * pass `validateUsername`. Server-side `slugifyUsername` would catch
+ * any drift, but matching the validator here means the onboarding
+ * input doesn't render an error on its own pre-filled value.
+ */
+export function suggestUsernameFromWallet(address: string): string {
+  const hex = address.toLowerCase().replace(/[^a-f0-9]/g, '');
+  // Pull the last 6 hex chars when available; very short or malformed
+  // input falls back to the slugifier's `player` default. The address
+  // suffix is more identifying for a viewer scanning multiple users
+  // than the prefix, which is overwhelmingly `0x000…` for vanity wallets.
+  const tail = hex.slice(-6) || 'player';
+  return slugifyUsername(`griddle_${tail}`);
+}
