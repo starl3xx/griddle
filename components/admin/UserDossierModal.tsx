@@ -100,7 +100,7 @@ export function UserDossierModal({
 
         <div className="p-5 space-y-5">
           {loading && <div className="flex justify-center py-12"><CircleNotch className="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>}
-          {error && <p className="text-sm text-red-600 text-center py-8">{error}</p>}
+          {error && <p className="text-sm text-red-600 dark:text-red-400 text-center py-8">{error}</p>}
 
           {data && (
             <>
@@ -126,7 +126,7 @@ function SummarySection({ d }: { d: DossierData }) {
         <Kv k="Profile id" v={s.profileId != null ? `#${s.profileId}` : '—'} />
         <Kv k="Handle" v={s.handle ?? '—'} />
         <Kv k="Email" v={s.email ? (
-          <span className="inline-flex items-center gap-1">{s.email}{s.emailVerifiedAt && <Check className="w-3 h-3 text-emerald-600" weight="bold" />}</span>
+          <span className="inline-flex items-center gap-1">{s.email}{s.emailVerifiedAt && <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" weight="bold" />}</span>
         ) : '—'} />
         <Kv k="Wallet" v={s.wallet ? <code className="text-[11px]">{s.wallet.slice(0, 8)}…{s.wallet.slice(-6)}</code> : '—'} />
         <Kv k="Session" v={s.sessionId ? <code className="text-[11px]">{s.sessionId.slice(0, 12)}…</code> : '—'} />
@@ -176,7 +176,7 @@ function SolvesSection({ d }: { d: DossierData }) {
                 <td className="py-1.5 px-2 font-mono tracking-wider text-gray-800 dark:text-gray-200"><PuzzlePiece className="inline w-3 h-3 mr-1 text-gray-400 dark:text-gray-500" weight="bold" />{s.answer}</td>
                 <td className="py-1.5 px-2 text-right tabular-nums">{s.serverSolveMs ? formatMs(s.serverSolveMs) : '—'}</td>
                 <td className="py-1.5 px-2">
-                  {s.flag ? <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${s.flag === 'ineligible' ? 'bg-red-100 dark:bg-red-900/40 text-red-700' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700'}`}>{s.flag}</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                  {s.flag ? <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${s.flag === 'ineligible' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700'}`}>{s.flag}</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
                 </td>
                 <td className="py-1.5 px-2 text-right tabular-nums text-gray-500 dark:text-gray-400">{new Date(s.createdAt).toLocaleDateString()}</td>
               </tr>

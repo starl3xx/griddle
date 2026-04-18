@@ -68,8 +68,8 @@ export function CohortHeatmap({ cohorts }: { cohorts: CohortCell[] }) {
 function HeatCell({ pct }: { pct: number }) {
   // Bucket pct into color intensity. 0% = plain; 50%+ = strong.
   const bg =
-    pct >= 0.5 ? 'bg-emerald-500 text-white'
-    : pct >= 0.3 ? 'bg-emerald-300 text-emerald-900'
+    pct >= 0.5 ? 'bg-emerald-500 dark:bg-emerald-700 text-white'
+    : pct >= 0.3 ? 'bg-emerald-300 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-100'
     : pct >= 0.15 ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300'
     : pct > 0 ? 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
     : 'bg-gray-50 dark:bg-gray-800 text-gray-300 dark:text-gray-600';

@@ -179,7 +179,7 @@ export function UsersTab() {
       {loading ? (
         <div className="flex justify-center py-12"><CircleNotch className="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>
       ) : error ? (
-        <p className="text-sm text-red-600 text-center py-8">{error}</p>
+        <p className="text-sm text-red-600 dark:text-red-400 text-center py-8">{error}</p>
       ) : users.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">No players found.</p>
       ) : (
@@ -440,7 +440,7 @@ function EditUserModal({
               <Crown className="w-4 h-4 text-accent" weight="fill" aria-hidden />Premium
             </span>
             {user.premium && user.premiumSource && !premium && (
-              <span className="text-[10px] text-red-600 font-bold uppercase tracking-wider">will revoke</span>
+              <span className="text-[10px] text-red-600 dark:text-red-400 font-bold uppercase tracking-wider">will revoke</span>
             )}
           </label>
 
@@ -454,7 +454,7 @@ function EditUserModal({
             </Field>
           )}
 
-          {error && <p className="text-[12px] text-red-600">{error}</p>}
+          {error && <p className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
 
           <div className="flex gap-2">
             <button type="button" onClick={save} disabled={saving || deleting} className="btn-primary flex-1 text-sm">
@@ -468,11 +468,11 @@ function EditUserModal({
           <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
             {confirmDelete ? (
               <div className="flex items-center gap-2">
-                <p className="flex-1 text-[11px] text-red-700">
+                <p className="flex-1 text-[11px] text-red-700 dark:text-red-400">
                   Delete this profile? Solves and wordmarks will be detached, not removed.
                 </p>
                 <button type="button" onClick={remove} disabled={deleting}
-                  className="py-2 px-3 rounded-btn text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60">
+                  className="py-2 px-3 rounded-btn text-xs font-bold text-white bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-600 disabled:opacity-60">
                   {deleting ? 'Deleting…' : 'Delete'}
                 </button>
                 <button type="button" onClick={() => setConfirmDelete(false)} disabled={deleting}
@@ -480,7 +480,7 @@ function EditUserModal({
               </div>
             ) : (
               <button type="button" onClick={() => setConfirmDelete(true)}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:text-red-700">
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-400">
                 <Trash className="w-3.5 h-3.5" weight="bold" aria-hidden />Delete profile
               </button>
             )}

@@ -130,7 +130,7 @@ export function CostsTab() {
             <Receipt className="h-4 w-4" weight="bold" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Monthly op costs</span>
           </div>
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
           {(rows ?? []).length === 0 ? (
             <p className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">No cost rows yet. Click Add row.</p>
           ) : (
@@ -182,7 +182,7 @@ export function CostsTab() {
                     </td>
                     <td className="py-1 pl-2 text-right">
                       <button type="button" onClick={() => deleteRow(r.id)} disabled={savingId === r.id} aria-label="Delete row"
-                        className="text-gray-400 dark:text-gray-500 hover:text-red-600 disabled:opacity-50">
+                        className="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50">
                         <Trash className="w-4 h-4" weight="bold" />
                       </button>
                     </td>

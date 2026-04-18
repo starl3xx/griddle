@@ -292,7 +292,7 @@ export function PuzzlesTab() {
                         <td className="py-1 px-2 text-right tabular-nums">{p.heuristic}</td>
                         <td className="py-1 px-2 text-right tabular-nums">{formatMs(p.observedAvgMs)}</td>
                         <td className="py-1 px-2 text-right tabular-nums text-gray-500 dark:text-gray-400">{formatMs(predicted)}</td>
-                        <td className={`py-1 pl-2 text-right tabular-nums font-bold ${p.residual > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                        <td className={`py-1 pl-2 text-right tabular-nums font-bold ${p.residual > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                           {formatSignedMs(p.residual)}
                         </td>
                       </tr>

@@ -177,8 +177,8 @@ export function FunnelTab() {
                       {retainedFromPrev !== null && (
                         <span
                           className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                            retainedFromPrev < 0.3 ? 'bg-red-100 dark:bg-red-900/40 text-red-700'
-                            : retainedFromPrev < 0.6 ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700'
+                            retainedFromPrev < 0.3 ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
+                            : retainedFromPrev < 0.6 ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400'
                             : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
                           }`}
                           title="% of previous stage that made it to this stage"

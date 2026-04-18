@@ -10,7 +10,7 @@ export type Tone = 'ok' | 'warning' | 'error' | 'accent';
 function deltaPill(delta: number | null, kind: 'abs' | 'pct') {
   if (delta === null || !Number.isFinite(delta)) return null;
   const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '–';
-  const color = delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-red-600' : 'text-gray-400 dark:text-gray-500';
+  const color = delta > 0 ? 'text-emerald-600 dark:text-emerald-400' : delta < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500';
   const str = kind === 'pct'
     ? `${Math.abs(delta * 100).toFixed(1)}%`
     : Math.abs(Math.round(delta)).toLocaleString();
