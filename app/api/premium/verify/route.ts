@@ -3,11 +3,13 @@ import { createPublicClient, http, parseEventLogs } from 'viem';
 import { base } from 'viem/chains';
 import { griddlePremiumAbi } from '@/lib/contracts/griddlePremiumAbi';
 import { getGriddlePremiumAddress } from '@/lib/contracts/addresses';
-import { recordCryptoUnlock } from '@/lib/db/queries';
+import { recordCryptoUnlock, HandleTakenError, EmailTakenError } from '@/lib/db/queries';
 import { recordFunnelEvent } from '@/lib/funnel/record';
 import { getSessionId } from '@/lib/session';
 import { isValidAddress } from '@/lib/address';
 import { checkRateLimit, rateLimitResponseInit } from '@/lib/rate-limit';
+import { validateUsername } from '@/lib/username';
+import { isValidEmail, normalizeEmail } from '@/lib/email';
 
 /**
  * POST /api/premium/verify
@@ -40,6 +42,21 @@ const publicClient = createPublicClient({
 
 interface VerifyBody {
   txHash?: string;
+  /**
+   * Handle the player chose in the inline unlock form. Required when
+   * no profile yet exists for this wallet (so we have a second identity
+   * anchor alongside the wallet). Client MAY still send it on repeat
+   * unlocks — validated + ignored if it would collide with another
+   * profile's handle.
+   */
+  handle?: string;
+  /**
+   * Optional email from the inline unlock form. Stored on
+   * `premium_users.email` and `profiles.email`. When present it
+   * becomes the durable claim anchor for later magic-link sign-in on
+   * a different device.
+   */
+  email?: string;
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -61,6 +78,36 @@ export async function POST(req: Request): Promise<NextResponse> {
   const txHash = body.txHash;
   if (typeof txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
     return NextResponse.json({ error: 'txHash must be 0x + 64 hex' }, { status: 400 });
+  }
+
+  // Optional handle — validated here rather than deeper in the stack
+  // so a bad handle rejects with 400 before we kick off a receipt
+  // read. Null when the client didn't collect one (signed-in user with
+  // a profile already, or pre-M6 client that doesn't know about the
+  // inline form).
+  let handle: string | null = null;
+  if (typeof body.handle === 'string' && body.handle.trim().length > 0) {
+    const normalized = body.handle.trim().toLowerCase();
+    const validation = validateUsername(normalized);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: validation.error ?? 'invalid handle' },
+        { status: 400 },
+      );
+    }
+    handle = normalized;
+  }
+
+  // Optional email — same permissive stance. A malformed email is
+  // still a 400 (typo caught early beats a silently-dropped claim
+  // anchor) but omitting it entirely is fine: handle + wallet already
+  // give us two anchors on the crypto path.
+  let email: string | null = null;
+  if (typeof body.email === 'string' && body.email.trim().length > 0) {
+    if (!isValidEmail(body.email)) {
+      return NextResponse.json({ error: 'invalid email' }, { status: 400 });
+    }
+    email = normalizeEmail(body.email);
   }
 
   const sessionId = await getSessionId();
@@ -118,14 +165,71 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'event user is not a valid address' }, { status: 400 });
   }
 
+  // Attempt the unlock with the supplied identity anchors. Two typed
+  // errors from upsertProfile need opposite treatment:
+  //
+  //   - `HandleTakenError`: another profile (with a verified identity)
+  //     owns this handle. Surface as 409 so the client re-opens the
+  //     identity form with the already-landed txHash preserved;
+  //     subsequent retries only re-call this verify route, never the
+  //     on-chain payment.
+  //
+  //   - `EmailTakenError`: another profile owns this email. Retrying
+  //     the form can't fix it, so we retry server-side with email=null
+  //     so the handle still lands on the profile. The `premium_users`
+  //     row already captured the email as a transaction snapshot
+  //     (no unique constraint there), so the audit trail survives
+  //     even though the profile doesn't adopt the collided email.
+  //     Client is told via `emailTaken: true` so the UI can explain.
+  let emailTaken = false;
   try {
-    await recordCryptoUnlock({ wallet, txHash, usdcAmount: usdcIn, wordBurned });
+    await recordCryptoUnlock({ wallet, txHash, usdcAmount: usdcIn, wordBurned, handle, email });
   } catch (err) {
-    console.error('[premium/verify] recordCryptoUnlock failed', err);
-    return NextResponse.json(
-      { error: 'failed to record unlock' },
-      { status: 500 },
-    );
+    if (err instanceof HandleTakenError) {
+      return NextResponse.json(
+        { error: 'That username is taken.', code: 'handle_taken', wallet, txHash },
+        { status: 409 },
+      );
+    }
+    if (err instanceof EmailTakenError) {
+      console.warn(
+        '[premium/verify] email already owned by another profile; retrying without email',
+        { wallet, txHash },
+      );
+      emailTaken = true;
+      try {
+        await recordCryptoUnlock({
+          wallet,
+          txHash,
+          usdcAmount: usdcIn,
+          wordBurned,
+          handle,
+          email: null,
+        });
+      } catch (retryErr) {
+        // Retry can still fail if the handle is ALSO taken — surface
+        // as 409 so the client can re-prompt. Any other error is a
+        // 500; the on-chain burn already landed, so a re-verify on
+        // next page load picks up premium via the wallet-keyed read.
+        if (retryErr instanceof HandleTakenError) {
+          return NextResponse.json(
+            { error: 'That username is taken.', code: 'handle_taken', wallet, txHash },
+            { status: 409 },
+          );
+        }
+        console.error('[premium/verify] retry-without-email also failed', retryErr);
+        return NextResponse.json(
+          { error: 'failed to record unlock' },
+          { status: 500 },
+        );
+      }
+    } else {
+      console.error('[premium/verify] recordCryptoUnlock failed', err);
+      return NextResponse.json(
+        { error: 'failed to record unlock' },
+        { status: 500 },
+      );
+    }
   }
 
   try {
@@ -137,5 +241,5 @@ export async function POST(req: Request): Promise<NextResponse> {
     console.warn('[premium/verify] funnel telemetry emit failed', err);
   }
 
-  return NextResponse.json({ premium: true, wallet, txHash });
+  return NextResponse.json({ premium: true, wallet, txHash, emailTaken });
 }

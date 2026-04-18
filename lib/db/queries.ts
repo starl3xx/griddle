@@ -838,6 +838,48 @@ export async function getProfileByHandle(handle: string): Promise<ProfileRow | n
 }
 
 /**
+ * Lookup by Stripe checkout session id. The partial unique index
+ * `profiles_stripe_session_idx` guarantees at most one row per
+ * session id, so this returns null or a single profile.
+ *
+ * Used by `upsertProfile` to find an email-only profile created by
+ * the Stripe webhook (M6-premium-email-anchor) when the same buyer
+ * later connects a wallet — we link the wallet into that existing
+ * row rather than inserting a duplicate and colliding on the unique
+ * index.
+ */
+export async function getProfileByStripeSessionId(
+  stripeSessionId: string,
+): Promise<ProfileRow | null> {
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.stripeSessionId, stripeSessionId))
+    .limit(1);
+  return rows.length === 0 ? null : toProfileRow(rows[0]);
+}
+
+/**
+ * Lookup by email, case-insensitive. Uses `lower(email)` to hit the
+ * `profiles_email_lower_idx` unique index.
+ *
+ * Pairs with the anti-hijack logic in `upsertProfile`: email is a
+ * user-typed claim, not a verified identity, so we need to surface
+ * existing email ownership as a typed error rather than letting the
+ * caller silently merge into a stranger's row.
+ */
+export async function getProfileByEmail(email: string): Promise<ProfileRow | null> {
+  const normalized = email.trim().toLowerCase();
+  if (normalized.length === 0) return null;
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.email}) = ${normalized}`)
+    .limit(1);
+  return rows.length === 0 ? null : toProfileRow(rows[0]);
+}
+
+/**
  * Upsert a profile. Used by both premium unlock paths:
  *
  *   - **Crypto**: `upsertProfile({ wallet, premiumSource: 'crypto' })`  - 
@@ -891,6 +933,19 @@ export interface UpsertProfileInput {
    *     so a replayed webhook can't double-insert the same session
    */
   stripeSessionId?: string | null;
+  /**
+   * Email address — same three-state semantics as stripeSessionId:
+   *   - `undefined` (omitted)  -  keep existing value on update
+   *   - `null`                 -  explicitly clear
+   *   - `string`               -  set to new value (will be lowercased)
+   *
+   * When setting from a just-completed purchase, the caller is
+   * responsible for validation (see `lib/email.ts`). The partial
+   * unique index `profiles_email_lower_idx` prevents collision with
+   * another profile's email; callers should catch the unique-violation
+   * from a conflicting email.
+   */
+  email?: string | null;
 }
 
 /**
@@ -908,6 +963,65 @@ export class MergeConflictError extends Error {
     );
     this.name = 'MergeConflictError';
   }
+}
+
+/**
+ * Thrown by `upsertProfile` when the supplied handle already belongs
+ * to a profile owned by a different verified identity (wallet, session,
+ * email-verified, or FID). Surfaces the takeover attempt cleanly so the
+ * caller (e.g. /api/premium/verify) can return a 409 rather than
+ * silently overwriting the victim's row. Verified-identity check is
+ * the trust boundary — orphan handle-only profiles remain mergeable
+ * by the legacy claim path.
+ */
+export class HandleTakenError extends Error {
+  constructor(
+    public readonly profileId: number,
+    public readonly handle: string,
+  ) {
+    super(`upsertProfile: handle '${handle}' already belongs to profile ${profileId}`);
+    this.name = 'HandleTakenError';
+  }
+}
+
+/**
+ * Thrown by `upsertProfile` when the supplied email already belongs to
+ * a profile owned by a different verified identity. Same trust-boundary
+ * rationale as `HandleTakenError`; caller decides whether to retry
+ * without the email (crypto path) or reject outright.
+ */
+export class EmailTakenError extends Error {
+  constructor(
+    public readonly profileId: number,
+    public readonly email: string,
+  ) {
+    super(`upsertProfile: email '${email}' already belongs to profile ${profileId}`);
+    this.name = 'EmailTakenError';
+  }
+}
+
+/**
+ * A profile has a verified identity anchor if someone has already
+ * proven ownership via a non-form-input signal. This is the trust
+ * boundary that separates "unclaimed profile — merge safely" from
+ * "belongs to someone else — refuse to take over".
+ *
+ *   - `wallet`             → proved by an on-chain event (crypto unlock,
+ *                            wallet-link signature flow)
+ *   - `stripeSessionId`    → set by the Stripe webhook from a signed
+ *                            event payload
+ *   - `emailVerifiedAt`    → user clicked a magic link to their inbox
+ *   - `farcasterFid`       → Farcaster mini-app connector attested the FID
+ *
+ * A profile with none of these is "orphan" — legacy handle-only rows,
+ * freshly webhook-created email rows awaiting magic-link claim. These
+ * remain mergeable under the existing claim model.
+ */
+function hasVerifiedIdentity(p: ProfileRow): boolean {
+  return p.wallet !== null
+    || p.stripeSessionId !== null
+    || p.emailVerifiedAt !== null
+    || p.farcasterFid !== null;
 }
 
 /**
@@ -937,43 +1051,116 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   //   string              → set to new value (fiat unlock)
   // We preserve the raw undefined vs null distinction throughout.
   const stripeSessionId = input.stripeSessionId;
+  // email uses the same three-state convention. Lowercase on write so
+  // the partial unique index `profiles_email_lower_idx` matches
+  // regardless of how the caller cased the input.
+  const email =
+    input.email === undefined
+      ? undefined
+      : input.email === null
+        ? null
+        : input.email.trim().toLowerCase() || null;
 
   if (wallet === null && handle === null) {
     throw new Error('upsertProfile requires at least one of wallet or handle');
   }
 
-  // Look up BOTH identities before deciding what to do. The two unique
-  // partial indexes on `profiles` mean we can't catch duplicates via
-  // `onConflictDoUpdate` against both columns at once, and we also need
-  // to detect the "merge" case  -  where wallet and handle each already
-  // own a different row  -  before we try to write to either.
-  const [byWallet, byHandle] = await Promise.all([
+  // Look up all candidate identities before deciding what to do. The
+  // three partial unique indexes (wallet / handle / stripeSessionId)
+  // mean we can't catch duplicates via `onConflictDoUpdate` against all
+  // three columns at once. Looking them up here also lets us detect the
+  // cross-row merge case.
+  //
+  // stripeSessionId matters post-M6-premium-email-anchor: the Stripe
+  // webhook pre-creates an email-only profile carrying this session
+  // id. When the same buyer later connects a wallet and migration
+  // runs, we want to UPDATE that existing row (setting wallet) rather
+  // than INSERT a new one — a bare insert would collide on the
+  // stripe_session_idx unique index.
+  const [byWallet, byHandle, bySession, byEmail] = await Promise.all([
     wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
     handle ? getProfileByHandle(handle) : Promise.resolve(null),
+    typeof stripeSessionId === 'string' && stripeSessionId.length > 0
+      ? getProfileByStripeSessionId(stripeSessionId)
+      : Promise.resolve(null),
+    typeof email === 'string' && email.length > 0
+      ? getProfileByEmail(email)
+      : Promise.resolve(null),
   ]);
 
-  // Merge case: wallet and handle each point at DIFFERENT existing rows.
-  // This is the "handle-only fiat profile later connects a wallet that
-  // already has a crypto profile" scenario. The cross-row merge needs
-  // to atomically DELETE the handle-only row and UPDATE the wallet row
-  // to pick up the handle  -  but the runtime `db` client uses the
-  // stateless neon-http driver, which does not support interactive
-  // `db.transaction()`. Implementing this atomically requires a single
-  // raw-SQL CTE (one HTTP round trip = one implicit server transaction).
-  //
-  // Rather than ship a half-right merge in the scaffolding PR, detect
-  // the case and throw an explicit `MergeConflictError`. M5-premium-checkout will add
-  // a dedicated `mergeProfiles(walletId, handleId)` helper that runs
-  // the CTE when it actually needs this path (wallet-link flow from
-  // the handle-only Apple Pay path). No call sites hit upsertProfile
-  // yet, so throwing here is a safe contract for the scaffolding.
-  if (byWallet && byHandle && byWallet.id !== byHandle.id) {
-    throw new MergeConflictError(byWallet.id, byHandle.id);
+  // Cross-row merge detection. Any two of {byWallet, byHandle, bySession,
+  // byEmail} pointing at different profile rows is a merge conflict we
+  // refuse to silently resolve — the stateless neon-http driver can't
+  // run a proper CTE merge, so the options are either (a) half-merge and
+  // corrupt identity, or (b) surface a typed error and let the caller
+  // decide. We pick (b).
+  const candidates = [byWallet, byHandle, bySession, byEmail];
+  const seenIds = new Set<number>();
+  let conflictA: number | null = null;
+  let conflictB: number | null = null;
+  for (const c of candidates) {
+    if (!c) continue;
+    if (seenIds.size > 0 && !seenIds.has(c.id)) {
+      conflictA = [...seenIds][0];
+      conflictB = c.id;
+      break;
+    }
+    seenIds.add(c.id);
+  }
+  if (conflictA !== null && conflictB !== null) {
+    throw new MergeConflictError(conflictA, conflictB);
   }
 
-  // Single-row update: either wallet or handle matched an existing row,
-  // OR they both matched the same row. Update in place.
-  const existing = byWallet ?? byHandle;
+  // Trust-boundary guard against identity takeover.
+  //
+  // The pairwise check above collapses when only ONE of the four
+  // candidates is non-null — and that's exactly the takeover case we
+  // need to catch. A crypto buyer typing a victim's handle has:
+  //   byWallet  = null   (attacker is new to the site)
+  //   byHandle  = P_victim (verified wallet)
+  //   bySession = null   (crypto path)
+  //   byEmail   = null or mismatched
+  // All pairs involving a null collapse, so the pairwise loop finds
+  // no conflict, and the fall-through merge would overwrite P_victim's
+  // wallet with the attacker's. Same shape for byEmail-only takeover.
+  //
+  // Rule: a weak-signal lookup (byHandle / byEmail) is only a safe
+  // merge target if (a) a verified lookup (byWallet / bySession) agrees,
+  // or (b) the matched profile has no verified identity of its own
+  // (it's an unclaimed / legacy handle-only row).
+  const verifiedMatch = byWallet ?? bySession;
+  if (!verifiedMatch) {
+    if (byHandle && hasVerifiedIdentity(byHandle)) {
+      throw new HandleTakenError(byHandle.id, handle ?? '(unknown)');
+    }
+    if (byEmail && hasVerifiedIdentity(byEmail)) {
+      throw new EmailTakenError(byEmail.id, email ?? '(unknown)');
+    }
+  }
+
+  // Session-id row merge: bySession points at the same row as any
+  // populated byWallet/byHandle (guaranteed by the pairwise check
+  // above). Use it as the target so the webhook-created email profile
+  // picks up a wallet / handle from the migrate call. Don't overwrite
+  // the email — captured from the Stripe event, remains the durable
+  // claim anchor.
+  if (bySession) {
+    return updateProfileInPlace(bySession.id, {
+      wallet: wallet ?? bySession.wallet,
+      handle: handle ?? bySession.handle,
+      premiumSource: premiumSource ?? bySession.premiumSource,
+      grantedBy: grantedBy ?? bySession.grantedBy,
+      reason: reason ?? bySession.reason,
+      stripeSessionId: stripeSessionId !== undefined ? stripeSessionId : bySession.stripeSessionId,
+      email: email !== undefined ? email : bySession.email,
+    });
+  }
+
+  // Single-row update. Prefer byWallet (verified) so a returning user
+  // without a handle change doesn't adopt an unrelated orphan. Fall
+  // through to byHandle / byEmail only when they're orphans (guarded
+  // by the trust-boundary check above).
+  const existing = byWallet ?? byHandle ?? byEmail;
   if (existing) {
     return updateProfileInPlace(existing.id, {
       wallet: wallet ?? existing.wallet,
@@ -983,6 +1170,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
       reason: reason ?? existing.reason,
       // !==undefined so null explicitly clears; ?? would treat null as "keep existing"
       stripeSessionId: stripeSessionId !== undefined ? stripeSessionId : existing.stripeSessionId,
+      email: email !== undefined ? email : existing.email,
     });
   }
 
@@ -998,9 +1186,20 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // against the row the concurrent request created, giving the
   // caller the same "last writer wins" semantics as the no-race
   // path without needing to surface raw DB errors.
+  // On insert, `email === undefined` means "don't touch" — send null to
+  // the DB so the default (NULL) takes effect. `email === null` also
+  // inserts null; a string value inserts as-is (already lowercased).
   const insertedRows = await db
     .insert(profiles)
-    .values({ wallet, handle, premiumSource, grantedBy, reason, stripeSessionId })
+    .values({
+      wallet,
+      handle,
+      premiumSource,
+      grantedBy,
+      reason,
+      stripeSessionId,
+      email: email === undefined ? null : email,
+    })
     .onConflictDoNothing()
     .returning();
 
@@ -1013,11 +1212,33 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   // into `upsertProfile`  -  recursion would double the lookup + risk
   // re-entering the merge-conflict branch if the race winner happened
   // to combine wallet+handle differently than we expected.
-  const [retryByWallet, retryByHandle] = await Promise.all([
+  //
+  // Re-query ALL FOUR candidate keys. The critical addition is byEmail:
+  // if the insert collided specifically on `profiles_email_lower_idx`
+  // (because another profile already owns this email), the other
+  // lookups all miss and the old code would throw a generic "not
+  // findable" error. Surface the email collision explicitly so the
+  // caller (crypto verify route) can retry without email.
+  const [retryByWallet, retryByHandle, retryBySession, retryByEmail] = await Promise.all([
     wallet ? getProfileByWallet(wallet) : Promise.resolve(null),
     handle ? getProfileByHandle(handle) : Promise.resolve(null),
+    typeof stripeSessionId === 'string' && stripeSessionId.length > 0
+      ? getProfileByStripeSessionId(stripeSessionId)
+      : Promise.resolve(null),
+    typeof email === 'string' && email.length > 0
+      ? getProfileByEmail(email)
+      : Promise.resolve(null),
   ]);
-  const raceWinner = retryByWallet ?? retryByHandle;
+  // If the insert failed solely because this email belongs to another
+  // profile (no match on wallet/handle/session), throw the typed
+  // EmailTakenError so the caller retries without email rather than
+  // seeing an opaque internal error.
+  if (
+    !retryByWallet && !retryByHandle && !retryBySession && retryByEmail
+  ) {
+    throw new EmailTakenError(retryByEmail.id, email ?? '(unknown)');
+  }
+  const raceWinner = retryByWallet ?? retryByHandle ?? retryBySession ?? retryByEmail;
   if (!raceWinner) {
     throw new Error(
       'upsertProfile: insert rejected by unique constraint but row not findable on re-query',
@@ -1033,6 +1254,18 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
   ) {
     throw new MergeConflictError(retryByWallet.id, retryByHandle.id);
   }
+  // Same trust boundary as the primary path: don't let a race-recovery
+  // weak-signal match take over a profile with verified identity.
+  const retryVerified = retryByWallet ?? retryBySession;
+  if (!retryVerified) {
+    if (retryByHandle && hasVerifiedIdentity(retryByHandle)) {
+      throw new HandleTakenError(retryByHandle.id, handle ?? '(unknown)');
+    }
+    if (retryByEmail && hasVerifiedIdentity(retryByEmail)) {
+      throw new EmailTakenError(retryByEmail.id, email ?? '(unknown)');
+    }
+  }
+
   return updateProfileInPlace(raceWinner.id, {
     wallet: wallet ?? raceWinner.wallet,
     handle: handle ?? raceWinner.handle,
@@ -1040,6 +1273,7 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
     grantedBy: grantedBy ?? raceWinner.grantedBy,
     reason: reason ?? raceWinner.reason,
     stripeSessionId: stripeSessionId !== undefined ? stripeSessionId : raceWinner.stripeSessionId,
+    email: email !== undefined ? email : raceWinner.email,
   });
 }
 
@@ -1056,6 +1290,7 @@ async function updateProfileInPlace(
     grantedBy: string | null;
     reason: string | null;
     stripeSessionId: string | null;
+    email: string | null;
   },
 ): Promise<ProfileRow> {
   const updatedRows = await db
@@ -1067,6 +1302,7 @@ async function updateProfileInPlace(
       grantedBy: patch.grantedBy,
       reason: patch.reason,
       stripeSessionId: patch.stripeSessionId,
+      email: patch.email,
       updatedAt: new Date(),
     })
     .where(eq(profiles.id, id))
@@ -1422,6 +1658,21 @@ export interface RecordCryptoUnlockInput {
   usdcAmount: bigint;
   /** $WORD wei burned in the same tx. Serialized as a decimal string. */
   wordBurned: bigint;
+  /**
+   * Optional handle the player chose in the inline crypto unlock form.
+   * Required by the UI when no profile exists for this wallet (so we
+   * have a second identity anchor alongside the wallet); null / omitted
+   * if the player already has a profile and no new handle was collected.
+   * Already passed through `validateUsername` at the caller.
+   */
+  handle?: string | null;
+  /**
+   * Optional email the player typed into the inline crypto unlock form.
+   * Stored both on `premium_users.email` (transaction snapshot) and on
+   * `profiles.email` (durable identity anchor for later magic-link
+   * sign-in). Validated at the caller.
+   */
+  email?: string | null;
 }
 
 /**
@@ -1467,6 +1718,12 @@ export async function recordCryptoUnlock(input: RecordCryptoUnlockInput): Promis
   // Explicit string representation avoids JS number precision loss.
   const usdcDecimal = formatUsdc6(input.usdcAmount);
   const wordBurnedStr = input.wordBurned.toString();
+  // Optional email snapshot from the inline unlock form. Lowercased so
+  // later lookups (magic-link signup, admin search) don't need a case
+  // fold at read time. `undefined` means the caller didn't collect one
+  // this time — on a re-unlock we don't want to clobber a previously
+  // captured email, so treat it as "keep existing" via COALESCE below.
+  const emailValue = normalizeIdentity(input.email)?.toLowerCase() ?? null;
   await db
     .insert(premiumUsers)
     .values({
@@ -1483,6 +1740,7 @@ export async function recordCryptoUnlock(input: RecordCryptoUnlockInput): Promis
       escrowOpenTx: null,
       escrowBurnTx: null,
       externalId: null,
+      email: emailValue,
     })
     .onConflictDoUpdate({
       target: premiumUsers.wallet,
@@ -1504,6 +1762,10 @@ export async function recordCryptoUnlock(input: RecordCryptoUnlockInput): Promis
         escrowOpenTx: null,
         escrowBurnTx: null,
         externalId: null,
+        // COALESCE: new email wins when provided, else keep whatever the
+        // wallet already had (e.g. an email captured by a prior fiat
+        // attempt that later got overwritten by a crypto re-unlock).
+        email: sql`COALESCE(excluded.email, ${premiumUsers.email})`,
         unlockedAt: new Date(),
       },
     });
@@ -1517,7 +1779,17 @@ export async function recordCryptoUnlock(input: RecordCryptoUnlockInput): Promis
   // fiat doesn't retain the stale Stripe session id on their profile row
   // after re-unlocking via crypto  -  mirrors the same clearing done on
   // the premium_users row above.
-  await upsertProfile({ wallet: normalized, premiumSource: 'crypto', stripeSessionId: null });
+  //
+  // Handle and email pass through with the "keep existing" semantics of
+  // upsertProfile — omitted (undefined) when the caller didn't collect
+  // them so we don't clobber values from a previous run.
+  await upsertProfile({
+    wallet: normalized,
+    premiumSource: 'crypto',
+    stripeSessionId: null,
+    handle: normalizeIdentity(input.handle) ?? undefined,
+    email: emailValue ?? undefined,
+  });
 }
 
 /**
@@ -1549,13 +1821,26 @@ export interface RecordFiatUnlockInput {
   /** 'pending' | 'burned' | 'refunded'. Defaults to 'pending' at
    *  write time. */
   escrowStatus?: 'pending' | 'burned' | 'refunded' | null;
+  /**
+   * Email from `session.customer_details.email`. Stripe collects email
+   * on every checkout, so this is effectively required on the fiat
+   * path — kept optional in the type only so a test fixture can skip
+   * it. Stored on `premium_users.email` as a transaction snapshot and
+   * on `profiles.email` as the durable claim anchor.
+   */
+  email?: string | null;
 }
 
 export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<void> {
   const wallet = normalizeIdentity(input.wallet);
   const handle = normalizeIdentity(input.handle);
-  if (!wallet && !handle) {
-    throw new Error('recordFiatUnlock requires at least one of wallet or handle');
+  const emailValue = normalizeIdentity(input.email)?.toLowerCase() ?? null;
+  // Email OR wallet OR handle: at least one identity anchor required.
+  // Email is the new durable claim anchor for anonymous Stripe buyers,
+  // so a fiat unlock without wallet / handle is legitimate as long as
+  // email is present.
+  if (!wallet && !handle && !emailValue) {
+    throw new Error('recordFiatUnlock requires at least one of wallet, handle, or email');
   }
 
   if (wallet) {
@@ -1620,6 +1905,7 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
         escrowBurnTx: null,
         externalId: input.externalId ?? null,
         wordBurned: wordBurnedValue,
+        email: emailValue,
       })
       .onConflictDoUpdate({
         target: premiumUsers.wallet,
@@ -1628,6 +1914,10 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
           escrowOpenTx: sql`COALESCE(${premiumUsers.escrowOpenTx}, excluded.escrow_open_tx)`,
           externalId: sql`COALESCE(${premiumUsers.externalId}, excluded.external_id)`,
           wordBurned: sql`COALESCE(${premiumUsers.wordBurned}, excluded.word_burned)`,
+          // Backfill a missing email (e.g. pre-M6 fiat row re-settled by
+          // a later webhook replay). Never clobber an existing email —
+          // the first capture is the receipt-of-record address.
+          email: sql`COALESCE(${premiumUsers.email}, excluded.email)`,
         },
         setWhere: sql`${premiumUsers.source} = 'fiat'`,
       });
@@ -1646,11 +1936,62 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
   // did, the migrate route's catch block would restore the session key even
   // though the premium_users insert already committed, allowing a second
   // wallet to claim the same session and create a double-grant.
+  // Anonymous-with-email case (no wallet, no handle).
+  //
+  // SECURITY: we MUST NOT stamp a new stripeSessionId onto an existing
+  // email-owned profile here. The email is unverified — Stripe only
+  // saw it once on a checkout form. If an attacker pays $6 using a
+  // victim's email, stamping the session id on the victim's profile
+  // would let the attacker later connect their own wallet via
+  // /api/premium/migrate and have upsertProfile's bySession lookup
+  // silently rewire the victim's wallet to the attacker's. See
+  // Bugbot finding on commit c248e8c.
+  //
+  // Safe behavior: only attribute this purchase to a profile if we
+  // CREATE one fresh. If the email already owns a profile, the
+  // purchase is orphaned — session KV still grants premium on the
+  // buyer's current device, and an admin can reconcile manually.
+  // Future work: a magic-link-to-claim flow where the real email
+  // owner explicitly links an orphaned purchase after verifying.
+  if (!wallet && !handle && emailValue) {
+    try {
+      const inserted = await db
+        .insert(profiles)
+        .values({
+          email: emailValue,
+          emailVerifiedAt: null, // Stripe email is unverified until a magic-link click
+          premiumSource: 'fiat',
+          stripeSessionId: input.stripeSessionId,
+          updatedAt: new Date(),
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted.length === 0) {
+        // Email already owns a profile — by design we don't touch it.
+        // The caller (webhook) still has the session KV grant, so the
+        // buyer's current browser keeps premium. The DB has no profile-
+        // level trace of this purchase until a follow-up claim flow
+        // ships.
+        console.warn(
+          '[recordFiatUnlock] email already owns a profile — purchase orphaned at profile level (session KV still grants premium)',
+          { stripeSessionId: input.stripeSessionId, email: emailValue },
+        );
+      }
+    } catch (err) {
+      console.error(
+        '[recordFiatUnlock] email-only profile insert failed (non-fatal, session KV still gates premium)',
+        err,
+      );
+    }
+    return;
+  }
+
   await upsertProfile({
     wallet: wallet ?? undefined,
     handle: handle ?? undefined,
     premiumSource: 'fiat',
     stripeSessionId: input.stripeSessionId,
+    email: emailValue ?? undefined,
   }).catch((err) => {
     console.error('[recordFiatUnlock] upsertProfile failed (non-fatal, premium_users row committed)', err);
   });
@@ -2167,13 +2508,26 @@ export async function upsertProfileForFarcaster(input: {
 }
 
 /**
- * Get or create a profile keyed on email. Used after magic link
- * verification to give the user a profile they can enrich later.
+ * Get or create a profile keyed on email. Two call sites, two modes:
+ *
+ *   - Default (`verify: true`): used after magic-link verification. A
+ *     newly created profile is stamped `emailVerifiedAt=now()` and an
+ *     existing unverified profile gets verified in place.
+ *
+ *   - Pre-verification (`verify: false`): used by the Stripe webhook
+ *     for anonymous fiat buyers. We haven't proven the user controls
+ *     the inbox yet — they entered the address on Stripe's form. Seed
+ *     the profile so the later magic-link sign-in finds a premium row,
+ *     but leave `emailVerifiedAt` null so the actual verification
+ *     event still gets recorded when the user clicks the link. The
+ *     magic-link verify path flips it to verified on first login.
  */
 export async function getOrCreateProfileByEmail(
   email: string,
+  opts: { verify?: boolean } = { verify: true },
 ): Promise<ProfileRow> {
   const normalized = email.toLowerCase().trim();
+  const verify = opts.verify !== false;
 
   // Look for existing profile by email
   const existing = await db
@@ -2184,10 +2538,11 @@ export async function getOrCreateProfileByEmail(
 
   if (existing.length > 0) {
     let r = existing[0];
-    // If email wasn't verified yet, verify it now — use .returning() so
-    // the returned profile object matches what's actually in the DB
-    // (same updatedAt, same emailVerifiedAt).
-    if (!r.emailVerifiedAt) {
+    // Only stamp verified when the caller is the magic-link path.
+    // The Stripe webhook path leaves an unverified row unverified so
+    // the user's actual link-click becomes the source-of-truth
+    // verification timestamp.
+    if (verify && !r.emailVerifiedAt) {
       const now = new Date();
       const updated = await db
         .update(profiles)
@@ -2210,7 +2565,7 @@ export async function getOrCreateProfileByEmail(
     .insert(profiles)
     .values({
       email: normalized,
-      emailVerifiedAt: new Date(),
+      emailVerifiedAt: verify ? new Date() : null,
       updatedAt: new Date(),
     })
     .onConflictDoNothing()

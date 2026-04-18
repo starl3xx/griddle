@@ -155,6 +155,18 @@ export const premiumUsers = pgTable(
     escrowOpenTx: varchar('escrow_open_tx', { length: 66 }),
     escrowBurnTx: varchar('escrow_burn_tx', { length: 66 }),
     externalId: varchar('external_id', { length: 66 }),
+    /**
+     * Email snapshot captured at purchase time. Primary identity anchor
+     * for purchases made before a profile exists — the claim path on
+     * magic-link signup matches on `lower(email)`. Stored even when a
+     * wallet is already connected so the transaction row preserves
+     * exactly what Stripe saw (or what the crypto buyer typed) even if
+     * the player later edits `profiles.email`.
+     *
+     * Required on the fiat path (Stripe collects email on every
+     * checkout); optional on crypto / admin_grant.
+     */
+    email: varchar('email', { length: 254 }),
   },
   (t) => ({
     stripeSessionIdx: uniqueIndex('premium_users_stripe_session_idx')
@@ -163,6 +175,12 @@ export const premiumUsers = pgTable(
     externalIdIdx: uniqueIndex('premium_users_external_id_idx')
       .on(t.externalId)
       .where(sql`${t.externalId} is not null`),
+    // Non-unique: two wallets can legitimately share an email (e.g. a
+    // user who unlocks premium on a second wallet). Indexed lower() so
+    // the admin transactions search (`ilike %term%`) can use it.
+    emailLowerIdx: index('premium_users_email_lower_idx')
+      .on(sql`lower(${t.email})`)
+      .where(sql`${t.email} is not null`),
   }),
 );
 
