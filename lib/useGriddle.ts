@@ -250,6 +250,12 @@ export function useGriddle({
     setSolved(false);
     setPendingSolve(false);
     setFoundWords([]);
+    // foundWordsRef is the source of truth for the crumb dedup check —
+    // reset it synchronously so a dictionary resolution that lands in
+    // the window between setFoundWords([]) and the ref-sync effect
+    // running can’t false-reject a new-puzzle crumb that happens to
+    // match a word from the previous puzzle.
+    foundWordsRef.current = [];
     lastFoundWordRef.current = null;
     backspaceCountRef.current = 0;
     resetCountRef.current = 0;
