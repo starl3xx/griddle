@@ -69,7 +69,25 @@ export function PremiumCheckoutEmbed({ wallet, onComplete }: PremiumCheckoutEmbe
         }),
       });
       if (!res.ok) {
-        const detail = await res.text().catch(() => '');
+        // The route returns JSON ({ error: string }) on failure, so
+        // `res.text()` alone would surface the JSON wrapper in the
+        // error panel instead of the message itself. Try to parse and
+        // pull .error, fall back to the raw text, and finally to a
+        // generic suffix if the body is empty or unreadable.
+        const raw = await res.text().catch(() => '');
+        let detail = '';
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as { error?: unknown };
+            if (typeof parsed.error === 'string' && parsed.error) {
+              detail = parsed.error;
+            } else {
+              detail = raw;
+            }
+          } catch {
+            detail = raw;
+          }
+        }
         const message = `Checkout setup failed (${res.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`;
         setFetchError(message);
         throw new Error(message);
