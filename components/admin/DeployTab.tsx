@@ -67,12 +67,19 @@ export function DeployTab() {
 
   const chainOk = chainId === BASE_CHAIN_ID;
 
+  const runSwitchChain = async () => {
+    setErrors((e) => ({ ...e, chain: '' }));
+    try {
+      await switchChainAsync({ chainId: BASE_CHAIN_ID });
+    } catch (err) {
+      setErrors((e) => ({ ...e, chain: (err as Error).message }));
+    }
+  };
+
   // ─── Step 1: deploy both contracts ─────────────────────────────
   const runDeploy = async () => {
     if (!publicClient || !address) return;
-    if (!chainOk) {
-      await switchChainAsync({ chainId: BASE_CHAIN_ID });
-    }
+    if (!chainOk) return; // UI gates on chainOk — require an explicit switch click first
     // Reset downstream step state that's TIED to the contract
     // address — a re-deploy produces new addresses, so recipe (set
     // on the old contract) and escrow (approved on the old contract)
@@ -91,11 +98,13 @@ export function DeployTab() {
       approveEscrow: null,
     }));
     try {
-      // 1a) deploy WordOracle
+      // 1a) deploy WordOracle — chainId pin makes wagmi throw ChainMismatchError
+      // if the connector drifted off Base, rather than silently signing on mainnet.
       const oracleHash = await deployContractAsync({
         abi: wordOracleArtifact.abi as Abi,
         bytecode: wordOracleArtifact.bytecode,
         args: [JACKPOT_MANAGER_ADDRESS],
+        chainId: BASE_CHAIN_ID,
       });
       const oracleReceipt = await publicClient.waitForTransactionReceipt({ hash: oracleHash });
       const oracleAddress = oracleReceipt.contractAddress;
@@ -114,6 +123,7 @@ export function DeployTab() {
           ESCROW_MANAGER_ADDRESS,
           address, // owner = connected admin wallet
         ],
+        chainId: BASE_CHAIN_ID,
       });
       const premiumReceipt = await publicClient.waitForTransactionReceipt({ hash: premiumHash });
       const premiumAddress = premiumReceipt.contractAddress;
@@ -130,9 +140,7 @@ export function DeployTab() {
   // ─── Step 2: commit swap recipe ───────────────────────────────
   const runSetSwap = async () => {
     if (!state.premiumAddress) return;
-    if (!chainOk) {
-      await switchChainAsync({ chainId: BASE_CHAIN_ID });
-    }
+    if (!chainOk) return;
     setSteps((s) => ({ ...s, recipe: 'running' }));
     setErrors((e) => ({ ...e, recipe: '' }));
     try {
@@ -141,6 +149,7 @@ export function DeployTab() {
         abi: griddlePremiumArtifact.abi as Abi,
         functionName: 'setSwapConfig',
         args: [SWAP_RECIPE.commands, SWAP_RECIPE.inputs],
+        chainId: BASE_CHAIN_ID,
       });
       if (publicClient) {
         await publicClient.waitForTransactionReceipt({ hash });
@@ -226,11 +235,33 @@ export function DeployTab() {
             <div className="text-xs text-gray-500 font-mono">
               Owner: {address.slice(0, 6)}…{address.slice(-4)}
               {' · '}
-              Chain: {chainOk ? 'Base ✓' : <span className="text-rose-600">wrong chain — click any button to switch</span>}
+              Chain: {chainOk ? 'Base ✓' : <span className="text-rose-600">not on Base (id {chainId})</span>}
             </div>
           </div>
         </div>
       </Card>
+
+      {!chainOk && (
+        <Card className="border-rose-200 bg-rose-50">
+          <div className="flex items-start gap-3">
+            <Warning className="h-5 w-5 text-rose-700 flex-shrink-0 mt-0.5" weight="fill" />
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-rose-900">Switch wallet to Base before deploying</div>
+              <div className="text-xs text-rose-900/80 mt-0.5 leading-relaxed">
+                All deploy + write txs are pinned to chain id {BASE_CHAIN_ID}. Actions are disabled until your wallet is on Base.
+              </div>
+              {errors.chain && (
+                <div className="mt-2 text-xs text-rose-700 bg-white/70 border border-rose-200 rounded px-2 py-1.5 break-all">
+                  {errors.chain}
+                </div>
+              )}
+            </div>
+            <div className="flex-shrink-0">
+              <Button size="sm" onClick={runSwitchChain}>Switch to Base</Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <StepCard
         num={1}
@@ -238,6 +269,7 @@ export function DeployTab() {
         subtitle="Two on-chain txs from your wallet. Constructor wires Base USDC, Universal Router, Permit2, and the oracle."
         state={steps.deploy}
         error={errors.deploy}
+        disabled={!chainOk}
         action={{ label: steps.deploy === 'done' ? 'Re-deploy (overwrites)' : 'Deploy', onClick: runDeploy }}
       >
         {state.oracleAddress && (
@@ -260,7 +292,7 @@ export function DeployTab() {
         subtitle="One on-chain tx from owner wallet. Sets the Universal Router commands + inputs that drive the USDC → $WORD atomic swap."
         state={steps.recipe}
         error={errors.recipe}
-        disabled={!state.premiumAddress}
+        disabled={!state.premiumAddress || !chainOk}
         action={{ label: steps.recipe === 'done' ? 'Re-commit' : 'Set recipe', onClick: runSetSwap }}
       >
         {state.setSwapTx && (
