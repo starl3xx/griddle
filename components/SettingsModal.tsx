@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Moon,
   Sun,
@@ -15,12 +15,15 @@ import {
   Gear,
   Camera,
   Timer,
+  PencilSimple,
+  ArrowRight,
 } from '@phosphor-icons/react';
 import { Avatar } from './Avatar';
 import { FaqAccordion } from './FaqAccordion';
 import { OtpCodeInput } from './OtpCodeInput';
 import { uploadAvatar } from '@/lib/avatar-upload';
-import { validateUsername } from '@/lib/username';
+import { suggestUsernameFromWallet, validateUsername } from '@/lib/username';
+import { getDefaultAvatarDataUri, pickAvatarSeed } from '@/lib/default-avatar';
 
 /**
  * Shape of the profile object surfaced by GET /api/profile. Kept narrow
@@ -56,8 +59,8 @@ interface SettingsModalProps {
   /**
    * The wallet currently bound to the session via KV, or null. Used
    * to detect the "wallet-connected but no profile row yet" state so
-   * Settings can show a "Complete your profile" form instead of the
-   * generic onboarding CTAs.
+   * Settings can render the onboarding flow with a wallet-derived
+   * suggested username instead of a generic empty input.
    */
   sessionWallet: string | null;
   premium: boolean;
@@ -94,20 +97,26 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * Settings modal — all identity and preferences surfaces, accessed via
  * the top-right gear/avatar button.
  *
- * Responsibilities:
- *   - Identity editing (display name, handle, avatar URL) for users
- *     with a profile, via PATCH /api/profile.
- *   - Inline add-email for wallet-only users (sends a magic link via
- *     POST /api/auth/request, then the verify route merges the new
- *     email profile into the existing wallet profile).
- *   - Connect-wallet trigger for email/handle-only users.
- *   - Dark mode toggle (everyone).
- *   - Premium preferences (streak protection, unassisted mode) — only
- *     when premium is unlocked AND the user has a wallet (the
- *     user_settings table keys on wallet).
- *   - Anonymous state: Sign in / Connect wallet / Unlock with card or
- *     crypto — the three onboarding CTAs, moved here from StatsModal
- *     so Stats stays read-only.
+ * Renders one of four mutually exclusive modes:
+ *   - **anonymous**: no profile, no wallet, not premium. Shows the
+ *     three onboarding CTAs (sign in, connect wallet, upgrade).
+ *   - **premium-no-profile**: paid via fiat without picking an
+ *     identity. Shows sign-in/connect prompts so the unlock can
+ *     follow them across devices.
+ *   - **onboarding**: identity bound (wallet or email) but no `handle`
+ *     yet. One focused task: pick a username. Wallet-first users get a
+ *     `griddle_<hex>` suggestion pre-filled; email-first users start
+ *     empty. Single primary CTA.
+ *   - **settings**: handle exists. Read-mostly identity panel with
+ *     atomic per-row editors (username, photo) and the existing
+ *     sign-in-methods, preferences, premium, and FAQ sections. There
+ *     is no global "Save profile" button — each row that *can* edit
+ *     manages its own dirty state and Save call.
+ *
+ * Splitting modes structurally (not via guards inside one render path)
+ * is what kills the historical "Save profile / Nothing to save" bug:
+ * the global save affordance only renders in the one mode where it
+ * has work to do (onboarding's Continue button, which always writes).
  */
 export function SettingsModal({
   open,
@@ -130,86 +139,30 @@ export function SettingsModal({
   const [savingProtection, setSavingProtection] = useState(false);
   const [savingUnassisted, setSavingUnassisted] = useState(false);
 
-  // Local edit buffers for profile fields. Seeded from the incoming
-  // profile whenever the modal opens (or the profile refetches) so we
-  // don't clobber in-flight user typing.
-  const [usernameDraft, setUsernameDraft] = useState('');
-  const [avatarUrlDraft, setAvatarUrlDraft] = useState('');
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [profileSavedAt, setProfileSavedAt] = useState<number | null>(null);
-
   // Inline add-email state for wallet-only users
   const [emailDraft, setEmailDraft] = useState('');
   const [emailSending, setEmailSending] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSentTo, setEmailSentTo] = useState<string | null>(null);
 
-  // Avatar upload state. `avatarUploading` drives the spinner on the
-  // upload button; `avatarUploadError` surfaces resize/network errors
-  // inline. The actual resulting URL is written to `avatarUrlDraft`
-  // so it flows through the existing Save / Complete profile button
-  // and gets persisted atomically with any display-name changes.
-  const avatarFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const hasIdentity = !!profile;
+  const hasHandle = hasIdentity && !!profile.handle;
+  const mode: 'anonymous' | 'premium-no-profile' | 'onboarding' | 'settings' =
+    hasHandle
+      ? 'settings'
+      : hasIdentity || sessionWallet
+        ? 'onboarding'
+        : premium
+          ? 'premium-no-profile'
+          : 'anonymous';
 
-  const handleAvatarFilePick = async (file: File) => {
-    setAvatarUploadError(null);
-    setAvatarUploading(true);
-    try {
-      const url = await uploadAvatar(file);
-      setAvatarUrlDraft(url);
-    } catch (err) {
-      setAvatarUploadError(
-        err instanceof Error ? err.message : 'Upload failed',
-      );
-    } finally {
-      setAvatarUploading(false);
-      // Reset the file input so re-selecting the same file fires
-      // `onChange` again — browsers otherwise suppress duplicates.
-      if (avatarFileInputRef.current) avatarFileInputRef.current.value = '';
-    }
-  };
-
-  // Reset status state on every *open* transition — error banner,
-  // saved confirmation, email draft. Previously this also seeded the
-  // profile drafts which caused two bugs: (a) the post-save refetch
-  // cleared the "Saved." confirmation before the user could read it,
-  // and (b) any mid-edit refetch clobbered in-flight draft edits.
+  // Reset email-add status on every open transition.
   useEffect(() => {
     if (!open) return;
-    setProfileError(null);
-    setProfileSavedAt(null);
     setEmailDraft('');
     setEmailError(null);
     setEmailSentTo(null);
   }, [open]);
-
-  // Seed profile drafts from the incoming profile, but only *once* per
-  // open cycle. A ref-flag handles the edge case where the modal is
-  // opened BEFORE the async profile fetch resolves (the onProfileCreated
-  // and ?auth=ok paths) — we wait for profile to become non-null and
-  // then seed. The ref resets on close so the next open cycle can seed
-  // fresh from whatever the current profile is.
-  const seededOpenRef = useRef(false);
-  useEffect(() => {
-    if (!open) { seededOpenRef.current = false; return; }
-    if (seededOpenRef.current) return;
-    if (!profile) return; // wait for profile
-    setUsernameDraft(profile.handle ?? '');
-    setAvatarUrlDraft(profile.avatarUrl ?? '');
-    seededOpenRef.current = true;
-  }, [open, profile]);
-
-  // Auto-dismiss the "Saved." confirmation after 2.5s. Beats leaving it
-  // stuck until the next modal open, and gives the user enough time to
-  // read it without requiring an acknowledge click.
-  useEffect(() => {
-    if (profileSavedAt === null) return;
-    const t = setTimeout(() => setProfileSavedAt(null), 2500);
-    return () => clearTimeout(t);
-  }, [profileSavedAt]);
 
   useEffect(() => {
     if (!open) return;
@@ -248,117 +201,6 @@ export function SettingsModal({
     }
   };
 
-  const saveProfile = async () => {
-    setProfileError(null);
-    setProfileSavedAt(null);
-
-    const trimmedUsername = usernameDraft.trim().toLowerCase();
-    const trimmedAvatar = avatarUrlDraft.trim();
-
-    // Two modes:
-    //   a) profile exists → PATCH /api/profile with the diff of
-    //      changed fields. Username changes are Premium-gated (both
-    //      client-side here for UX and server-side for enforcement).
-    //   b) no profile yet (wallet-connected user completing onboarding
-    //      for the first time) → POST /api/profile/create with the
-    //      drafts, server auto-attaches the session wallet.
-    if (!profile) {
-      const validation = validateUsername(trimmedUsername);
-      if (!validation.valid) {
-        setProfileError(validation.error ?? 'Invalid username.');
-        return;
-      }
-      setProfileSaving(true);
-      try {
-        const res = await fetch('/api/profile/create', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            username: trimmedUsername,
-            ...(trimmedAvatar ? { avatarUrl: trimmedAvatar } : {}),
-          }),
-        });
-        if (res.status === 409) {
-          // Profile already exists server-side but client state was
-          // stale. Fall back to PATCH so the user isn't stuck.
-          const patchRes = await fetch('/api/profile', {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              handle: trimmedUsername,
-              ...(trimmedAvatar ? { avatarUrl: trimmedAvatar } : {}),
-            }),
-          });
-          if (!patchRes.ok) {
-            const d = (await patchRes.json().catch(() => ({}))) as { error?: string };
-            throw new Error(d.error ?? `Save failed (${patchRes.status})`);
-          }
-        } else if (!res.ok) {
-          const d = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(d.error ?? `Save failed (${res.status})`);
-        }
-        setProfileSavedAt(Date.now());
-        onProfileChanged();
-      } catch (err) {
-        setProfileError(err instanceof Error ? err.message : 'Save failed');
-      } finally {
-        setProfileSaving(false);
-      }
-      return;
-    }
-
-    // PATCH path — existing profile.
-    const patch: { handle?: string; avatarUrl?: string | null } = {};
-    const currentHandle = profile.handle ?? '';
-    const currentAvatar = profile.avatarUrl ?? '';
-
-    if (trimmedUsername !== currentHandle) {
-      if (currentHandle) {
-        // Renaming an existing handle — Premium only.
-        if (!premium) {
-          setProfileError('Changing your username is a Premium feature.');
-          return;
-        }
-      }
-      // Validate for both initial set and rename — including empty,
-      // which validateUsername rejects with a min-length error.
-      const validation = validateUsername(trimmedUsername);
-      if (!validation.valid) {
-        setProfileError(validation.error ?? 'Invalid username.');
-        return;
-      }
-      patch.handle = trimmedUsername;
-    }
-    if (trimmedAvatar !== currentAvatar) {
-      // Empty → null = clear the avatar. Non-empty → set the URL.
-      patch.avatarUrl = trimmedAvatar ? trimmedAvatar : null;
-    }
-
-    if (Object.keys(patch).length === 0) {
-      setProfileError('Nothing to save.');
-      return;
-    }
-
-    setProfileSaving(true);
-    try {
-      const res = await fetch('/api/profile', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) {
-        const d = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(d.error ?? `Save failed (${res.status})`);
-      }
-      setProfileSavedAt(Date.now());
-      onProfileChanged();
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Save failed');
-    } finally {
-      setProfileSaving(false);
-    }
-  };
-
   const sendAddEmail = async () => {
     setEmailError(null);
     const trimmed = emailDraft.trim().toLowerCase();
@@ -387,14 +229,18 @@ export function SettingsModal({
 
   if (!open) return null;
 
-  // Identity resolution for the header — prefer username (handle),
-  // then a truncated wallet, then a contextual prompt.
-  const hasIdentity = !!profile;
-  const hasCompleteProfile = hasIdentity && !!profile.handle;
+  // Identity resolution for the header. Pulled through the shared
+  // `pickAvatarSeed` helper so the gear button, this header, and the
+  // StatsPanel header all derive the same monogram for the same user.
+  const headerSeed = pickAvatarSeed({
+    handle: profile?.handle,
+    wallet: sessionWallet,
+    email: profile?.email,
+  });
   const headerLabel =
     profile?.handle?.trim()
-    || (hasIdentity
-      ? 'Complete your profile'
+    || (mode === 'onboarding'
+      ? 'Welcome — pick a username'
       : sessionWallet
         ? `${sessionWallet.slice(0, 6)}…${sessionWallet.slice(-4)}`
         : 'Anonymous');
@@ -438,7 +284,7 @@ export function SettingsModal({
       >
         {/* Header */}
         <div className="flex items-center gap-3 mb-5">
-          <Avatar pfpUrl={profile?.avatarUrl ?? null} />
+          <Avatar pfpUrl={profile?.avatarUrl ?? null} seed={headerSeed} />
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100 truncate">
               {headerLabel}
@@ -460,12 +306,7 @@ export function SettingsModal({
           </button>
         </div>
 
-        {/* Fully anonymous — no profile, no wallet, no premium. The
-            anonymous surface for a brand-new visitor: sign-in entry,
-            wallet connect, and the upsell path. Worded as "sign in"
-            because the magic-link flow is idempotent — same button
-            for both new and returning users. */}
-        {!hasIdentity && !sessionWallet && !premium && (
+        {mode === 'anonymous' && (
           <div className="py-2 space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
               Sign in to track your streaks, fastest times, and carry your progress across devices.
@@ -483,10 +324,7 @@ export function SettingsModal({
           </div>
         )}
 
-        {/* Premium but no identity — fiat buyer who hasn't created a
-            profile yet. Same sign-in affordance, no unlock CTA (they
-            already paid). */}
-        {!hasIdentity && !sessionWallet && premium && (
+        {mode === 'premium-no-profile' && (
           <div className="py-2 space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
               You’re Premium. Sign in so your access follows you across devices.
@@ -500,87 +338,38 @@ export function SettingsModal({
           </div>
         )}
 
-        {/* Profile editor — shown for both existing profiles and
-            wallet-connected users completing onboarding. In
-            "complete" mode (no profile yet) the user picks their
-            username (slugified + profanity-checked server-side),
-            and the whole flow is framed as "Complete your profile"
-            rather than "edit." For existing profiles, the username
-            field is read-only unless Premium. */}
-        {(hasIdentity || sessionWallet) && (
-          <Section title={hasCompleteProfile ? 'Profile' : 'Complete your profile'}>
-            {!hasCompleteProfile && (
-              <p className="text-[12px] text-gray-500 dark:text-gray-400 leading-relaxed">
-                {hasIdentity
-                  ? 'Choose a username so your solves appear under a real identity on the leaderboard.'
-                  : 'Your wallet is connected. Choose a username so your solves appear under a real identity on the leaderboard.'}
-              </p>
-            )}
-            <LabeledInput
-              label="Username"
-              value={usernameDraft}
-              onChange={(v) => setUsernameDraft(v.toLowerCase())}
-              placeholder="starl3xx"
-              maxLength={32}
-              hint={
-                profile?.handle && !premium
-                  ? 'Upgrade to Premium to change your username'
-                  : '2–32 chars, a–z, 0–9, underscores'
-              }
-              disabled={!!profile?.handle && !premium}
-            />
-            <AvatarUploadRow
-              avatarUrl={avatarUrlDraft}
-              uploading={avatarUploading}
-              error={avatarUploadError}
-              premiumLocked={!premium}
-              fileInputRef={avatarFileInputRef}
-              onFilePick={handleAvatarFilePick}
-              onClear={() => {
-                setAvatarUrlDraft('');
-                setAvatarUploadError(null);
-              }}
+        {mode === 'onboarding' && (
+          <OnboardingPanel
+            sessionWallet={sessionWallet}
+            email={profile?.email ?? null}
+            onCreated={onProfileChanged}
+          />
+        )}
+
+        {mode === 'settings' && profile && (
+          <Section title="Profile">
+            <EditableUsernameRow
+              handle={profile.handle ?? ''}
+              premium={premium}
+              onSaved={onProfileChanged}
               onUpgrade={onUpgrade}
-              hint={
-                !premium
-                  ? 'Custom photos are a Premium feature'
-                  : hasCompleteProfile
-                    ? 'Tap to upload a new photo'
-                    : 'Optional — we’ll use a silhouette if you skip'
-              }
             />
-
-            {profileError && (
-              <p className="text-[12px] text-red-600 dark:text-red-400">{profileError}</p>
-            )}
-            {profileSavedAt && !profileError && (
-              <p className="text-[12px] text-green-600 dark:text-green-400 inline-flex items-center gap-1">
-                <Check className="w-3 h-3" weight="bold" aria-hidden />
-                Saved.
-              </p>
-            )}
-
-            <button
-              type="button"
-              onClick={saveProfile}
-              disabled={profileSaving}
-              className="btn-primary w-full inline-flex items-center justify-center gap-2"
-            >
-              {profileSaving ? (
-                <CircleNotch className="w-4 h-4 animate-spin" weight="bold" aria-hidden />
-              ) : (
-                <Check className="w-4 h-4" weight="bold" aria-hidden />
-              )}
-              {hasCompleteProfile ? 'Save profile' : 'Complete profile'}
-            </button>
+            <EditablePhotoRow
+              avatarUrl={profile.avatarUrl}
+              seed={pickAvatarSeed({
+                handle: profile.handle,
+                wallet: profile.wallet,
+                email: profile.email,
+              }) ?? 'guest'}
+              premium={premium}
+              onSaved={onProfileChanged}
+              onUpgrade={onUpgrade}
+            />
           </Section>
         )}
 
-        {/* Identity anchors — render for any user with at least one
-            identity signal (profile row OR session wallet). Same as
-            the profile editor: the section gates on "does it make
-            sense to let them add anchors?" and a wallet-only user
-            who hasn't saved their profile yet still qualifies. */}
+        {/* Sign-in methods — render for everyone with at least one
+            identity signal (profile row OR session wallet). */}
         {(hasIdentity || sessionWallet) && (
           <Section title="Sign-in methods">
             <IdentityRow
@@ -593,14 +382,12 @@ export function SettingsModal({
                 already has a saved profile row (hasIdentity). Gating
                 on hasIdentity (not hasIdentity || sessionWallet)
                 prevents a race where a wallet-only user sees both
-                the Complete-profile form and this email form at the
+                the onboarding form and this email form at the
                 same time, fires the email first, and clicks the
                 magic link before completing the profile — the
                 verify route would then create an email-only profile
                 with no wallet (because no wallet-linked row exists
-                to merge into), orphaning the session wallet. For
-                wallet-only users we show a hint telling them to
-                complete the profile first. */}
+                to merge into), orphaning the session wallet. */}
             {hasIdentity && !profile?.email && (
               <div className="space-y-2">
                 {emailSentTo ? (
@@ -647,7 +434,7 @@ export function SettingsModal({
             )}
             {!hasIdentity && sessionWallet && (
               <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
-                Complete your profile above first, then you can add an email to sign in from other devices.
+                Pick a username above first, then you can add an email to sign in from other devices.
               </p>
             )}
 
@@ -742,10 +529,10 @@ export function SettingsModal({
 
         {/* Premium status — upsell if not premium but has an account
             OR a connected wallet (covers the "wallet connected, no
-            profile row yet" path that the Complete-profile flow
-            created). Fully anonymous users see the onboarding CTAs
-            above and don't need this section at all, so skip it
-            entirely to avoid an orphaned "PREMIUM" header with no body. */}
+            profile row yet" path). Fully anonymous users see the
+            onboarding CTAs above and don't need this section at all,
+            so skip it entirely to avoid an orphaned "PREMIUM" header
+            with no body. */}
         {(premium || hasIdentity || sessionWallet) && (
           <Section title="Premium">
             {premium ? (
@@ -768,7 +555,7 @@ export function SettingsModal({
                 <Crown className="w-5 h-5 text-accent flex-shrink-0" weight="fill" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Unlock Premium</p>
-                  <p className="text-[11px] text-gray-500">Leaderboard, archive, streak protection &amp; more.</p>
+                  <p className="text-[11px] text-gray-500">Leaderboard, archive, custom photo, username changes &amp; more.</p>
                 </div>
                 <div className="flex gap-1.5 flex-shrink-0">
                   <button
@@ -801,58 +588,383 @@ export function SettingsModal({
 }
 
 /**
- * Avatar picker row. Shows the current avatar (or the default
- * silhouette when unset) as a circular thumbnail with an "Upload
- * photo" button next to it. Clicking the button triggers a hidden
- * file input with `accept="image/*"`, which on mobile prompts the
- * user's native "Take photo or choose from library" picker.
+ * Onboarding mode — renders only when the user has bound an identity
+ * (email or wallet) but has no `handle` yet. One focused task: pick a
+ * username. The default monogram preview updates live as the user
+ * types so they see the avatar they'll get even before saving.
  *
- * The uploaded URL is handed back to the parent via `onFilePick`,
- * which runs the resize-and-upload helper and writes the result into
- * `avatarUrlDraft` — so the existing Save / Complete profile button
- * persists the new URL alongside any other field edits.
+ * Wallet-first users get a `griddle_<hex>` suggestion pre-filled (they
+ * can edit it). Email-first users start with an empty input.
  *
- * When `premiumLocked` is true, the button is fully disabled (not
- * tappable) — the gate is enforced at the control level, not via a
- * click-through to the upgrade modal. Users still see the "Premium"
- * badge + hint copy so the gate is legible, and the Premium section
- * further down in Settings carries the upgrade CTA.
+ * The Continue button always has work to do — by mode definition the
+ * profile has no handle, so submitting always writes. This is the
+ * structural reason the old "Save profile / Nothing to save" bug
+ * can't reappear here.
  */
-function AvatarUploadRow({
-  avatarUrl,
-  uploading,
-  error,
-  premiumLocked,
-  fileInputRef,
-  onFilePick,
-  onClear,
-  onUpgrade,
-  hint,
+function OnboardingPanel({
+  sessionWallet,
+  email,
+  onCreated,
 }: {
-  avatarUrl: string;
-  uploading: boolean;
-  error: string | null;
-  /** When true, the upload button is swapped for an Upgrade CTA that fires `onUpgrade`. */
-  premiumLocked: boolean;
-  fileInputRef: React.RefObject<HTMLInputElement>;
-  onFilePick: (file: File) => void | Promise<void>;
-  onClear: () => void;
-  /** Opens the PremiumGateModal. Used when `premiumLocked` and the user taps the CTA. */
-  onUpgrade: () => void;
-  hint?: string;
+  sessionWallet: string | null;
+  email: string | null;
+  onCreated: () => void;
 }) {
-  const hasAvatar = avatarUrl.trim().length > 0;
-  const uploadDisabled = uploading;
-  const handleUploadClick = () => {
+  const initial = useMemo(
+    () => (sessionWallet ? suggestUsernameFromWallet(sessionWallet) : ''),
+    [sessionWallet],
+  );
+  const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // If `sessionWallet` binds *after* this panel mounts (e.g. user
+  // opened Settings while anonymous, then connected a wallet from the
+  // Sign-in methods row below), `useState(initial)` would otherwise
+  // hold the empty string forever and the wallet-derived suggestion
+  // would never appear. Pre-fill only when the user hasn't typed —
+  // we never overwrite an in-flight draft.
+  useEffect(() => {
+    setDraft((current) => (current ? current : initial));
+  }, [initial]);
+
+  const trimmed = draft.trim().toLowerCase();
+  const previewSeed = trimmed || sessionWallet || 'guest';
+  const previewSrc = getDefaultAvatarDataUri(previewSeed);
+
+  const submit = async () => {
+    setError(null);
+    const validation = validateUsername(trimmed);
+    if (!validation.valid) {
+      setError(validation.error ?? 'Invalid username.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/profile/create', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: trimmed }),
+      });
+      // Server upserts on duplicate sessions (returns 409 in stale
+      // client states); fall through to a PATCH so the user isn't
+      // stuck behind a race with their own /api/auth/verify redirect.
+      if (res.status === 409) {
+        const patchRes = await fetch('/api/profile', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ handle: trimmed }),
+        });
+        if (!patchRes.ok) {
+          const d = (await patchRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(d.error ?? `Save failed (${patchRes.status})`);
+        }
+      } else if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? `Save failed (${res.status})`);
+      }
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 py-2">
+      <div className="flex flex-col items-center gap-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={previewSrc}
+          alt=""
+          className="w-20 h-20 rounded-full bg-gray-100"
+        />
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+          Custom photos with Premium
+        </p>
+      </div>
+      <p className="text-sm text-gray-600 dark:text-gray-400 text-center leading-relaxed">
+        Pick a username so your solves appear under a real identity on the leaderboard.
+        <br />
+        <span className="text-[11px] text-gray-400 dark:text-gray-500">
+          You can change it later with Premium.
+        </span>
+      </p>
+      <div>
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.toLowerCase())}
+          placeholder="starl3xx"
+          maxLength={32}
+          spellCheck={false}
+          autoFocus
+          className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
+        />
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+          2–32 chars, a–z, 0–9, underscores
+        </p>
+      </div>
+      {error && (
+        <p className="text-[12px] text-red-600 dark:text-red-400">{error}</p>
+      )}
+      <button
+        type="button"
+        onClick={submit}
+        disabled={saving || trimmed.length === 0}
+        className="btn-primary w-full inline-flex items-center justify-center gap-2"
+      >
+        {saving ? (
+          <CircleNotch className="w-4 h-4 animate-spin" weight="bold" aria-hidden />
+        ) : (
+          <ArrowRight className="w-4 h-4" weight="bold" aria-hidden />
+        )}
+        Continue
+      </button>
+      {(sessionWallet || email) && (
+        <p className="text-[11px] text-gray-400 dark:text-gray-500 text-center">
+          Signed in as{' '}
+          <span className="font-mono text-gray-500 dark:text-gray-400">
+            {email ?? `${sessionWallet!.slice(0, 6)}…${sessionWallet!.slice(-4)}`}
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Atomic username editor for settings mode. View state shows the
+ * current handle with a trailing "Change" button; Premium users
+ * expand to an inline input with Save / Cancel; free users get
+ * routed to the upgrade modal instead.
+ *
+ * Renders no Save button outside the expanded editor — when the row
+ * is collapsed there's nothing to save, so the global "Nothing to
+ * save" bug from the old single-form design is structurally absent.
+ */
+function EditableUsernameRow({
+  handle,
+  premium,
+  onSaved,
+  onUpgrade,
+}: {
+  handle: string;
+  premium: boolean;
+  onSaved: () => void;
+  onUpgrade: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(handle);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const beginEdit = () => {
+    if (!premium) {
+      onUpgrade();
+      return;
+    }
+    setDraft(handle);
+    setError(null);
+    setEditing(true);
+  };
+
+  const cancel = () => {
+    setEditing(false);
+    setError(null);
+    setDraft(handle);
+  };
+
+  const save = async () => {
+    setError(null);
+    const trimmed = draft.trim().toLowerCase();
+    if (trimmed === handle) {
+      setEditing(false);
+      return;
+    }
+    const validation = validateUsername(trimmed);
+    if (!validation.valid) {
+      setError(validation.error ?? 'Invalid username.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ handle: trimmed }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? `Save failed (${res.status})`);
+      }
+      setEditing(false);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div>
+        <RowLabel>Username</RowLabel>
+        <div className="flex items-center gap-3">
+          <p className="text-sm font-mono text-gray-800 dark:text-gray-200 truncate flex-1 min-w-0">
+            @{handle}
+          </p>
+          <button
+            type="button"
+            onClick={beginEdit}
+            className="btn-secondary text-xs py-1.5 px-2.5 inline-flex items-center gap-1.5 flex-shrink-0"
+          >
+            {premium ? (
+              <PencilSimple className="w-3.5 h-3.5" weight="bold" aria-hidden />
+            ) : (
+              <Crown className="w-3.5 h-3.5 text-accent" weight="fill" aria-hidden />
+            )}
+            Change
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <RowLabel>Username</RowLabel>
+      <input
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.toLowerCase())}
+        maxLength={32}
+        spellCheck={false}
+        autoFocus
+        className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
+      />
+      {error && (
+        <p className="text-[12px] text-red-600 dark:text-red-400 mt-1">{error}</p>
+      )}
+      <div className="flex gap-2 mt-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="btn-primary text-xs py-1.5 px-3 inline-flex items-center gap-1.5"
+        >
+          {saving ? (
+            <CircleNotch className="w-3.5 h-3.5 animate-spin" weight="bold" aria-hidden />
+          ) : (
+            <Check className="w-3.5 h-3.5" weight="bold" aria-hidden />
+          )}
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={cancel}
+          disabled={saving}
+          className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Atomic photo editor for settings mode. View state shows the current
+ * avatar (custom upload or default monogram derived from `seed`) with
+ * a trailing "Change" / "Remove" affordance. Premium users get the
+ * existing upload + remove flow; free users get routed to upgrade.
+ *
+ * Each action is a single PATCH /api/profile so there's no draft
+ * state to mis-track and no "Nothing to save" failure mode.
+ */
+function EditablePhotoRow({
+  avatarUrl,
+  seed,
+  premium,
+  onSaved,
+  onUpgrade,
+}: {
+  avatarUrl: string | null;
+  seed: string;
+  premium: boolean;
+  onSaved: () => void;
+  onUpgrade: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const previewSrc = avatarUrl || getDefaultAvatarDataUri(seed);
+  const hasCustom = !!avatarUrl;
+  const busy = uploading || removing;
+
+  const handleChangeClick = () => {
+    if (!premium) {
+      onUpgrade();
+      return;
+    }
     fileInputRef.current?.click();
   };
+
+  const handleFile = async (file: File) => {
+    setError(null);
+    setUploading(true);
+    try {
+      const url = await uploadAvatar(file);
+      const res = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ avatarUrl: url }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? `Save failed (${res.status})`);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      // Reset the file input so re-selecting the same file fires
+      // `onChange` again — browsers otherwise suppress duplicates.
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemove = async () => {
+    setError(null);
+    setRemoving(true);
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ avatarUrl: null }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? `Save failed (${res.status})`);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Remove failed');
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center gap-1.5 mb-2">
-        <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-          Photo
-        </label>
-        {premiumLocked && (
+        <RowLabel>Photo</RowLabel>
+        {!premium && (
           <span className="text-[9px] font-bold uppercase tracking-wider text-accent bg-accent/10 rounded px-1.5 py-0.5 inline-flex items-center gap-0.5">
             <Crown className="w-2.5 h-2.5" weight="fill" aria-hidden />
             Premium
@@ -860,63 +972,46 @@ function AvatarUploadRow({
         )}
       </div>
       <div className="flex items-center gap-3">
-        <div
-          className={`w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/30 border border-gray-200 dark:border-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0 ${premiumLocked ? 'opacity-70' : ''}`}
-        >
-          {hasAvatar ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={avatarUrl}
-              alt="Your avatar"
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <Camera className="w-5 h-5 text-brand" weight="bold" aria-hidden />
-          )}
+        <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 border border-gray-200 dark:border-gray-700">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewSrc}
+            alt=""
+            className="w-full h-full object-cover"
+          />
         </div>
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <div className="flex gap-2">
-            {premiumLocked ? (
-              // Non-premium: real CTA that opens the upgrade modal.
-              // Previously this rendered a `disabled` upload button,
-              // which looked actionable but did nothing when tapped —
-              // testers reported it as a broken control.
-              <button
-                type="button"
-                onClick={onUpgrade}
-                className="btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5"
-              >
+            <button
+              type="button"
+              onClick={handleChangeClick}
+              disabled={busy}
+              className="btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5"
+            >
+              {uploading ? (
+                <CircleNotch className="w-3.5 h-3.5 animate-spin" weight="bold" aria-hidden />
+              ) : !premium ? (
                 <Crown className="w-3.5 h-3.5 text-accent" weight="fill" aria-hidden />
-                Upgrade to add a photo
-              </button>
-            ) : (
+              ) : (
+                <Camera className="w-3.5 h-3.5" weight="bold" aria-hidden />
+              )}
+              {hasCustom && premium ? 'Change' : 'Customize'}
+            </button>
+            {hasCustom && premium && !busy && (
               <button
                 type="button"
-                disabled={uploadDisabled}
-                onClick={handleUploadClick}
-                aria-disabled={uploadDisabled}
-                className="btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5"
-              >
-                {uploading ? (
-                  <CircleNotch className="w-3.5 h-3.5 animate-spin" weight="bold" aria-hidden />
-                ) : (
-                  <Camera className="w-3.5 h-3.5" weight="bold" aria-hidden />
-                )}
-                {hasAvatar ? 'Change photo' : 'Upload photo'}
-              </button>
-            )}
-            {hasAvatar && !uploading && !premiumLocked && (
-              <button
-                type="button"
-                onClick={onClear}
+                onClick={handleRemove}
+                disabled={removing}
                 className="text-xs font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 Remove
               </button>
             )}
           </div>
-          {hint && !error && (
-            <p className="text-[10px] text-gray-400 dark:text-gray-500">{hint}</p>
+          {!error && !premium && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500">
+              Custom photos with Premium
+            </p>
           )}
           {error && (
             <p className="text-[11px] text-red-600 dark:text-red-400">{error}</p>
@@ -928,10 +1023,10 @@ function AvatarUploadRow({
         type="file"
         accept="image/*"
         className="hidden"
-        disabled={premiumLocked}
+        disabled={!premium}
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) onFilePick(f);
+          if (f) handleFile(f);
         }}
       />
     </div>
@@ -947,36 +1042,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function LabeledInput({
-  label, value, onChange, placeholder, maxLength, hint, disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  maxLength?: number;
-  hint?: string;
-  disabled?: boolean;
-}) {
+function RowLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-        {label}
-      </label>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        maxLength={maxLength}
-        disabled={disabled}
-        spellCheck={false}
-        className={`w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-      />
-      {hint && (
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">{hint}</p>
-      )}
-    </div>
+    <p className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+      {children}
+    </p>
   );
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { Gear } from '@phosphor-icons/react';
+import { getDefaultAvatarDataUri } from '@/lib/default-avatar';
 
 interface SettingsButtonProps {
   onClick: () => void;
@@ -12,13 +13,22 @@ interface SettingsButtonProps {
   avatarUrl?: string | null;
   /** Farcaster pfp fallback for miniapp users who haven't set avatarUrl. */
   pfpUrl?: string | null;
+  /**
+   * Identifier (handle, wallet, email) used to derive a deterministic
+   * monogram tile when no `avatarUrl`/`pfpUrl` is present. Lets a
+   * signed-in free user see their colored initial here instead of a
+   * generic gear. When omitted (truly anonymous viewer) the button
+   * keeps its gear icon — there's no identity to monogram yet.
+   */
+  seed?: string | null;
 }
 
 /**
  * Top-right settings affordance. Absolute-positioned so the centered
- * header doesn't reflow around it. Renders as a gear icon by default,
- * swaps to the user's avatar when one is available. Click opens the
- * SettingsModal in the parent.
+ * header doesn't reflow around it. Renders as a gear icon for the
+ * truly-anonymous viewer, the user's monogram tile once they have an
+ * identity (handle/wallet), and their Farcaster/uploaded photo when
+ * one is set. Click opens the SettingsModal in the parent.
  *
  * `top` is tuned to put the gear's vertical center on the same axis
  * as the "Griddle" wordmark so the two read as one header row. The
@@ -30,8 +40,14 @@ interface SettingsButtonProps {
  * explicitly uploads an image shouldn't see their Farcaster photo here
  * just because they're inside a miniapp.
  */
-export function SettingsButton({ onClick, avatarUrl, pfpUrl }: SettingsButtonProps) {
-  const imgSrc = avatarUrl || pfpUrl;
+export function SettingsButton({ onClick, avatarUrl, pfpUrl, seed }: SettingsButtonProps) {
+  // Stay on `||` (not `??`) end-to-end so empty-string variants of
+  // either source — `avatarUrl=null, pfpUrl=""` slipping in from a
+  // sync that wrote a blank string — still fall through to the
+  // monogram instead of rendering an empty <img>.
+  const explicit = avatarUrl || pfpUrl;
+  const monogram = !explicit && seed ? getDefaultAvatarDataUri(seed) : null;
+  const imgSrc = explicit || monogram;
   return (
     <button
       type="button"

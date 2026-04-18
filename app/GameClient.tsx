@@ -19,6 +19,7 @@ import { CreateProfileModal } from '@/components/CreateProfileModal';
 import { PremiumGateModal } from '@/components/PremiumGateModal';
 import { SettingsModal, type ProfileSnapshot } from '@/components/SettingsModal';
 import { SettingsButton } from '@/components/SettingsButton';
+import { pickAvatarSeed } from '@/lib/default-avatar';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
 import { useFarcaster } from '@/lib/farcaster';
@@ -1036,6 +1037,11 @@ export default function GameClient({
         onClick={() => setShowSettings(true)}
         avatarUrl={profile?.avatarUrl ?? null}
         pfpUrl={pfpUrl}
+        seed={pickAvatarSeed({
+          handle: profile?.handle,
+          wallet: sessionWallet,
+          email: profile?.email,
+        })}
       />
 
       <main className="flex-1 flex flex-col items-center px-4 pt-4 pb-6 gap-6">
@@ -1227,6 +1233,7 @@ export default function GameClient({
         profileLoaded={profileLoaded}
         pfpUrl={profile?.avatarUrl ?? pfpUrl}
         username={profile?.handle ?? username}
+        email={profile?.email ?? null}
         onCreateProfile={() => { setBrowseTab(null); setShowCreateProfile(true); }}
         onUpgrade={() => {
           setBrowseTab(null);
