@@ -608,6 +608,16 @@ function OnboardingPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // If `sessionWallet` binds *after* this panel mounts (e.g. user
+  // opened Settings while anonymous, then connected a wallet from the
+  // Sign-in methods row below), `useState(initial)` would otherwise
+  // hold the empty string forever and the wallet-derived suggestion
+  // would never appear. Pre-fill only when the user hasn't typed —
+  // we never overwrite an in-flight draft.
+  useEffect(() => {
+    setDraft((current) => (current ? current : initial));
+  }, [initial]);
+
   const trimmed = draft.trim().toLowerCase();
   const previewSeed = trimmed || sessionWallet || 'guest';
   const previewSrc = getDefaultAvatarDataUri(previewSeed);

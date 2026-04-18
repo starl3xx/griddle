@@ -41,9 +41,13 @@ interface SettingsButtonProps {
  * just because they're inside a miniapp.
  */
 export function SettingsButton({ onClick, avatarUrl, pfpUrl, seed }: SettingsButtonProps) {
+  // Stay on `||` (not `??`) end-to-end so empty-string variants of
+  // either source — `avatarUrl=null, pfpUrl=""` slipping in from a
+  // sync that wrote a blank string — still fall through to the
+  // monogram instead of rendering an empty <img>.
   const explicit = avatarUrl || pfpUrl;
   const monogram = !explicit && seed ? getDefaultAvatarDataUri(seed) : null;
-  const imgSrc = explicit ?? monogram;
+  const imgSrc = explicit || monogram;
   return (
     <button
       type="button"
