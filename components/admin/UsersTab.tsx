@@ -137,13 +137,13 @@ export function UsersTab() {
     <div className="space-y-4">
       <div className="flex flex-col md:flex-row gap-3 md:items-center">
         <div className="relative flex-1">
-          <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" weight="bold" />
+          <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" weight="bold" />
           <input
             type="search"
             placeholder="Search wallet, handle, or session…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand bg-white"
+            className="w-full pl-9 pr-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand bg-white dark:bg-gray-900"
           />
         </div>
         <div className="flex gap-1.5">
@@ -155,7 +155,7 @@ export function UsersTab() {
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
                 type === t
                   ? 'bg-brand text-white'
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               {t}
@@ -170,32 +170,32 @@ export function UsersTab() {
       </div>
 
       {pagination && (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           {pagination.total.toLocaleString()} {pagination.total === 1 ? 'player' : 'players'}
           {debouncedQuery && ` matching "${debouncedQuery}"`}
         </p>
       )}
 
       {loading ? (
-        <div className="flex justify-center py-12"><CircleNotch className="w-6 h-6 animate-spin text-gray-400" weight="bold" /></div>
+        <div className="flex justify-center py-12"><CircleNotch className="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>
       ) : error ? (
         <p className="text-sm text-red-600 text-center py-8">{error}</p>
       ) : users.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-8">No players found.</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">No players found.</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
           <table className="min-w-full divide-y divide-gray-100 text-sm">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Identity</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Email</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Wallet / Session</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Premium</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Solves / Joined</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Identity</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Email</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Wallet / Session</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Premium</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Solves / Joined</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
+            <tbody className="divide-y divide-gray-100 bg-white dark:bg-gray-900">
               {users.map((u) => (
                 u.kind === 'registered' ? (
                   <RegisteredTr key={`r-${u.id}`} u={u} onEdit={() => setEditingUser(u)} onOpen={() => openDossier(u)} />
@@ -211,12 +211,12 @@ export function UsersTab() {
       {pagination && pagination.pages > 1 && (
         <div className="flex items-center justify-between">
           <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-            className="text-sm text-gray-600 hover:text-brand disabled:opacity-40 transition-colors">
+            className="text-sm text-gray-600 dark:text-gray-400 hover:text-brand disabled:opacity-40 transition-colors">
             ← Previous
           </button>
-          <span className="text-xs text-gray-500">Page {page} of {pagination.pages}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">Page {page} of {pagination.pages}</span>
           <button type="button" disabled={page >= pagination.pages} onClick={() => setPage((p) => p + 1)}
-            className="text-sm text-gray-600 hover:text-brand disabled:opacity-40 transition-colors">
+            className="text-sm text-gray-600 dark:text-gray-400 hover:text-brand disabled:opacity-40 transition-colors">
             Next →
           </button>
         </div>
@@ -250,42 +250,42 @@ function rowLabel(u: RegisteredRow): string {
 
 function RegisteredTr({ u, onEdit, onOpen }: { u: RegisteredRow; onEdit: () => void; onOpen: () => void }) {
   return (
-    <tr className="hover:bg-gray-50 cursor-pointer" onClick={onOpen}>
+    <tr className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer" onClick={onOpen}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2.5">
           {u.avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={u.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
           ) : (
-            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-gray-500 text-xs font-bold">
+            <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0 text-gray-500 dark:text-gray-400 text-xs font-bold">
               {rowLabel(u)[0].toUpperCase()}
             </div>
           )}
           <div className="min-w-0">
-            <p className="font-semibold text-gray-900 truncate">{rowLabel(u)}</p>
+            <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{rowLabel(u)}</p>
             {u.farcasterUsername && <p className="text-[11px] text-purple-600 truncate">@{u.farcasterUsername}</p>}
           </div>
         </div>
       </td>
       <td className="px-4 py-3 text-xs">
         {u.email ? (
-          <span className="text-gray-700 inline-flex items-center gap-1">
+          <span className="text-gray-700 dark:text-gray-300 inline-flex items-center gap-1">
             {u.email}
             {u.emailVerifiedAt && <Check className="w-3 h-3 text-green-600" weight="bold" aria-label="verified" />}
           </span>
-        ) : <span className="text-gray-300">—</span>}
+        ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
       </td>
-      <td className="px-4 py-3 font-mono text-xs text-gray-600">
-        {u.wallet ? <>{u.wallet.slice(0, 6)}&hellip;{u.wallet.slice(-4)}</> : <span className="text-gray-300">—</span>}
+      <td className="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">
+        {u.wallet ? <>{u.wallet.slice(0, 6)}&hellip;{u.wallet.slice(-4)}</> : <span className="text-gray-300 dark:text-gray-600">—</span>}
       </td>
       <td className="px-4 py-3">
         {u.premium ? (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent">
             <Crown className="w-3 h-3" weight="fill" /> {u.premiumSource ?? 'premium'}
           </span>
-        ) : <span className="text-gray-300 text-[11px]">—</span>}
+        ) : <span className="text-gray-300 dark:text-gray-600 text-[11px]">—</span>}
       </td>
-      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+      <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
         {new Date(u.createdAt).toLocaleDateString()}
       </td>
       <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
@@ -299,26 +299,26 @@ function RegisteredTr({ u, onEdit, onOpen }: { u: RegisteredRow; onEdit: () => v
 
 function AnonTr({ u, onOpen }: { u: AnonRow; onOpen: () => void }) {
   return (
-    <tr className="hover:bg-gray-50 cursor-pointer" onClick={onOpen}>
+    <tr className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer" onClick={onOpen}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-gray-400">
+          <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0 text-gray-400 dark:text-gray-500">
             <User className="w-4 h-4" weight="bold" aria-hidden />
           </div>
           <div className="min-w-0">
-            <p className="font-mono text-[12px] text-gray-700 truncate">anon:{u.sessionId.slice(0, 8)}</p>
-            <p className="text-[11px] text-gray-400">no account</p>
+            <p className="font-mono text-[12px] text-gray-700 dark:text-gray-300 truncate">anon:{u.sessionId.slice(0, 8)}</p>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">no account</p>
           </div>
         </div>
       </td>
-      <td className="px-4 py-3 text-xs"><span className="text-gray-300">—</span></td>
-      <td className="px-4 py-3 font-mono text-xs text-gray-400 truncate max-w-[180px]">{u.sessionId.slice(0, 16)}…</td>
-      <td className="px-4 py-3"><span className="text-gray-300 text-[11px]">—</span></td>
-      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+      <td className="px-4 py-3 text-xs"><span className="text-gray-300 dark:text-gray-600">—</span></td>
+      <td className="px-4 py-3 font-mono text-xs text-gray-400 dark:text-gray-500 truncate max-w-[180px]">{u.sessionId.slice(0, 16)}…</td>
+      <td className="px-4 py-3"><span className="text-gray-300 dark:text-gray-600 text-[11px]">—</span></td>
+      <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
         {u.solves} solve{u.solves === 1 ? '' : 's'} · last {new Date(u.lastActive).toLocaleDateString()}
       </td>
       <td className="px-4 py-3 text-right">
-        <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">view →</span>
+        <span className="text-[10px] text-gray-400 dark:text-gray-500 font-semibold uppercase tracking-wider">view →</span>
       </td>
     </tr>
   );
@@ -413,11 +413,11 @@ function EditUserModal({
       <div className="modal-sheet animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start gap-3 mb-5">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold tracking-tight text-gray-900">Edit profile #{user.id}</h2>
-            <p className="text-[11px] text-gray-500 font-mono truncate">{user.wallet ?? 'no wallet'}</p>
+            <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Edit profile #{user.id}</h2>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">{user.wallet ?? 'no wallet'}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
-            className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors">
+            className="w-8 h-8 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4" aria-hidden>
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>
@@ -427,16 +427,16 @@ function EditUserModal({
         <div className="space-y-4">
           <Field label="Username">
             <input type="text" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="(unset)"
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
           </Field>
           <Field label="Email">
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="(unset)"
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
           </Field>
 
           <label className="flex items-center gap-3 cursor-pointer">
             <input type="checkbox" checked={premium} onChange={(e) => setPremium(e.target.checked)} className="w-4 h-4 accent-accent" />
-            <span className="text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 inline-flex items-center gap-1.5">
               <Crown className="w-4 h-4 text-accent" weight="fill" aria-hidden />Premium
             </span>
             {user.premium && user.premiumSource && !premium && (
@@ -449,8 +449,8 @@ function EditUserModal({
               <input type="text" value={reason} onChange={(e) => setReason(e.target.value)}
                 placeholder="e.g. launch contributor, support comp, Farcaster giveaway"
                 maxLength={200}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
-              <p className="text-[10px] text-gray-400 mt-1">Appears in the Grant tab’s Recent Grants audit list.</p>
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand" />
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Appears in the Grant tab’s Recent Grants audit list.</p>
             </Field>
           )}
 
@@ -465,7 +465,7 @@ function EditUserModal({
             </button>
           </div>
 
-          <div className="border-t border-gray-100 pt-4">
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
             {confirmDelete ? (
               <div className="flex items-center gap-2">
                 <p className="flex-1 text-[11px] text-red-700">
@@ -476,7 +476,7 @@ function EditUserModal({
                   {deleting ? 'Deleting…' : 'Delete'}
                 </button>
                 <button type="button" onClick={() => setConfirmDelete(false)} disabled={deleting}
-                  className="text-xs text-gray-500 hover:text-gray-800 font-semibold">Cancel</button>
+                  className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-800 font-semibold">Cancel</button>
               </div>
             ) : (
               <button type="button" onClick={() => setConfirmDelete(true)}
@@ -494,7 +494,7 @@ function EditUserModal({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">{label}</label>
+      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">{label}</label>
       {children}
     </div>
   );

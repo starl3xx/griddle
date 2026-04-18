@@ -175,7 +175,7 @@ export function GrantTab() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 {mode === 'wallet' ? 'Wallet address' : 'Handle'}
               </label>
               <Input
@@ -193,7 +193,7 @@ export function GrantTab() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 Reason (optional)
               </label>
               <Input
@@ -257,10 +257,10 @@ export function GrantTab() {
         <CardContent>
           {grantsLoading && grants.length === 0 ? (
             <div className="flex justify-center py-8">
-              <CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" />
+              <CircleNotch className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" />
             </div>
           ) : grants.length === 0 ? (
-            <p className="text-center text-sm text-gray-500 py-8">
+            <p className="text-center text-sm text-gray-500 dark:text-gray-400 py-8">
               No grants yet. Comp one above to get started.
             </p>
           ) : (
@@ -288,12 +288,12 @@ export function GrantTab() {
                         {new Date(g.unlockedAt).toISOString().replace('T', ' ').slice(0, 19)}
                       </TableCell>
                       <TableCell className="font-mono text-xs">{identityLabel}</TableCell>
-                      <TableCell className="font-mono text-xs text-gray-500">
+                      <TableCell className="font-mono text-xs text-gray-500 dark:text-gray-400">
                         {g.grantedBy
                           ? `${g.grantedBy.slice(0, 6)}…${g.grantedBy.slice(-4)}`
                           : '—'}
                       </TableCell>
-                      <TableCell className="text-xs text-gray-600 max-w-xs truncate">
+                      <TableCell className="text-xs text-gray-600 dark:text-gray-400 max-w-xs truncate">
                         {g.reason ?? '—'}
                       </TableCell>
                     </TableRow>

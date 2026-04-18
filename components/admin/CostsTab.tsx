@@ -108,12 +108,12 @@ export function CostsTab() {
     }
   };
 
-  if (loading && !rows) return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" /></div>;
+  if (loading && !rows) return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold tracking-tight text-gray-900">Costs</h2>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Costs</h2>
         <div className="flex gap-2">
           <Button variant="ghost" size="sm" onClick={fetchRows} aria-label="Refresh">
             <ArrowsClockwise className="h-4 w-4" weight="bold" />
@@ -126,16 +126,16 @@ export function CostsTab() {
 
       <Card>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-gray-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
             <Receipt className="h-4 w-4" weight="bold" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Monthly op costs</span>
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
           {(rows ?? []).length === 0 ? (
-            <p className="text-sm text-gray-500 py-4 text-center">No cost rows yet. Click Add row.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">No cost rows yet. Click Add row.</p>
           ) : (
             <table className="w-full text-sm">
-              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 <tr>
                   <th className="py-1 pr-2 text-left">Category</th>
                   <th className="py-1 px-2 text-left">Label</th>
@@ -147,7 +147,7 @@ export function CostsTab() {
               </thead>
               <tbody>
                 {(rows ?? []).map((r) => (
-                  <tr key={r.id} className="border-t border-gray-100">
+                  <tr key={r.id} className="border-t border-gray-100 dark:border-gray-800">
                     <td className="py-1 pr-2">
                       <InlineInput
                         value={r.category}
@@ -175,24 +175,24 @@ export function CostsTab() {
                       />
                     </td>
                     <td className="py-1 px-2">
-                      <InlineInput value={r.notes ?? ''} onSave={(v) => updateRow(r.id, { notes: v || null })} className="text-[12px] text-gray-500" />
+                      <InlineInput value={r.notes ?? ''} onSave={(v) => updateRow(r.id, { notes: v || null })} className="text-[12px] text-gray-500 dark:text-gray-400" />
                     </td>
-                    <td className="py-1 px-2 text-right text-[11px] text-gray-400 tabular-nums">
+                    <td className="py-1 px-2 text-right text-[11px] text-gray-400 dark:text-gray-500 tabular-nums">
                       {new Date(r.updatedAt).toLocaleDateString()}
                     </td>
                     <td className="py-1 pl-2 text-right">
                       <button type="button" onClick={() => deleteRow(r.id)} disabled={savingId === r.id} aria-label="Delete row"
-                        className="text-gray-400 hover:text-red-600 disabled:opacity-50">
+                        className="text-gray-400 dark:text-gray-500 hover:text-red-600 disabled:opacity-50">
                         <Trash className="w-4 h-4" weight="bold" />
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
-              <tfoot className="border-t-2 border-gray-200">
+              <tfoot className="border-t-2 border-gray-200 dark:border-gray-700">
                 <tr>
-                  <td colSpan={2} className="py-2 text-right font-bold uppercase tracking-wider text-[11px] text-gray-600">Monthly total</td>
-                  <td className="py-2 px-2 text-right tabular-nums font-black text-base text-gray-900">${total.toFixed(2)}</td>
+                  <td colSpan={2} className="py-2 text-right font-bold uppercase tracking-wider text-[11px] text-gray-600 dark:text-gray-400">Monthly total</td>
+                  <td className="py-2 px-2 text-right tabular-nums font-black text-base text-gray-900 dark:text-gray-100">${total.toFixed(2)}</td>
                   <td colSpan={3}></td>
                 </tr>
               </tfoot>
@@ -200,7 +200,7 @@ export function CostsTab() {
           )}
         </CardContent>
       </Card>
-      <p className="text-[11px] text-gray-400">
+      <p className="text-[11px] text-gray-400 dark:text-gray-500">
         Pulse Revenue prorates this total by days-elapsed when computing net MTD.
       </p>
     </div>

@@ -109,7 +109,7 @@ export function TransactionsTab() {
       <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
         <div className="relative flex-1 max-w-md">
           <MagnifyingGlass
-            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400"
+            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500"
             weight="bold"
             aria-hidden
           />
@@ -153,12 +153,12 @@ export function TransactionsTab() {
             {loading && !data ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8">
-                  <CircleNotch className="inline h-4 w-4 animate-spin text-gray-400" weight="bold" />
+                  <CircleNotch className="inline h-4 w-4 animate-spin text-gray-400 dark:text-gray-500" weight="bold" />
                 </TableCell>
               </TableRow>
             ) : data && data.rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-sm text-gray-500">
+                <TableCell colSpan={7} className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
                   No transactions match.
                 </TableCell>
               </TableRow>
@@ -167,10 +167,10 @@ export function TransactionsTab() {
                 <TableRow key={`${row.wallet}-${row.unlockedAt}`}>
                   <TableCell>
                     <div className="flex flex-col gap-0.5">
-                      <span className="font-medium text-gray-900">
+                      <span className="font-medium text-gray-900 dark:text-gray-100">
                         {formatPlayerName({ handle: row.handle, wallet: row.wallet })}
                       </span>
-                      <span className="font-mono text-[11px] text-gray-500">
+                      <span className="font-mono text-[11px] text-gray-500 dark:text-gray-400">
                         {shortWallet(row.wallet)}
                       </span>
                     </div>
@@ -187,7 +187,7 @@ export function TransactionsTab() {
                   <TableCell>
                     <EscrowPill status={row.escrowStatus} source={row.source} />
                   </TableCell>
-                  <TableCell className="text-sm text-gray-600">
+                  <TableCell className="text-sm text-gray-600 dark:text-gray-400">
                     {formatDate(row.unlockedAt)}
                   </TableCell>
                   <TableCell>
@@ -205,7 +205,7 @@ export function TransactionsTab() {
       </div>
 
       {data && data.pagination.pages > 1 && (
-        <div className="flex items-center justify-between text-sm text-gray-600">
+        <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
           <div>
             Page {data.pagination.page} of {data.pagination.pages} · {data.pagination.total} rows
           </div>
@@ -259,13 +259,13 @@ function SourceBadge({ source }: { source: string }) {
   const style = (() => {
     switch (source) {
       case 'crypto':
-        return 'bg-blue-50 text-blue-700 border-blue-200';
+        return 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200';
       case 'fiat':
-        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        return 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200';
       case 'admin_grant':
-        return 'bg-amber-50 text-amber-700 border-amber-200';
+        return 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200';
       default:
-        return 'bg-gray-50 text-gray-700 border-gray-200';
+        return 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700';
     }
   })();
   return (
@@ -283,20 +283,20 @@ function EscrowPill({
   source: string;
 }) {
   if (source === 'crypto') {
-    return <span className="text-xs text-gray-500">burned on unlock</span>;
+    return <span className="text-xs text-gray-500 dark:text-gray-400">burned on unlock</span>;
   }
   if (source === 'admin_grant') {
-    return <span className="text-xs text-gray-500">n/a</span>;
+    return <span className="text-xs text-gray-500 dark:text-gray-400">n/a</span>;
   }
   if (!status) {
-    return <span className="text-xs text-gray-400">—</span>;
+    return <span className="text-xs text-gray-400 dark:text-gray-500">—</span>;
   }
   const style =
     status === 'pending'
       ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
       : status === 'burned'
-      ? 'bg-gray-50 text-gray-700 border-gray-200'
-      : 'bg-rose-50 text-rose-700 border-rose-200';
+      ? 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+      : 'bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 border-rose-200';
   return (
     <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full border ${style}`}>
       {status}
@@ -310,7 +310,7 @@ function TxLink({ hash, label }: { hash: string; label: string }) {
       href={`${BASESCAN_TX}${hash}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-0.5 text-xs text-blue-700 hover:underline"
+      className="inline-flex items-center gap-0.5 text-xs text-blue-700 dark:text-blue-400 hover:underline"
     >
       {label}
       <ArrowSquareOut className="h-3 w-3" weight="bold" aria-hidden />
