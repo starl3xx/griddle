@@ -1006,43 +1006,48 @@ export async function upsertProfile(input: UpsertProfileInput): Promise<ProfileR
       : Promise.resolve(null),
   ]);
 
-  // Merge case: wallet and handle each point at DIFFERENT existing rows.
-  // This is the "handle-only fiat profile later connects a wallet that
-  // already has a crypto profile" scenario. The cross-row merge needs
-  // to atomically DELETE the handle-only row and UPDATE the wallet row
-  // to pick up the handle  -  but the runtime `db` client uses the
-  // stateless neon-http driver, which does not support interactive
-  // `db.transaction()`. Implementing this atomically requires a single
-  // raw-SQL CTE (one HTTP round trip = one implicit server transaction).
+  // Cross-row merge detection. Any two of {byWallet, byHandle, bySession}
+  // pointing at different profile rows is a merge conflict we refuse to
+  // silently resolve — the stateless neon-http driver can't run a
+  // proper CTE merge, so the options are either (a) half-merge and
+  // corrupt identity, or (b) surface a typed error and let the caller
+  // decide. We pick (b).
   //
-  // Rather than ship a half-right merge in the scaffolding PR, detect
-  // the case and throw an explicit `MergeConflictError`. M5-premium-checkout will add
-  // a dedicated `mergeProfiles(walletId, handleId)` helper that runs
-  // the CTE when it actually needs this path (wallet-link flow from
-  // the handle-only Apple Pay path). No call sites hit upsertProfile
-  // yet, so throwing here is a safe contract for the scaffolding.
-  if (byWallet && byHandle && byWallet.id !== byHandle.id) {
-    throw new MergeConflictError(byWallet.id, byHandle.id);
+  // Pairwise over three lookups:
+  //   byWallet  vs byHandle   — original merge case (handle-only fiat
+  //                             profile + later-linked wallet profile)
+  //   byWallet  vs bySession  — wallet buyer whose stripe session id is
+  //                             already attached to a different profile
+  //                             (e.g. webhook wrote to the email row,
+  //                             but the wallet already owns a profile)
+  //   byHandle  vs bySession  — equivalent case for handle-path fiat
+  //
+  // The earlier byWallet/byHandle-only check is a special case of this
+  // loop; unifying them keeps the pairwise semantics explicit.
+  const candidates = [byWallet, byHandle, bySession];
+  const seenIds = new Set<number>();
+  let conflictA: number | null = null;
+  let conflictB: number | null = null;
+  for (const c of candidates) {
+    if (!c) continue;
+    if (seenIds.size > 0 && !seenIds.has(c.id)) {
+      conflictA = [...seenIds][0];
+      conflictB = c.id;
+      break;
+    }
+    seenIds.add(c.id);
+  }
+  if (conflictA !== null && conflictB !== null) {
+    throw new MergeConflictError(conflictA, conflictB);
   }
 
-  // Session-id row merge: if a profile with this Stripe session id
-  // already exists (webhook-pre-created on an anonymous fiat buy) and
-  // we're arriving with a wallet/handle for the same buyer, pick that
-  // row up and patch the new identity anchors onto it. Don't overwrite
-  // the email — it was captured from the trusted Stripe event and
-  // remains the durable claim anchor.
-  //
-  // Reject the cross-buyer case: if bySession and byWallet/byHandle
-  // point at different rows, the stripe session id legitimately
-  // belongs to a different buyer, which would be either a client bug
-  // (stale sessionId) or a manual admin-level fix waiting to happen.
-  // Surface as MergeConflictError so the caller can log + refuse
-  // rather than silently mis-merging identities.
+  // Session-id row merge: bySession points at the same row as any
+  // populated byWallet/byHandle (guaranteed by the pairwise check
+  // above). Use it as the target so the webhook-created email profile
+  // picks up a wallet / handle from the migrate call. Don't overwrite
+  // the email — captured from the Stripe event, remains the durable
+  // claim anchor.
   if (bySession) {
-    const other = byWallet ?? byHandle;
-    if (other && other.id !== bySession.id) {
-      throw new MergeConflictError(other.id, bySession.id);
-    }
     return updateProfileInPlace(bySession.id, {
       wallet: wallet ?? bySession.wallet,
       handle: handle ?? bySession.handle,
@@ -1804,33 +1809,50 @@ export async function recordFiatUnlock(input: RecordFiatUnlockInput): Promise<vo
   // did, the migrate route's catch block would restore the session key even
   // though the premium_users insert already committed, allowing a second
   // wallet to claim the same session and create a double-grant.
-  // Anonymous-with-email case (no wallet, no handle): land the buyer on
-  // an email-only profile so the magic-link sign-in later finds a row
-  // already marked premium. getOrCreateProfileByEmail gives us the
-  // email-as-PK + emailVerifiedAt=null (webhook-created, not verified)
-  // semantics that `upsertProfile` can't express cleanly since it only
-  // keys on wallet/handle.
+  // Anonymous-with-email case (no wallet, no handle).
+  //
+  // SECURITY: we MUST NOT stamp a new stripeSessionId onto an existing
+  // email-owned profile here. The email is unverified — Stripe only
+  // saw it once on a checkout form. If an attacker pays $6 using a
+  // victim's email, stamping the session id on the victim's profile
+  // would let the attacker later connect their own wallet via
+  // /api/premium/migrate and have upsertProfile's bySession lookup
+  // silently rewire the victim's wallet to the attacker's. See
+  // Bugbot finding on commit c248e8c.
+  //
+  // Safe behavior: only attribute this purchase to a profile if we
+  // CREATE one fresh. If the email already owns a profile, the
+  // purchase is orphaned — session KV still grants premium on the
+  // buyer's current device, and an admin can reconcile manually.
+  // Future work: a magic-link-to-claim flow where the real email
+  // owner explicitly links an orphaned purchase after verifying.
   if (!wallet && !handle && emailValue) {
     try {
-      const p = await getOrCreateProfileByEmail(emailValue, { verify: false });
-      // Apply the fiat flags on top of the freshly-created email row.
-      // updateProfileInPlace keeps the email itself, bumps updatedAt,
-      // and stamps premiumSource + stripeSessionId so /api/premium/session
-      // and the admin tab both see the purchase. If the row already
-      // existed (the email had a prior profile), we still want to flip
-      // it premium — the second capture doesn't invalidate the first.
-      await updateProfileInPlace(p.id, {
-        wallet: p.wallet,
-        handle: p.handle,
-        premiumSource: 'fiat',
-        grantedBy: p.grantedBy,
-        reason: p.reason,
-        stripeSessionId: input.stripeSessionId,
-        email: p.email ?? emailValue,
-      });
+      const inserted = await db
+        .insert(profiles)
+        .values({
+          email: emailValue,
+          emailVerifiedAt: null, // Stripe email is unverified until a magic-link click
+          premiumSource: 'fiat',
+          stripeSessionId: input.stripeSessionId,
+          updatedAt: new Date(),
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted.length === 0) {
+        // Email already owns a profile — by design we don't touch it.
+        // The caller (webhook) still has the session KV grant, so the
+        // buyer's current browser keeps premium. The DB has no profile-
+        // level trace of this purchase until a follow-up claim flow
+        // ships.
+        console.warn(
+          '[recordFiatUnlock] email already owns a profile — purchase orphaned at profile level (session KV still grants premium)',
+          { stripeSessionId: input.stripeSessionId, email: emailValue },
+        );
+      }
     } catch (err) {
       console.error(
-        '[recordFiatUnlock] email-only profile upsert failed (non-fatal, session KV still gates premium)',
+        '[recordFiatUnlock] email-only profile insert failed (non-fatal, session KV still gates premium)',
         err,
       );
     }
