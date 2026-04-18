@@ -85,13 +85,13 @@ export function UserDossierModal({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto animate-slide-up"
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-3 flex items-center justify-between">
-          <h2 className="text-sm font-bold tracking-tight text-gray-900">Dossier · {label}</h2>
+        <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 px-5 py-3 flex items-center justify-between">
+          <h2 className="text-sm font-bold tracking-tight text-gray-900 dark:text-gray-100">Dossier · {label}</h2>
           <button type="button" onClick={onClose} aria-label="Close"
-            className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors">
+            className="w-8 h-8 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4" aria-hidden>
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>
@@ -99,8 +99,8 @@ export function UserDossierModal({
         </div>
 
         <div className="p-5 space-y-5">
-          {loading && <div className="flex justify-center py-12"><CircleNotch className="w-6 h-6 animate-spin text-gray-400" weight="bold" /></div>}
-          {error && <p className="text-sm text-red-600 text-center py-8">{error}</p>}
+          {loading && <div className="flex justify-center py-12"><CircleNotch className="w-6 h-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>}
+          {error && <p className="text-sm text-red-600 dark:text-red-400 text-center py-8">{error}</p>}
 
           {data && (
             <>
@@ -120,13 +120,13 @@ function SummarySection({ d }: { d: DossierData }) {
   const s = d.summary;
   return (
     <section>
-      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">Summary</h3>
+      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Summary</h3>
       <div className="grid grid-cols-2 gap-3 text-sm">
         <Kv k="Identity kind" v={s.identityKind} />
         <Kv k="Profile id" v={s.profileId != null ? `#${s.profileId}` : '—'} />
         <Kv k="Handle" v={s.handle ?? '—'} />
         <Kv k="Email" v={s.email ? (
-          <span className="inline-flex items-center gap-1">{s.email}{s.emailVerifiedAt && <Check className="w-3 h-3 text-emerald-600" weight="bold" />}</span>
+          <span className="inline-flex items-center gap-1">{s.email}{s.emailVerifiedAt && <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" weight="bold" />}</span>
         ) : '—'} />
         <Kv k="Wallet" v={s.wallet ? <code className="text-[11px]">{s.wallet.slice(0, 8)}…{s.wallet.slice(-6)}</code> : '—'} />
         <Kv k="Session" v={s.sessionId ? <code className="text-[11px]">{s.sessionId.slice(0, 12)}…</code> : '—'} />
@@ -140,8 +140,8 @@ function SummarySection({ d }: { d: DossierData }) {
             <p className="font-bold text-accent-700">
               Premium · {s.premiumSource ?? 'unknown source'}
             </p>
-            {s.premiumReason && <p className="text-gray-600 mt-0.5">“{s.premiumReason}”</p>}
-            {s.premiumGrantedBy && <p className="text-[10px] text-gray-400 mt-0.5 font-mono">granted by {s.premiumGrantedBy}</p>}
+            {s.premiumReason && <p className="text-gray-600 dark:text-gray-400 mt-0.5">“{s.premiumReason}”</p>}
+            {s.premiumGrantedBy && <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 font-mono">granted by {s.premiumGrantedBy}</p>}
           </div>
         </div>
       )}
@@ -155,12 +155,12 @@ function SolvesSection({ d }: { d: DossierData }) {
   }
   return (
     <section>
-      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">
+      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
         Recent solves ({d.solves.length} of {d.totalSolves})
       </h3>
-      <div className="rounded-lg border border-gray-200 overflow-hidden">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
         <table className="w-full text-[12px]">
-          <thead className="bg-gray-50 text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+          <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider text-[10px]">
             <tr>
               <th className="py-1.5 px-2 text-left">Day</th>
               <th className="py-1.5 px-2 text-left">Answer</th>
@@ -169,16 +169,16 @@ function SolvesSection({ d }: { d: DossierData }) {
               <th className="py-1.5 px-2 text-right">When</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {d.solves.map((s, i) => (
               <tr key={`${s.puzzleId}-${i}`}>
-                <td className="py-1.5 px-2 tabular-nums text-gray-600">#{s.dayNumber}</td>
-                <td className="py-1.5 px-2 font-mono tracking-wider text-gray-800"><PuzzlePiece className="inline w-3 h-3 mr-1 text-gray-400" weight="bold" />{s.answer}</td>
+                <td className="py-1.5 px-2 tabular-nums text-gray-600 dark:text-gray-400">#{s.dayNumber}</td>
+                <td className="py-1.5 px-2 font-mono tracking-wider text-gray-800 dark:text-gray-200"><PuzzlePiece className="inline w-3 h-3 mr-1 text-gray-400 dark:text-gray-500" weight="bold" />{s.answer}</td>
                 <td className="py-1.5 px-2 text-right tabular-nums">{s.serverSolveMs ? formatMs(s.serverSolveMs) : '—'}</td>
                 <td className="py-1.5 px-2">
-                  {s.flag ? <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${s.flag === 'ineligible' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{s.flag}</span> : <span className="text-gray-300">—</span>}
+                  {s.flag ? <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${s.flag === 'ineligible' ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400'}`}>{s.flag}</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
                 </td>
-                <td className="py-1.5 px-2 text-right tabular-nums text-gray-500">{new Date(s.createdAt).toLocaleDateString()}</td>
+                <td className="py-1.5 px-2 text-right tabular-nums text-gray-500 dark:text-gray-400">{new Date(s.createdAt).toLocaleDateString()}</td>
               </tr>
             ))}
           </tbody>
@@ -194,14 +194,14 @@ function FunnelSection({ d }: { d: DossierData }) {
   }
   return (
     <section>
-      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">Recent funnel events</h3>
+      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Recent funnel events</h3>
       <ul className="space-y-1 text-[12px]">
         {d.funnelEvents.map((e, i) => (
-          <li key={i} className="flex items-center gap-2 text-gray-700">
-            <span className="font-mono text-[11px] text-gray-400 w-20 flex-shrink-0">{new Date(e.createdAt).toLocaleDateString()}</span>
+          <li key={i} className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+            <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500 w-20 flex-shrink-0">{new Date(e.createdAt).toLocaleDateString()}</span>
             <span className="font-semibold">{e.eventName}</span>
             {Object.keys(e.metadata).length > 0 && (
-              <span className="text-gray-500 text-[11px]">
+              <span className="text-gray-500 dark:text-gray-400 text-[11px]">
                 {Object.entries(e.metadata).map(([k, v]) => `${k}=${String(v)}`).join(', ')}
               </span>
             )}
@@ -218,7 +218,7 @@ function WordmarksSection({ d }: { d: DossierData }) {
   }
   return (
     <section>
-      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">Wordmarks earned ({d.wordmarks.length})</h3>
+      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Wordmarks earned ({d.wordmarks.length})</h3>
       <div className="flex flex-wrap gap-1.5">
         {d.wordmarks.map((w, i) => (
           <span key={i} className="inline-flex items-center gap-1 text-[11px] font-bold rounded-full bg-brand-100 text-brand-800 px-2 py-0.5">
@@ -234,8 +234,8 @@ function WordmarksSection({ d }: { d: DossierData }) {
 function Kv({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{k}</div>
-      <div className="text-gray-800 text-[13px] truncate">{v}</div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">{k}</div>
+      <div className="text-gray-800 dark:text-gray-200 text-[13px] truncate">{v}</div>
     </div>
   );
 }
@@ -243,8 +243,8 @@ function Kv({ k, v }: { k: string; v: React.ReactNode }) {
 function EmptySection({ title, body }: { title: string; body: string }) {
   return (
     <section>
-      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">{title}</h3>
-      <p className="text-[12px] text-gray-400">{body}</p>
+      <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">{title}</h3>
+      <p className="text-[12px] text-gray-400 dark:text-gray-500">{body}</p>
     </section>
   );
 }

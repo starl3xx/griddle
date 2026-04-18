@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X, Eye, EyeSlash, ClockCounterClockwise } from '@phosphor-icons/react';
+import { CircleNotch, ArrowsClockwise, PuzzlePiece, Calendar, TrendUp, X, ClockCounterClockwise } from '@phosphor-icons/react';
 import { formatMsCompact as formatMs, formatMsClock } from '@/lib/format';
 import { ScatterCalibration, type CalibrationPoint } from './charts/ScatterCalibration';
+import { SpoilerAnswer } from './SpoilerAnswer';
+import { tierTone } from './tierTone';
 
 interface PuzzlesPayload {
   today: {
@@ -38,14 +40,6 @@ interface PuzzlesPayload {
     residualStdDev: number;
   };
 }
-
-const TIER_TONE: Record<string, string> = {
-  Gentle: 'bg-emerald-100 text-emerald-800',
-  Easy: 'bg-emerald-50 text-emerald-700',
-  Medium: 'bg-yellow-100 text-yellow-800',
-  Hard: 'bg-orange-100 text-orange-800',
-  Brutal: 'bg-red-100 text-red-800',
-};
 
 /**
  * Puzzles tab — content-ops view. Four sections:
@@ -92,7 +86,7 @@ export function PuzzlesTab() {
 
   useEffect(() => { void fetchData(); }, []);
 
-  if (loading && !data) return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" /></div>;
+  if (loading && !data) return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>;
   if (error) {
     return (
       <div className="text-center py-12">
@@ -114,7 +108,7 @@ export function PuzzlesTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold tracking-tight text-gray-900">Puzzles</h2>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Puzzles</h2>
         <Button variant="ghost" size="sm" onClick={fetchData} aria-label="Refresh">
           <ArrowsClockwise className="h-4 w-4" weight="bold" />
         </Button>
@@ -126,17 +120,17 @@ export function PuzzlesTab() {
           <CardHeader><CardTitle className="text-sm flex items-center gap-1.5"><PuzzlePiece className="w-4 h-4" weight="bold" />Today</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Answer</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Answer</div>
               <SpoilerAnswer
                 answer={data.today.answer}
                 revealed={revealed.has(data.today.puzzleId)}
                 onToggle={() => toggleReveal(data.today!.puzzleId)}
                 size="lg"
               />
-              <div className="font-mono text-[11px] text-gray-500 mt-1">day #{data.today.dayNumber} · {data.today.date}</div>
+              <div className="font-mono text-[11px] text-gray-500 dark:text-gray-400 mt-1">day #{data.today.dayNumber} · {data.today.date}</div>
               <div className="mt-2 flex items-center gap-2 text-[11px]">
-                <span className={`rounded px-1.5 py-0.5 font-bold ${TIER_TONE[data.today.tier] ?? 'bg-gray-100'}`}>{data.today.tier}</span>
-                <span className="text-gray-500">heuristic {data.today.heuristicScore}</span>
+                <span className={`rounded px-1.5 py-0.5 font-bold ${tierTone(data.today.tier)}`}>{data.today.tier}</span>
+                <span className="text-gray-500 dark:text-gray-400">heuristic {data.today.heuristicScore}</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -146,15 +140,15 @@ export function PuzzlesTab() {
               <Metric label="Wordmarks" value={data.today.wordmarksEarned.toLocaleString()} />
             </div>
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Top crumbs found</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Top crumbs found</div>
               {data.today.topCrumbs.length === 0 ? (
-                <p className="text-[12px] text-gray-400">No crumbs yet.</p>
+                <p className="text-[12px] text-gray-400 dark:text-gray-500">No crumbs yet.</p>
               ) : (
                 <ul className="space-y-1 text-sm">
                   {data.today.topCrumbs.map((c) => (
                     <li key={c.word} className="flex justify-between">
                       <span className="font-mono">{c.word}</span>
-                      <span className="tabular-nums text-gray-500">×{c.count}</span>
+                      <span className="tabular-nums text-gray-500 dark:text-gray-400">×{c.count}</span>
                     </li>
                   ))}
                 </ul>
@@ -169,17 +163,17 @@ export function PuzzlesTab() {
         <CardHeader><CardTitle className="text-sm flex items-center gap-1.5"><Calendar className="w-4 h-4" weight="bold" />Upcoming</CardTitle></CardHeader>
         <CardContent>
           {data.upcoming.length === 0 ? (
-            <p className="text-sm text-gray-500">No upcoming puzzles queued.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">No upcoming puzzles queued.</p>
           ) : (
             <table className="w-full text-sm">
-              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 <tr><th className="py-1 pr-2 text-left">Day</th><th className="py-1 px-2 text-left">Date</th><th className="py-1 px-2 text-left">Answer</th><th className="py-1 px-2 text-right">Heuristic</th><th className="py-1 pl-2 text-right">Tier</th></tr>
               </thead>
               <tbody>
                 {data.upcoming.map((p) => (
-                  <tr key={p.puzzleId} className="border-t border-gray-100">
+                  <tr key={p.puzzleId} className="border-t border-gray-100 dark:border-gray-800">
                     <td className="py-1 pr-2 tabular-nums">#{p.dayNumber}</td>
-                    <td className="py-1 px-2 font-mono text-[11px] text-gray-500">{p.date}</td>
+                    <td className="py-1 px-2 font-mono text-[11px] text-gray-500 dark:text-gray-400">{p.date}</td>
                     <td className="py-1 px-2">
                       <SpoilerAnswer
                         answer={p.answer}
@@ -189,7 +183,7 @@ export function PuzzlesTab() {
                       />
                     </td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.heuristicScore}</td>
-                    <td className="py-1 pl-2 text-right"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${TIER_TONE[p.tier] ?? 'bg-gray-100'}`}>{p.tier}</span></td>
+                    <td className="py-1 pl-2 text-right"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tierTone(p.tier)}`}>{p.tier}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -207,10 +201,10 @@ export function PuzzlesTab() {
         </CardHeader>
         <CardContent>
           {data.past.length === 0 ? (
-            <p className="text-sm text-gray-500">No past puzzles yet.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">No past puzzles yet.</p>
           ) : (
             <table className="w-full text-sm">
-              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 <tr>
                   <th className="py-1 pr-2 text-left">Day</th>
                   <th className="py-1 px-2 text-left">Date</th>
@@ -222,14 +216,14 @@ export function PuzzlesTab() {
               </thead>
               <tbody>
                 {data.past.map((p) => (
-                  <tr key={p.puzzleId} className="border-t border-gray-100">
+                  <tr key={p.puzzleId} className="border-t border-gray-100 dark:border-gray-800">
                     <td className="py-1 pr-2 tabular-nums">#{p.dayNumber}</td>
-                    <td className="py-1 px-2 font-mono text-[11px] text-gray-500">{p.date}</td>
-                    <td className="py-1 px-2 font-mono tracking-wider text-gray-800">{p.answer}</td>
+                    <td className="py-1 px-2 font-mono text-[11px] text-gray-500 dark:text-gray-400">{p.date}</td>
+                    <td className="py-1 px-2 font-mono tracking-wider text-gray-800 dark:text-gray-200">{p.answer}</td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.solves.toLocaleString()}</td>
                     <td className="py-1 px-2 text-right tabular-nums">{p.heuristicScore}</td>
                     <td className="py-1 pl-2 text-right">
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${TIER_TONE[p.tier] ?? 'bg-gray-100'}`}>{p.tier}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tierTone(p.tier)}`}>{p.tier}</span>
                     </td>
                   </tr>
                 ))}
@@ -251,7 +245,7 @@ export function PuzzlesTab() {
           <CardContent>
             <div className="flex flex-wrap gap-1.5">
               {data.neverSolved.map((p) => (
-                <span key={p.puzzleId} className="text-[11px] font-mono rounded bg-gray-100 text-gray-700 px-1.5 py-0.5">
+                <span key={p.puzzleId} className="text-[11px] font-mono rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-1.5 py-0.5">
                   #{p.dayNumber}:{p.answer}
                 </span>
               ))}
@@ -267,7 +261,7 @@ export function PuzzlesTab() {
         </CardHeader>
         <CardContent>
           <ScatterCalibration points={data.calibration.points} slope={data.calibration.slope} intercept={data.calibration.intercept} />
-          <p className="text-[11px] text-gray-500 mt-3">
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-3">
             OLS fit: observed_ms = {data.calibration.slope.toFixed(0)} × heuristic + {data.calibration.intercept.toFixed(0)}
             {' · '}
             R² = {data.calibration.rSquared.toFixed(2)}
@@ -277,21 +271,21 @@ export function PuzzlesTab() {
 
           {outliers.length > 0 && (
             <div className="mt-4">
-              <h4 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">Outliers (|z| &gt; 1)</h4>
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Outliers (|z| &gt; 1)</h4>
               <table className="w-full text-[12px]">
-                <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   <tr><th className="py-1 pr-2 text-left">Answer</th><th className="py-1 px-2 text-right">Heuristic</th><th className="py-1 px-2 text-right">Observed</th><th className="py-1 px-2 text-right">Predicted</th><th className="py-1 pl-2 text-right">Residual</th></tr>
                 </thead>
                 <tbody>
                   {outliers.map((p) => {
                     const predicted = data.calibration.slope * p.heuristic + data.calibration.intercept;
                     return (
-                      <tr key={p.puzzleId} className="border-t border-gray-100">
+                      <tr key={p.puzzleId} className="border-t border-gray-100 dark:border-gray-800">
                         <td className="py-1 pr-2 font-mono tracking-wider">{p.answer}</td>
                         <td className="py-1 px-2 text-right tabular-nums">{p.heuristic}</td>
                         <td className="py-1 px-2 text-right tabular-nums">{formatMs(p.observedAvgMs)}</td>
-                        <td className="py-1 px-2 text-right tabular-nums text-gray-500">{formatMs(predicted)}</td>
-                        <td className={`py-1 pl-2 text-right tabular-nums font-bold ${p.residual > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                        <td className="py-1 px-2 text-right tabular-nums text-gray-500 dark:text-gray-400">{formatMs(predicted)}</td>
+                        <td className={`py-1 pl-2 text-right tabular-nums font-bold ${p.residual > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                           {formatSignedMs(p.residual)}
                         </td>
                       </tr>
@@ -299,7 +293,7 @@ export function PuzzlesTab() {
                   })}
                 </tbody>
               </table>
-              <p className="text-[10px] text-gray-400 mt-2">
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
                 Positive residual = observed slower than predicted (heuristic underestimated difficulty).
                 Negative = observed faster (heuristic overestimated). Use this to retune the formula.
               </p>
@@ -330,72 +324,12 @@ function formatSignedMs(ms: number): string {
   return `${sign}${formatMs(Math.abs(ms))}`;
 }
 
-/**
- * Click-to-reveal for puzzle answers. Modeled on Vercel’s env-var UI:
- * hidden by default (so the admin doesn’t spoil today/upcoming by
- * walking past the tab), revealed on explicit click. Bullet substitution
- * (not blur) is used for the hidden state — blurred bold text still leaks
- * word shape, and bullets also hide the exact letter count since every
- * puzzle is padded to the same width (`MAX_WIDTH`).
- */
-const MAX_WIDTH = 12;
-function SpoilerAnswer({
-  answer,
-  revealed,
-  onToggle,
-  size,
-}: {
-  answer: string;
-  revealed: boolean;
-  onToggle: () => void;
-  size: 'lg' | 'sm';
-}) {
-  const label = revealed ? 'Hide answer' : 'Reveal answer';
-  const Icon = revealed ? EyeSlash : Eye;
-  const hidden = '•'.repeat(MAX_WIDTH);
-  if (size === 'lg') {
-    return (
-      <div className="inline-flex items-center gap-2">
-        <span
-          className="text-2xl font-black tracking-widest text-gray-900"
-          aria-hidden={!revealed}
-        >
-          {revealed ? answer.toUpperCase() : hidden}
-        </span>
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={label}
-          title={label}
-          className="rounded-md p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-        >
-          <Icon className="w-4 h-4" weight="bold" />
-        </button>
-      </div>
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-label={label}
-      title={label}
-      className="group inline-flex items-center gap-1.5 font-mono tracking-wider text-gray-800"
-    >
-      <span aria-hidden={!revealed}>
-        {revealed ? answer : hidden}
-      </span>
-      <Icon className="w-3 h-3 text-gray-400 group-hover:text-gray-700 transition-colors" weight="bold" />
-    </button>
-  );
-}
-
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{label}</div>
-      <div className="text-xl font-black tabular-nums text-gray-900">{value}</div>
-      {sub && <div className="text-[10px] text-gray-400">{sub}</div>}
+      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">{label}</div>
+      <div className="text-xl font-black tabular-nums text-gray-900 dark:text-gray-100">{value}</div>
+      {sub && <div className="text-[10px] text-gray-400 dark:text-gray-500">{sub}</div>}
     </div>
   );
 }
@@ -409,10 +343,10 @@ function DifficultyList({ title, rows }: {
       <CardHeader><CardTitle className="text-sm">{title}</CardTitle></CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-sm text-gray-500">Not enough solve data yet (min 10 per puzzle).</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Not enough solve data yet (min 10 per puzzle).</p>
         ) : (
           <table className="w-full text-sm">
-            <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+            <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
               <tr>
                 <th className="py-1 pr-2 text-left">Day</th>
                 <th className="py-1 px-2 text-left">Answer</th>
@@ -423,9 +357,9 @@ function DifficultyList({ title, rows }: {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.puzzleId} className="border-t border-gray-100">
-                  <td className="py-1 pr-2 tabular-nums text-gray-600">#{r.dayNumber}</td>
-                  <td className="py-1 px-2 font-mono tracking-wider text-gray-800">{r.answer}</td>
+                <tr key={r.puzzleId} className="border-t border-gray-100 dark:border-gray-800">
+                  <td className="py-1 pr-2 tabular-nums text-gray-600 dark:text-gray-400">#{r.dayNumber}</td>
+                  <td className="py-1 px-2 font-mono tracking-wider text-gray-800 dark:text-gray-200">{r.answer}</td>
                   <td className="py-1 px-2 text-right tabular-nums">{r.solves}</td>
                   <td className="py-1 px-2 text-right tabular-nums font-bold">{formatMsClock(r.avgMs)}</td>
                   <td className="py-1 pl-2 text-right tabular-nums">{r.heuristicScore}</td>

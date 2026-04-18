@@ -11,10 +11,9 @@ import { UsersTab } from './UsersTab';
 import { PuzzlesTab } from './PuzzlesTab';
 import { TransactionsTab } from './TransactionsTab';
 import { CostsTab } from './CostsTab';
-import { DeployTab } from './DeployTab';
-import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins, Rocket } from '@phosphor-icons/react';
+import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins } from '@phosphor-icons/react';
 
-type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs' | 'deploy';
+type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs';
 
 interface AdminDashboardProps {
   /** Connected admin wallet — shown in the header for context. */
@@ -34,13 +33,13 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>('pulse');
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white dark:bg-gray-900">
       <div className="container mx-auto py-8 px-4 max-w-7xl">
         <header className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
             Admin dashboard
           </h1>
-          <p className="text-sm font-medium text-gray-500 mt-1">
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1">
             Operator console ·{' '}
             <span className="font-mono">
               {adminWallet.slice(0, 6)}…{adminWallet.slice(-4)}
@@ -73,8 +72,6 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
         <TabGroup title="Settings">
           <TabButton active={activeTab === 'costs'} onClick={() => setActiveTab('costs')}
             icon={<Coins className="h-4 w-4" weight="bold" />} label="Costs" />
-          <TabButton active={activeTab === 'deploy'} onClick={() => setActiveTab('deploy')}
-            icon={<Rocket className="h-4 w-4" weight="bold" />} label="Deploy" />
         </TabGroup>
 
         <div className="mt-6">
@@ -87,7 +84,6 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
           {activeTab === 'anomalies' && <AnomaliesTab />}
           {activeTab === 'grant' && <GrantTab />}
           {activeTab === 'costs' && <CostsTab />}
-          {activeTab === 'deploy' && <DeployTab />}
         </div>
       </div>
     </div>
@@ -103,7 +99,7 @@ function TabGroup({
 }) {
   return (
     <>
-      <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+      <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
         {title}
       </div>
       <div className="flex gap-2 mb-4 overflow-x-auto pb-1">{children}</div>

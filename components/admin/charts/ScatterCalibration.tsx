@@ -39,7 +39,7 @@ interface ScatterCalibrationProps {
 export function ScatterCalibration({ points, slope, intercept, height = 300 }: ScatterCalibrationProps) {
   if (points.length < 2) {
     return (
-      <p className="text-sm text-gray-500 py-8 text-center">
+      <p className="text-sm text-gray-500 dark:text-gray-400 py-8 text-center">
         Need at least 2 puzzles with solve data to calibrate. Keep playing.
       </p>
     );

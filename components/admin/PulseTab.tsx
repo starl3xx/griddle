@@ -20,6 +20,8 @@ import { formatMsCompact as formatMs } from '@/lib/format';
 import { SparklineCard } from './charts/SparklineCard';
 import { TrendLine } from './charts/TrendLine';
 import { StackedBar } from './charts/StackedBar';
+import { SpoilerAnswer } from './SpoilerAnswer';
+import { tierTone } from './tierTone';
 
 interface PulsePayload {
   headline: {
@@ -96,7 +98,7 @@ export function PulseTab() {
   useEffect(() => { void fetchPulse(); }, [fetchPulse]);
 
   if (loading && !data) {
-    return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" /></div>;
+    return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>;
   }
   if (error) {
     return (
@@ -149,7 +151,7 @@ export function PulseTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold tracking-tight text-gray-900">Pulse</h2>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Pulse</h2>
         <Button variant="ghost" size="sm" onClick={fetchPulse} disabled={loading} aria-label="Refresh">
           {loading ? <CircleNotch className="h-4 w-4 animate-spin" weight="bold" /> : <ArrowsClockwise className="h-4 w-4" weight="bold" />}
         </Button>
@@ -157,7 +159,7 @@ export function PulseTab() {
 
       {/* Row 1 — Today */}
       <section className="space-y-2">
-        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Today</h3>
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Today</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <SparklineCard
             icon={<Pulse className="h-4 w-4" weight="bold" />}
@@ -187,7 +189,7 @@ export function PulseTab() {
 
       {/* Row 2 — Trailing */}
       <section className="space-y-2">
-        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Trailing</h3>
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Trailing</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <SparklineCard
             icon={<TrendUp className="h-4 w-4" weight="bold" />}
@@ -226,7 +228,7 @@ export function PulseTab() {
           pending is a rolling 30-day balance since it's an "owed,
           not yet booked" status not a time-window figure). */}
       <section className="space-y-2">
-        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Revenue · month-to-date</h3>
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Revenue · month-to-date</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <SparklineCard
             icon={<Coins className="h-4 w-4" weight="bold" />}
@@ -260,7 +262,7 @@ export function PulseTab() {
 
       {/* Row 4 — Charts */}
       <section className="space-y-2">
-        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Trends · last 30d</h3>
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Trends · last 30d</h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card>
             <CardHeader>
@@ -282,7 +284,7 @@ export function PulseTab() {
             </CardHeader>
             <CardContent>
               {data.revenueSeries.length === 0 ? (
-                <p className="text-sm text-gray-500 py-8 text-center">No revenue in the last 30 days.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 py-8 text-center">No revenue in the last 30 days.</p>
               ) : (
                 <StackedBar
                   data={data.revenueSeries}
@@ -301,42 +303,41 @@ export function PulseTab() {
 }
 
 function HardestWordTile({ today }: { today: PulsePayload['todaysPuzzle'] }) {
+  const [revealed, setRevealed] = useState(false);
   if (!today) {
     return (
       <Card>
         <CardContent className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-gray-400">
+          <div className="flex items-center gap-2 text-gray-400 dark:text-gray-500">
             <PuzzlePiece className="h-4 w-4" weight="bold" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Today's puzzle</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Today's puzzle</span>
           </div>
-          <div className="text-3xl font-black text-gray-900">—</div>
-          <div className="text-[11px] text-gray-400">no data yet</div>
+          <div className="text-3xl font-black text-gray-900 dark:text-gray-100">—</div>
+          <div className="text-[11px] text-gray-400 dark:text-gray-500">no data yet</div>
         </CardContent>
       </Card>
     );
   }
-  const tierTone: Record<string, string> = {
-    Gentle: 'bg-emerald-100 text-emerald-800',
-    Easy: 'bg-emerald-50 text-emerald-700',
-    Medium: 'bg-yellow-100 text-yellow-800',
-    Hard: 'bg-orange-100 text-orange-800',
-    Brutal: 'bg-red-100 text-red-800',
-  };
   return (
     <Card>
       <CardContent className="flex flex-col gap-1">
-        <div className="flex items-center gap-2 text-gray-400">
+        <div className="flex items-center gap-2 text-gray-400 dark:text-gray-500">
           <PuzzlePiece className="h-4 w-4" weight="bold" />
-          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Today's puzzle</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Today's puzzle</span>
         </div>
-        <div className="text-2xl font-black tracking-widest text-gray-900">{today.answer.toUpperCase()}</div>
+        <SpoilerAnswer
+          answer={today.answer}
+          revealed={revealed}
+          onToggle={() => setRevealed((r) => !r)}
+          size="lg"
+        />
         <div className="flex items-center gap-2 text-[11px]">
-          <span className={`rounded px-1.5 py-0.5 font-bold ${tierTone[today.tier] ?? 'bg-gray-100 text-gray-700'}`}>
+          <span className={`rounded px-1.5 py-0.5 font-bold ${tierTone(today.tier)}`}>
             {today.tier}
           </span>
-          <span className="text-gray-500">heuristic {today.heuristicScore}</span>
-          <span className="text-gray-300">·</span>
-          <span className="text-gray-500">{today.solves} solves</span>
+          <span className="text-gray-500 dark:text-gray-400">heuristic {today.heuristicScore}</span>
+          <span className="text-gray-300 dark:text-gray-600">·</span>
+          <span className="text-gray-500 dark:text-gray-400">{today.solves} solves</span>
         </div>
       </CardContent>
     </Card>

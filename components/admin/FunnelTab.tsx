@@ -121,7 +121,7 @@ export function FunnelTab() {
   }, [stageMap]);
 
   if (loading && !data) {
-    return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" /></div>;
+    return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>;
   }
   if (error) {
     return (
@@ -138,7 +138,7 @@ export function FunnelTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold tracking-tight text-gray-900">Funnel</h2>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Funnel</h2>
         <div className="flex gap-1.5">
           {(Object.keys(WINDOW_LABELS) as FunnelWindow[]).map((w) => (
             <Button key={w} size="sm" variant={w === win ? 'default' : 'outline'} onClick={() => setWin(w)}>
@@ -151,7 +151,7 @@ export function FunnelTab() {
       {/* Stages with drop-off */}
       <Card>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-gray-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
             <ChartLineUp className="h-4 w-4" weight="bold" />
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Stages · {WINDOW_LABELS[win]}
@@ -171,15 +171,15 @@ export function FunnelTab() {
               return (
                 <div key={stage.name} className="space-y-1">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="font-semibold text-gray-900">{stage.label}</span>
+                    <span className="font-semibold text-gray-900 dark:text-gray-100">{stage.label}</span>
                     <span className="flex items-center gap-2 tabular-nums">
-                      <span className="text-gray-600">{sessions.toLocaleString()} sessions</span>
+                      <span className="text-gray-600 dark:text-gray-400">{sessions.toLocaleString()} sessions</span>
                       {retainedFromPrev !== null && (
                         <span
                           className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                            retainedFromPrev < 0.3 ? 'bg-red-100 text-red-700'
-                            : retainedFromPrev < 0.6 ? 'bg-orange-100 text-orange-700'
-                            : 'bg-emerald-100 text-emerald-700'
+                            retainedFromPrev < 0.3 ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
+                            : retainedFromPrev < 0.6 ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400'
+                            : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
                           }`}
                           title="% of previous stage that made it to this stage"
                         >
@@ -191,14 +191,14 @@ export function FunnelTab() {
                       </span>
                     </span>
                   </div>
-                  <div className="h-2 bg-gray-100 rounded overflow-hidden">
+                  <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded overflow-hidden">
                     <div className="h-full bg-brand transition-all" style={{ width: `${Math.min(100, retainedFromStart * 100)}%` }} />
                   </div>
                   {buckets.length > 1 && (
-                    <div className="pl-3 pt-1 text-[11px] text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                    <div className="pl-3 pt-1 text-[11px] text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
                       {buckets.map((b) => (
                         <span key={b.bucket} className="tabular-nums">
-                          {b.bucket}: <span className="font-bold text-gray-700">{b.sessions}</span>
+                          {b.bucket}: <span className="font-bold text-gray-700 dark:text-gray-300">{b.sessions}</span>
                         </span>
                       ))}
                     </div>
@@ -213,17 +213,17 @@ export function FunnelTab() {
       {/* Entry points */}
       <Card>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-gray-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
             <Target className="h-4 w-4" weight="bold" />
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Entry points — gate triggered by feature
             </span>
           </div>
           {data.entryPoints.length === 0 ? (
-            <p className="text-sm text-gray-500">No gate events in this window.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">No gate events in this window.</p>
           ) : (
             <table className="w-full text-sm">
-              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <thead className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 <tr>
                   <th className="py-1 pr-2 text-left">Feature</th>
                   <th className="py-1 px-2 text-right">Shown</th>
@@ -235,7 +235,7 @@ export function FunnelTab() {
               </thead>
               <tbody>
                 {data.entryPoints.map((ep) => (
-                  <tr key={ep.feature} className="border-t border-gray-100">
+                  <tr key={ep.feature} className="border-t border-gray-100 dark:border-gray-800">
                     <td className="py-1 pr-2 font-mono text-[12px]">{ep.feature}</td>
                     <td className="py-1 px-2 text-right tabular-nums">{ep.shown}</td>
                     <td className="py-1 px-2 text-right tabular-nums">{ep.clicked}</td>
@@ -255,7 +255,7 @@ export function FunnelTab() {
       {/* Time to stage */}
       <Card>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-gray-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
             <Timer className="h-4 w-4" weight="bold" />
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Time to stage (medians)
@@ -274,7 +274,7 @@ export function FunnelTab() {
       {otherEvents.length > 0 && (
         <Card>
           <CardContent className="space-y-3">
-            <div className="flex items-center gap-2 text-gray-500">
+            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
               <ChartLineUp className="h-4 w-4" weight="bold" />
               <span className="text-[10px] font-bold uppercase tracking-wider">Other signals</span>
             </div>
@@ -287,17 +287,17 @@ export function FunnelTab() {
                 return (
                   <div key={name} className="space-y-1">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-semibold text-gray-900">{label}</span>
-                      <span className="tabular-nums text-gray-600">
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">{label}</span>
+                      <span className="tabular-nums text-gray-600 dark:text-gray-400">
                         {row.sessions.toLocaleString()} sessions
-                        <span className="text-gray-400 ml-2">({row.total.toLocaleString()} events)</span>
+                        <span className="text-gray-400 dark:text-gray-500 ml-2">({row.total.toLocaleString()} events)</span>
                       </span>
                     </div>
                     {buckets.length > 0 && (
-                      <div className="pl-3 pt-1 text-[11px] text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                      <div className="pl-3 pt-1 text-[11px] text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
                         {buckets.map((b) => (
                           <span key={b.bucket} className="tabular-nums">
-                            {b.bucket}: <span className="font-bold text-gray-700">{b.sessions}</span>
+                            {b.bucket}: <span className="font-bold text-gray-700 dark:text-gray-300">{b.sessions}</span>
                           </span>
                         ))}
                       </div>
@@ -313,7 +313,7 @@ export function FunnelTab() {
       {/* Time-to-convert (existing, upgrade → checkout per method) */}
       <Card>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-gray-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
             <Timer className="h-4 w-4" weight="bold" />
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Median time · upgrade click → checkout complete (by method)
@@ -322,8 +322,8 @@ export function FunnelTab() {
           <div className="grid grid-cols-2 gap-4">
             {data.stats.medianTimeToConvertMs.map((m) => (
               <div key={m.method}>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{m.method}</div>
-                <div className="text-2xl font-black tabular-nums text-gray-900">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">{m.method}</div>
+                <div className="text-2xl font-black tabular-nums text-gray-900 dark:text-gray-100">
                   {m.ms == null ? '—' : formatMs(m.ms)}
                 </div>
               </div>
@@ -338,8 +338,8 @@ export function FunnelTab() {
 function TtsCell({ label, ms }: { label: string; ms: number | null }) {
   return (
     <div>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{label}</div>
-      <div className="text-xl font-black tabular-nums text-gray-900">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">{label}</div>
+      <div className="text-xl font-black tabular-nums text-gray-900 dark:text-gray-100">
         {ms == null ? '—' : formatMs(ms)}
       </div>
     </div>

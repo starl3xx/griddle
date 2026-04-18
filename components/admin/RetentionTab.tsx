@@ -38,7 +38,7 @@ export function RetentionTab() {
 
   useEffect(() => { void fetchData(); }, []);
 
-  if (loading && !data) return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" /></div>;
+  if (loading && !data) return <div className="flex justify-center py-12"><CircleNotch className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" /></div>;
   if (error) {
     return (
       <div className="text-center py-12">
@@ -62,7 +62,7 @@ export function RetentionTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold tracking-tight text-gray-900">Retention</h2>
+        <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Retention</h2>
         <Button variant="ghost" size="sm" onClick={fetchData} aria-label="Refresh">
           <ArrowsClockwise className="h-4 w-4" weight="bold" />
         </Button>
@@ -83,12 +83,12 @@ export function RetentionTab() {
 }
 
 function Stat({ icon, label, value, tone = 'ok' }: { icon: React.ReactNode; label: string; value: string; tone?: 'ok' | 'accent' }) {
-  const valueClass = tone === 'accent' ? 'text-accent-700' : 'text-gray-900';
+  const valueClass = tone === 'accent' ? 'text-accent-700' : 'text-gray-900 dark:text-gray-100';
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2 text-gray-400">
+      <div className="flex items-center gap-2 text-gray-400 dark:text-gray-500">
         {icon}
-        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{label}</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</span>
       </div>
       <div className={`text-3xl font-black tabular-nums ${valueClass}`}>{value}</div>
     </div>

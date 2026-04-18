@@ -111,10 +111,10 @@ export function AnomaliesTab() {
           </div>
         ) : loading && entries.length === 0 ? (
           <div className="flex justify-center py-12">
-            <CircleNotch className="h-6 w-6 animate-spin text-gray-400" weight="bold" />
+            <CircleNotch className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" weight="bold" />
           </div>
         ) : entries.length === 0 ? (
-          <p className="text-center text-sm text-gray-500 py-8">
+          <p className="text-center text-sm text-gray-500 dark:text-gray-400 py-8">
             No flagged solves. Good news or quiet traffic.
           </p>
         ) : (

@@ -10,7 +10,7 @@ export type Tone = 'ok' | 'warning' | 'error' | 'accent';
 function deltaPill(delta: number | null, kind: 'abs' | 'pct') {
   if (delta === null || !Number.isFinite(delta)) return null;
   const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '–';
-  const color = delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-red-600' : 'text-gray-400';
+  const color = delta > 0 ? 'text-emerald-600 dark:text-emerald-400' : delta < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500';
   const str = kind === 'pct'
     ? `${Math.abs(delta * 100).toFixed(1)}%`
     : Math.abs(Math.round(delta)).toLocaleString();
@@ -52,10 +52,10 @@ export function SparklineCard({
   const gradientId = `spark-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const pill = deltaPill(delta, deltaKind);
   const iconClass: Record<Tone, string> = {
-    ok: 'text-gray-400', warning: 'text-warning', error: 'text-error', accent: 'text-accent',
+    ok: 'text-gray-400 dark:text-gray-500', warning: 'text-warning', error: 'text-error', accent: 'text-accent',
   };
   const valueClass: Record<Tone, string> = {
-    ok: 'text-gray-900', warning: 'text-warning-700', error: 'text-error-600', accent: 'text-accent-700',
+    ok: 'text-gray-900 dark:text-gray-100', warning: 'text-warning-700', error: 'text-error-600', accent: 'text-accent-700',
   };
   const strokeColor: Record<Tone, string> = {
     ok: '#9ca3af', warning: '#f59e0b', error: '#ef4444', accent: '#8b5cf6',
@@ -65,7 +65,7 @@ export function SparklineCard({
       <CardContent className="flex flex-col gap-1">
         <div className={`flex items-center gap-2 ${iconClass[tone]}`}>
           {icon}
-          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
             {label}
           </span>
         </div>
@@ -79,7 +79,7 @@ export function SparklineCard({
             </span>
           )}
         </div>
-        {sub && <div className="text-[11px] font-medium text-gray-400">{sub}</div>}
+        {sub && <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500">{sub}</div>}
         {series && series.length > 0 && (
           <div className="h-8 -mx-1 mt-1">
             <ResponsiveContainer width="100%" height="100%">
