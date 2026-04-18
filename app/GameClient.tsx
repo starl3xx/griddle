@@ -908,6 +908,13 @@ export default function GameClient({
    */
   const [showCryptoFlow, setShowCryptoFlow] = useState(false);
 
+  // True while the user has tapped "Pay with crypto" without a wallet
+  // yet — we opened the connect flow, and when sessionWallet flips
+  // non-null we auto-open the crypto flow so the tap feels continuous.
+  // Cleared on crypto-flow open, on gate modal close, or on explicit
+  // cancel of the connect picker.
+  const pendingCryptoAfterConnectRef = useRef(false);
+
   const handleUnlockCrypto = useCallback(() => {
     trackEvent({ name: 'upgrade_clicked', method: 'crypto' });
     // checkout_started fires from PremiumCryptoFlow at the actual
@@ -915,8 +922,24 @@ export default function GameClient({
     // would be redundant with upgrade_clicked in the same tick and
     // would blend different semantics with the fiat path (which
     // fires started only after Stripe session creation succeeds).
+    if (!sessionWallet) {
+      pendingCryptoAfterConnectRef.current = true;
+      triggerConnect();
+      return;
+    }
     setShowCryptoFlow(true);
-  }, []);
+  }, [sessionWallet, triggerConnect]);
+
+  // Auto-resume: if the user tapped "Pay with crypto" before
+  // connecting, open the crypto flow as soon as the wallet binding
+  // lands. The effect only fires when sessionWallet transitions from
+  // null → value AND the pending ref is set.
+  useEffect(() => {
+    if (!sessionWallet) return;
+    if (!pendingCryptoAfterConnectRef.current) return;
+    pendingCryptoAfterConnectRef.current = false;
+    setShowCryptoFlow(true);
+  }, [sessionWallet]);
 
   const handleUpgradeClickedFiat = useCallback(() => {
     trackEvent({ name: 'upgrade_clicked', method: 'fiat' });
@@ -1284,7 +1307,10 @@ export default function GameClient({
           feature={premiumGate}
           sessionWallet={sessionWallet}
           forceHostedFiat={inMiniApp}
-          onClose={() => setPremiumGate(null)}
+          onClose={() => {
+            pendingCryptoAfterConnectRef.current = false;
+            setPremiumGate(null);
+          }}
           onUnlockCrypto={handleUnlockCrypto}
           onUnlockFiat={handleUnlockFiatHosted}
           onUpgradeClickedFiat={handleUpgradeClickedFiat}

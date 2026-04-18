@@ -269,16 +269,14 @@ export function PremiumGateModal({
               <button
                 type="button"
                 onClick={onUnlockCrypto}
-                disabled={!sessionWallet}
-                className="rounded-md border-2 border-brand bg-brand-50 dark:bg-brand-900/30 px-3 py-3 text-left hover:bg-brand-100 dark:hover:bg-brand-900/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title={sessionWallet ? undefined : 'Connect a wallet first'}
+                className="rounded-md border-2 border-brand bg-brand-50 dark:bg-brand-900/30 px-3 py-3 text-left hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors"
               >
                 <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                   Pay with crypto (USDC)
                 </div>
                 <div className="text-xl font-black text-gray-900 dark:text-gray-100 tabular-nums mt-0.5">$5</div>
                 <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">
-                  {sessionWallet ? 'Swapped to $WORD and burned' : 'Connect wallet first'}
+                  {sessionWallet ? 'Swapped to $WORD and burned' : 'Connect wallet, then pay'}
                 </div>
               </button>
 
