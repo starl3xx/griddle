@@ -302,6 +302,16 @@ export async function getDailyLeaderboard(
   `);
 
   const resolved = Array.isArray(rows) ? rows : (rows.rows ?? []);
+  // [debug] chasing the prod-returns-fewer-rows-than-DB bug (PR #93).
+  // Remove after root cause is identified.
+  console.log('[getDailyLeaderboard]', {
+    dayNumber,
+    puzzleId,
+    puzzleDate: String(puzzleDate),
+    puzzleDateType: typeof puzzleDate,
+    resolvedCount: resolved.length,
+    playerKeys: resolved.map((r) => r.player_key),
+  });
   if (resolved.length === 0) return [];
 
   // Batch-fetch every wordmark row for the current leaderboard's
