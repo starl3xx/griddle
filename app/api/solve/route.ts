@@ -235,7 +235,15 @@ export async function POST(
       try {
         const [summaryResult, streakResult] = await Promise.all([
           getPostSolveSummary(identity, body.dayNumber, { isPremium }),
-          getCurrentStreakForIdentity(identity),
+          // Match the fresh-solve path's flag gate: flagged solves
+          // don't advance a streak (anti-farming), so a refresh of a
+          // flagged solve must also show `currentStreak: 0` — not the
+          // player's real stored streak from an unrelated clean solve.
+          // Without this gate the modal would claim a streak on the
+          // replay that wasn't there on the fresh response.
+          prior.flag === null
+            ? getCurrentStreakForIdentity(identity)
+            : Promise.resolve(0),
         ]);
         summary = summaryResult;
         currentStreak = streakResult;
