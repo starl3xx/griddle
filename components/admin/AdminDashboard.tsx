@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
+import { useDarkMode } from '@/lib/useDarkMode';
 import { PulseTab } from './PulseTab';
-import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins } from '@phosphor-icons/react';
+import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins, Moon, Sun } from '@phosphor-icons/react';
 
 // Pulse is the default tab, so it's statically imported (the user sees
 // it on every admin page load). The remaining 8 tabs render only when
@@ -39,20 +40,35 @@ interface AdminDashboardProps {
  */
 export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>('pulse');
+  // Admin shell ships its own toggle so operators viewing /admin
+  // without first touching the main app's SettingsModal can still flip
+  // themes. Keyed on the admin wallet so the preference round-trips
+  // through /api/settings the same way the main app's toggle does.
+  const { dark, toggle: toggleDark } = useDarkMode(adminWallet);
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900">
       <div className="container mx-auto py-8 px-4 max-w-7xl">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
-            Admin dashboard
-          </h1>
-          <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1">
-            Operator console ·{' '}
-            <span className="font-mono">
-              {adminWallet.slice(0, 6)}…{adminWallet.slice(-4)}
-            </span>
-          </p>
+        <header className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+              Admin dashboard
+            </h1>
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1">
+              Operator console ·{' '}
+              <span className="font-mono">
+                {adminWallet.slice(0, 6)}…{adminWallet.slice(-4)}
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleDark}
+            aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="shrink-0 p-2 rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            {dark ? <Sun className="h-4 w-4" weight="bold" /> : <Moon className="h-4 w-4" weight="bold" />}
+          </button>
         </header>
 
         <TabGroup title="Analytics">
