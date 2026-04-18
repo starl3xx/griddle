@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionId } from '@/lib/session';
-import { getSessionWallet } from '@/lib/wallet-session';
-import { getSessionProfile } from '@/lib/session-profile';
+import { resolveSessionIdentity } from '@/lib/session-identity';
 import { getPremiumStats, type PremiumStats } from '@/lib/db/queries';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { kv } from '@/lib/kv';
@@ -34,10 +33,7 @@ const CACHE_TTL_SECONDS = 60;
 
 export async function GET(): Promise<NextResponse> {
   const sessionId = await getSessionId();
-  const [wallet, profileId] = await Promise.all([
-    getSessionWallet(sessionId),
-    getSessionProfile(sessionId),
-  ]);
+  const { wallet, profileId } = await resolveSessionIdentity(sessionId);
 
   if (!wallet && profileId == null) {
     return NextResponse.json({ wallet: null, stats: null });

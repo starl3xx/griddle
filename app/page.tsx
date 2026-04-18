@@ -9,8 +9,7 @@ import {
   recordPuzzleLoad,
 } from '@/lib/db/queries';
 import { getSessionId } from '@/lib/session';
-import { getSessionProfile } from '@/lib/session-profile';
-import { getSessionWallet } from '@/lib/wallet-session';
+import { resolveSessionIdentity } from '@/lib/session-identity';
 
 /**
  * Root page. Server component — reads today’s puzzle directly from
@@ -44,10 +43,9 @@ export default async function Page() {
   // → Neon. Settings depends on wallet so it can't start until after.
   // profileId from session KV so we can detect a prior solve against
   // the handle-only identity path.
-  const [puzzle, sessionWallet, profileId] = await Promise.all([
+  const [puzzle, { wallet: sessionWallet, profileId }] = await Promise.all([
     getTodayPuzzle(),
-    getSessionWallet(sessionId),
-    getSessionProfile(sessionId),
+    resolveSessionIdentity(sessionId),
   ]);
   if (!puzzle) {
     notFound();

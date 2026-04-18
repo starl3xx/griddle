@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { getArchiveList, getMySolvedDayNumbers } from '@/lib/db/queries';
 import { getCurrentDayNumber, getDateForDayNumber } from '@/lib/scheduler';
 import { getSessionId } from '@/lib/session';
-import { getSessionWallet } from '@/lib/wallet-session';
-import { getSessionProfile } from '@/lib/session-profile';
+import { resolveSessionIdentity } from '@/lib/session-identity';
 
 /**
  * GET /api/archive
@@ -31,10 +30,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse> {
   const sessionId = await getSessionId();
-  const [entries, wallet, profileId] = await Promise.all([
+  const [entries, { wallet, profileId }] = await Promise.all([
     getArchiveList(60),
-    getSessionWallet(sessionId),
-    getSessionProfile(sessionId),
+    resolveSessionIdentity(sessionId),
   ]);
   const solvedDayNumbers = await getMySolvedDayNumbers({
     profileId,
