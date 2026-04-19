@@ -76,8 +76,16 @@ function SolveTrendSparkline({ points }: { points: PremiumStats['solveTrend'] })
                 <stop offset="100%" stopColor="currentColor" stopOpacity={0} />
               </linearGradient>
             </defs>
-            {/* YAxis hidden but configured so the area scales correctly across the time range. */}
-            <YAxis hide domain={[min, max]} />
+            {/* Hidden XAxis carries dayNumber so the tooltip label can
+                show "Puzzle #<dayNumber>" instead of the array index
+                recharts would default to. */}
+            <XAxis dataKey="dayNumber" hide />
+            {/* YAxis reversed so faster (smaller ms) renders at the
+                top — matches the prior hand-rolled chart's semantics
+                that "improvement = upward trend". Without `reversed`
+                the area would invert and a player getting faster
+                would visually look like they're regressing. */}
+            <YAxis hide domain={[min, max]} reversed />
             <Tooltip
               cursor={{ stroke: 'currentColor', strokeOpacity: 0.2 }}
               contentStyle={{

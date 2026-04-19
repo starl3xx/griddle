@@ -22,7 +22,6 @@ const PremiumStatsCharts = dynamic(
 );
 
 interface PremiumStatsSectionProps {
-  wallet: string | null;
   premium: boolean;
   onUpgrade: () => void;
 }
@@ -39,12 +38,16 @@ interface PremiumStatsResponse {
  * `PremiumStatsCharts` so non-premium users never download recharts.
  *
  * Render matrix:
- *   - premium + wallet → fetch `/api/stats/premium`, lazy-load charts
+ *   - premium → fetch `/api/stats/premium`, lazy-load charts
  *   - premium + fetch failed → inline error card
- *   - free / no wallet → static placeholder behind a blur + upgrade CTA
+ *   - free → static placeholder behind a blur + upgrade CTA
+ *
+ * No wallet gate: `/api/stats/premium` resolves identity server-side
+ * via `resolveSessionIdentity` (profile id + wallet + session id), so
+ * a handle-only premium user gets real numbers too. Gating on `wallet`
+ * here used to lock those users into a permanent skeleton.
  */
 export function PremiumStatsSection({
-  wallet,
   premium,
   onUpgrade,
 }: PremiumStatsSectionProps) {
@@ -53,7 +56,7 @@ export function PremiumStatsSection({
   const [errored, setErrored] = useState(false);
 
   useEffect(() => {
-    if (!premium || !wallet) return;
+    if (!premium) return;
     let cancelled = false;
     setLoading(true);
     setErrored(false);
@@ -75,7 +78,7 @@ export function PremiumStatsSection({
     return () => {
       cancelled = true;
     };
-  }, [premium, wallet]);
+  }, [premium]);
 
   // Premium + fetch failed: surface the error instead of silently
   // rendering a placeholder as if it were real data. Showing
@@ -97,10 +100,12 @@ export function PremiumStatsSection({
   return (
     <section className="mt-5 relative animate-fade-in">
       {premium ? (
-        loading || !stats ? (
+        loading && !stats ? (
           <ChartsSkeleton />
-        ) : (
+        ) : stats ? (
           <PremiumStatsCharts stats={stats} />
+        ) : (
+          <ChartsSkeleton />
         )
       ) : (
         <>

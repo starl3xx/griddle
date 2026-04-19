@@ -149,11 +149,7 @@ export function StatsPanel({
           overlay upgrade CTA — the overlay IS the teaser, so no
           separate "More stats with Premium" strip underneath. */}
       {hasAccount && !statsLoading && (
-        <PremiumStatsSection
-          wallet={wallet}
-          premium={premium}
-          onUpgrade={onUpgrade}
-        />
+        <PremiumStatsSection premium={premium} onUpgrade={onUpgrade} />
       )}
 
       {/* Lexicon — full Wordmarks grid. Earned wordmarks in color,
