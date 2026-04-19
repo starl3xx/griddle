@@ -490,6 +490,29 @@ export function playerKeyFor(identity: {
 }
 
 /**
+ * Every `player_key` an identity may have written rows under across
+ * its history. A user who solved before linking a wallet, then linked
+ * a wallet, then created a profile, has rows attributed to all three
+ * keys; reads that filter on a single key (wordmarks, streaks, the
+ * placement CTE) miss the historical rows under the superseded keys
+ * and surface as "0/17 wordmarks despite a solve under 30s on the
+ * same screen". Returning every plausible key lets the read OR across
+ * them — see getWordmarksForPlayer for the read-side use.
+ *
+ * Order matters: callers that want to prefer the canonical key (for
+ * dedupe / "first match wins" semantics) get `p:<id>` first.
+ */
+export function playerKeyCandidates(identity: {
+  profileId?: number | null;
+  wallet?: string | null;
+}): string[] {
+  const keys: string[] = [];
+  if (identity.profileId != null) keys.push(`p:${identity.profileId}`);
+  if (identity.wallet) keys.push(identity.wallet.toLowerCase());
+  return keys;
+}
+
+/**
  * SQL fragment matching a solve row to the caller's identity. See
  * StatsIdentity docs for the resolution order; this is the shared
  * predicate used by getWalletStats, getPremiumStats, and any future
@@ -2880,42 +2903,64 @@ export async function insertWordmarksIfNew(
  * Fetch all wordmarks earned by a player, newest first. Used by the
  * Lexicon grid on the Stats panel.
  *
- * Keyed on player_key (profile_id preferred, wallet fallback) so a
- * handle-only user and a wallet-only user each see their own row
- * set under the same identity scheme the /api/solve write path uses.
+ * Reads under EVERY player_key the identity may have written rows
+ * under (see `playerKeyCandidates`) — without this, wordmark rows
+ * earned before a wallet→profile link (under wallet key) become
+ * invisible to a session that now resolves to `p:<id>`.
  *
- * Uses raw SQL — see the "Drizzle wallet-eq drift" note in the README
- * Code Style section. The original wallet-eq flakiness was observed
- * on the same column pattern being used here, so the same raw-SQL
- * precaution applies.
+ * Drift safety: the wallet-eq drift documented in the README only
+ * affects equality comparisons on the wallet column. `inArray` on a
+ * generated player_key column emits `IN ($1, $2, ...)` and is the
+ * same shape `getLeaderboardWordmarksFor` uses — see its note for
+ * the bug history.
  */
 export async function getWordmarksForPlayer(
   identity: StatsIdentity,
 ): Promise<EarnedWordmarkRow[]> {
-  const playerKey = playerKeyFor(identity);
-  if (playerKey == null) return [];
-  const result = await db.execute<{
-    wordmarkId: string;
-    earnedAt: Date;
-    puzzleId: number | null;
-  }>(sql`
-    SELECT
-      wordmark_id AS "wordmarkId",
-      earned_at   AS "earnedAt",
-      puzzle_id   AS "puzzleId"
-    FROM wordmarks
-    WHERE player_key = ${playerKey}
-    ORDER BY earned_at DESC
-  `);
-  const rows = Array.isArray(result) ? result : (result.rows ?? []);
-  return rows.map((r) => ({
-    wordmarkId: r.wordmarkId,
-    // Neon HTTP may return timestamps as either Date or ISO string
-    // depending on driver version — coerce defensively so callers can
-    // always call `.toISOString()` on the result.
-    earnedAt: r.earnedAt instanceof Date ? r.earnedAt : new Date(r.earnedAt),
-    puzzleId: r.puzzleId,
-  }));
+  // OR across every key the identity may have written under. A user
+  // who earned wordmarks before linking a wallet (rows under wallet
+  // key) and then created a profile (subsequent rows under p:<id>)
+  // would otherwise see only the post-profile half — the bug that
+  // surfaced as "Lightning unearned even though Stats shows a 0:08
+  // fastest solve" once the profile-id became the read key.
+  const candidates = playerKeyCandidates(identity);
+  if (candidates.length === 0) return [];
+  // `inArray` (not `= ANY($candidates)`): Drizzle's sql template
+  // expands a JS array as a tuple `($1, $2)`, not as a single array
+  // param, so the raw `ANY(...)` form fails with SQLSTATE 42846. See
+  // the same note above `getLeaderboardWordmarksFor` for the bug
+  // history — `inArray` emits `player_key IN ($1, $2, ...)` which
+  // has the same semantics without the param-shape mismatch.
+  const rows = await db
+    .select({
+      wordmarkId: wordmarks.wordmarkId,
+      earnedAt: wordmarks.earnedAt,
+      puzzleId: wordmarks.puzzleId,
+    })
+    .from(wordmarks)
+    .where(inArray(wordmarks.playerKey, candidates));
+  // Dedupe by wordmarkId — a user could in principle have the same
+  // wordmark earned under both their wallet key (legacy) and their
+  // profile key (post-link). Keep the earliest earned_at so the
+  // "first time you earned X" semantics hold.
+  const earliestById = new Map<string, EarnedWordmarkRow>();
+  for (const r of rows) {
+    const earnedAt = r.earnedAt instanceof Date ? r.earnedAt : new Date(r.earnedAt);
+    const existing = earliestById.get(r.wordmarkId);
+    if (existing == null || earnedAt < existing.earnedAt) {
+      earliestById.set(r.wordmarkId, {
+        wordmarkId: r.wordmarkId,
+        // Neon HTTP may return timestamps as either Date or ISO string
+        // depending on driver version — coerce defensively so callers
+        // can always call `.toISOString()` on the result.
+        earnedAt,
+        puzzleId: r.puzzleId,
+      });
+    }
+  }
+  return Array.from(earliestById.values()).sort(
+    (a, b) => b.earnedAt.getTime() - a.earnedAt.getTime(),
+  );
 }
 
 /**
@@ -3373,14 +3418,26 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
     //    the synthetic player_key so wallet + profile-only players are
     //    ranked side by side. EXISTS guard avoids the `best_ms < NULL`
     //    false-rank-1 trap for non-solvers (see PR #54's Bugbot fix).
+    //
+    //    LEFT JOIN profiles canonicalizes legacy wallet-only solves
+    //    (profile_id IS NULL on the row, but a profile now exists for
+    //    that wallet) under the player's `p:<id>` key — without it,
+    //    the caller's `p:<id>` group would only contain post-link
+    //    solves and the percentile would be computed against a
+    //    truncated history.
     callerKey == null
       ? Promise.resolve([{ rank: null, total: 0 }])
       : db.execute<{ rank: number | null; total: number }>(sql`
         WITH today_eligible AS (
           SELECT
-            COALESCE('p:' || s.profile_id::text, s.wallet) AS player_key,
+            COALESCE(
+              'p:' || s.profile_id::text,
+              'p:' || prof.id::text,
+              s.wallet
+            ) AS player_key,
             MIN(s.server_solve_ms) AS best_ms
           FROM solves s
+          LEFT JOIN profiles prof ON prof.wallet = s.wallet
           JOIN puzzles p ON p.id = s.puzzle_id
           WHERE p.day_number = ${today}
             AND s.solved = true
@@ -3403,15 +3460,26 @@ export async function getPremiumStats(identity: StatsIdentity): Promise<PremiumS
     // 4. placements — window-function RANK over all eligible solves
     //    gives every player_key a rank per puzzle in a single scan.
     //    FILTER counts collapse to the four numbers we need.
+    //
+    //    LEFT JOIN profiles serves the same canonicalization role as
+    //    in the percentile CTE above: a wallet-only solve whose wallet
+    //    has since been bound to a profile is grouped under the
+    //    profile's `p:<id>` key rather than its raw wallet, so legacy
+    //    solves contribute to the player's career podium.
     callerKey == null
       ? Promise.resolve([{ first: 0, second: 0, third: 0, top_ten: 0 }])
       : db.execute<{ first: number; second: number; third: number; top_ten: number }>(sql`
         WITH eligible AS (
           SELECT
             s.puzzle_id,
-            COALESCE('p:' || s.profile_id::text, s.wallet) AS player_key,
+            COALESCE(
+              'p:' || s.profile_id::text,
+              'p:' || prof.id::text,
+              s.wallet
+            ) AS player_key,
             MIN(s.server_solve_ms) AS best_ms
           FROM solves s
+          LEFT JOIN profiles prof ON prof.wallet = s.wallet
           JOIN puzzles p ON p.id = s.puzzle_id
           WHERE s.solved = true
             AND (s.flag IS NULL OR s.flag = 'suspicious')
