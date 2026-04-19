@@ -62,16 +62,18 @@ function getIosSwitch(): HTMLInputElement | null {
 function fireIos(pattern: HapticPattern): void {
   const el = getIosSwitch();
   if (!el) return;
-  el.checked = !el.checked;
+  // Use .click() rather than mutating .checked directly. iOS only fires
+  // the Taptic Engine on user-interaction-style events; a bare property
+  // assignment flips the state but never ticks the haptic. .click()
+  // synthesizes the activation iOS recognizes, which both toggles the
+  // switch AND fires the haptic. Called from within a real user gesture
+  // (keydown / onClick) so iOS's user-activation requirement is met.
+  el.click();
   if (pattern === 'error') {
-    // Space the second toggle in a separate task so the browser commits
-    // each DOM mutation independently — synchronous tight-loop toggles
-    // coalesce into one render and emit only one Taptic Engine event.
-    // 60ms reads as a double-tap burst (the closest iOS analogue to the
-    // Android [15,30,15] pattern).
-    setTimeout(() => {
-      el.checked = !el.checked;
-    }, 60);
+    // 60ms gap so the second click is its own activation event — iOS
+    // coalesces back-to-back synchronous events into one tick. Reads
+    // as a double-tap burst (closest analogue to Android [15,30,15]).
+    setTimeout(() => el.click(), 60);
   }
 }
 
