@@ -64,7 +64,7 @@ export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
             }}
             aria-label={w.name}
             title={`${w.name} · ${w.description}`}
-            className={`relative w-5 h-5 rounded-full ${theme.bg} ring-2 ${theme.ring} outline outline-2 outline-white dark:outline-gray-800 flex items-center justify-center text-[10px] leading-none ${
+            className={`relative w-5 h-5 rounded-full ${theme.bg} ring-2 ${theme.ring} outline outline-2 outline-offset-2 outline-white dark:outline-gray-800 flex items-center justify-center text-[10px] leading-none ${
               isOpen ? 'z-20' : ''
             }`}
           >
