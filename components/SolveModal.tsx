@@ -209,28 +209,39 @@ export function SolveModal({
           {word}
         </p>
 
-        {/* Wordmarks earned on THIS solve. Small pill strip beneath
-            the word; absent when nothing new was earned. A user who
-            already holds every wordmark solves and sees nothing new
-            here — correct and intentional. */}
+        {/* Wordmarks earned on THIS solve. Circle badge + title +
+            description — matches the Lexicon and leaderboard badge
+            language (wordmarks always render as a circle) so the
+            post-solve reveal reads as the same collectible the user
+            will see on the Stats grid later. Absent when nothing new
+            was earned. A user who already holds every wordmark solves
+            and sees nothing new here — correct and intentional. */}
         {earnedBadges.length > 0 && (
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 animate-fade-in">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">
+          <div className="mt-4 animate-fade-in">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 text-center">
               Earned
-            </span>
-            {earnedBadges.map((w) => {
-              const theme = WORDMARK_THEMES[w.id];
-              return (
-                <span
-                  key={w.id}
-                  className={`inline-flex items-center gap-1 rounded-pill ring-1 ${theme.bg} ${theme.ring} text-gray-900 dark:text-gray-100 px-2 py-0.5 text-[11px] font-bold`}
-                  title={w.description}
-                >
-                  <span aria-hidden>{w.emoji}</span>
-                  {w.name}
-                </span>
-              );
-            })}
+            </p>
+            <div className="mt-2 flex flex-wrap items-start justify-center gap-4">
+              {earnedBadges.map((w) => {
+                const theme = WORDMARK_THEMES[w.id];
+                return (
+                  <div key={w.id} className="flex w-24 flex-col items-center text-center">
+                    <div
+                      className={`w-12 h-12 rounded-full ${theme.bg} ring-2 ${theme.ring} flex items-center justify-center text-xl`}
+                      aria-hidden
+                    >
+                      {w.emoji}
+                    </div>
+                    <span className="mt-1.5 text-xs font-bold leading-tight text-gray-900 dark:text-gray-100">
+                      {w.name}
+                    </span>
+                    <span className="mt-0.5 text-[10px] font-medium leading-snug text-gray-600 dark:text-gray-400">
+                      {w.description}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
