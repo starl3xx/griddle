@@ -6,6 +6,7 @@ import { Crown, Backspace, ArrowCounterClockwise, Info } from '@phosphor-icons/r
 import { formatLongDate } from '@/lib/format';
 import { useDarkMode } from '@/lib/useDarkMode';
 import { useZenMode } from '@/lib/useZenMode';
+import { useHaptics } from '@/lib/useHaptics';
 import { Grid } from '@/components/Grid';
 import { WordSlots } from '@/components/WordSlots';
 import { SolveModal } from '@/components/SolveModal';
@@ -147,6 +148,7 @@ export default function GameClient({
   const [sessionWallet, setSessionWallet] = useState<string | null>(initialSessionWallet);
   const { dark, toggle: toggleDark } = useDarkMode(sessionWallet);
   const { zen, toggle: toggleZen } = useZenMode();
+  const { haptics, toggle: toggleHaptics } = useHaptics();
 
   // Active puzzle — defaults to today's. Archive navigation swaps it.
   const [activePuzzle, setActivePuzzle] = useState<InitialPuzzle>(initialPuzzle);
@@ -1345,6 +1347,8 @@ export default function GameClient({
         onToggleDark={toggleDark}
         zen={zen}
         onToggleZen={toggleZen}
+        haptics={haptics}
+        onToggleHaptics={toggleHaptics}
         onProfileChanged={() => { void refetchProfile(); }}
         onUnassistedChanged={setUnassistedMode}
         onClose={() => setShowSettings(false)}

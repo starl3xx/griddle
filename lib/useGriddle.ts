@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getBlockedCells, isValidPath } from './adjacency';
 import { isDictionaryWord, prefetchDictionary } from './dictionary';
+import { fireHaptic } from './haptics';
 import { SolveTelemetry, type SolvePayload } from './telemetry';
 
 export type CellState = 'open' | 'available' | 'current' | 'used' | 'blocked';
@@ -196,6 +197,7 @@ export function useGriddle({
 
   const triggerShake = useCallback(() => {
     setShakeSignal((s) => s + 1);
+    fireHaptic('error');
   }, []);
 
   const reset = useCallback(() => {
@@ -403,6 +405,7 @@ export function useGriddle({
           // half-solved state with no SolveModal.
           if (verdict.solved && verdict.word != null) {
             setSolved(true);
+            fireHaptic('success');
             // foundWords intentionally preserved on confirmed solve —
             // the crumbs the player found during the attempt stay
             // visible in the FoundWords strip after the modal closes
@@ -458,6 +461,7 @@ export function useGriddle({
       // by the time the user reaches a 4-letter shorter-word check.
       prefetchDictionary();
       telemetryRef.current?.recordKeystroke();
+      fireHaptic('tap');
       const newPath = [...path, foundCell];
       setPath(newPath);
       if (newPath.length === 9) triggerSolve(newPath);
@@ -478,6 +482,7 @@ export function useGriddle({
       }
       prefetchDictionary();
       telemetryRef.current?.recordKeystroke();
+      fireHaptic('tap');
       const newPath = [...path, cellIdx];
       setPath(newPath);
       if (newPath.length === 9) triggerSolve(newPath);
