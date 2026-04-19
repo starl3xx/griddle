@@ -103,9 +103,20 @@ export function fireHaptic(pattern: HapticPattern): void {
  * True if the current device exposes any haptic surface (Vibration API
  * or iOS switch). Used to hide the Settings toggle on devices where it
  * would have no effect.
+ *
+ * Gated on `(pointer: coarse)` first: `navigator.vibrate` is present on
+ * desktop Chrome/Firefox as a no-op even without vibration hardware, so
+ * checking only the API would surface the toggle on laptops where it
+ * does nothing perceptible. The iOS switch path is also touch-only
+ * (Safari on iPhone/iPad), so the same gate covers both.
  */
 export function hapticsAvailable(): boolean {
   if (typeof window === 'undefined') return false;
+  try {
+    if (!window.matchMedia('(pointer: coarse)').matches) return false;
+  } catch {
+    return false;
+  }
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
     return true;
   }
