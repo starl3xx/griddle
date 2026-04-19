@@ -15,6 +15,7 @@ import {
   Gear,
   Camera,
   Timer,
+  DeviceMobile,
   PencilSimple,
   ArrowRight,
 } from '@phosphor-icons/react';
@@ -24,6 +25,7 @@ import { OtpCodeInput } from './OtpCodeInput';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { suggestUsernameFromWallet, validateUsername } from '@/lib/username';
 import { getDefaultAvatarDataUri, pickAvatarSeed } from '@/lib/default-avatar';
+import { hapticsAvailable } from '@/lib/haptics';
 
 /**
  * Shape of the profile object surfaced by GET /api/profile. Kept narrow
@@ -74,6 +76,14 @@ interface SettingsModalProps {
    */
   zen: boolean;
   onToggleZen: () => void;
+  /**
+   * Haptics — when true, subtle tactile feedback fires on grid keystrokes,
+   * shake/error moments, and the solve. Per-device preference (localStorage).
+   * The toggle row hides itself on devices without a haptic surface
+   * (desktop with no Vibration API, iOS < 17.4 without the switch element).
+   */
+  haptics: boolean;
+  onToggleHaptics: () => void;
   /** Called when profile state mutates so the parent can re-fetch. */
   onProfileChanged: () => void;
   /** Called when unassisted mode is toggled so the game grid updates. */
@@ -127,6 +137,8 @@ export function SettingsModal({
   onToggleDark,
   zen,
   onToggleZen,
+  haptics,
+  onToggleHaptics,
   onProfileChanged,
   onUnassistedChanged,
   onClose,
@@ -485,6 +497,24 @@ export function SettingsModal({
             disabled={false}
             onChange={onToggleZen}
           />
+
+          {/* Haptics — only rendered on devices that can actually buzz.
+              Safe to evaluate hapticsAvailable() inline because the modal
+              returns null when !open, so SSR never reaches this branch. */}
+          {hapticsAvailable() && (
+            <ToggleRow
+              icon={<DeviceMobile className="w-4 h-4" weight="bold" />}
+              label="Haptics"
+              description={
+                haptics
+                  ? 'Subtle taps as you play'
+                  : 'Tactile feedback off'
+              }
+              checked={haptics}
+              disabled={false}
+              onChange={onToggleHaptics}
+            />
+          )}
 
           {/* Premium preferences — always rendered so non-premium
               users see them as a feature preview. When !premium the
