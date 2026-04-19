@@ -57,11 +57,16 @@ function getIosSwitch(): HTMLInputElement | null {
 function fireIos(pattern: HapticPattern): void {
   const el = getIosSwitch();
   if (!el) return;
-  // One toggle = one selection-style tick. Two toggles for 'error' read
-  // as a doubled tap, the closest analogue to Android's [15,30,15] burst.
-  const toggles = pattern === 'error' ? 2 : 1;
-  for (let i = 0; i < toggles; i++) {
-    el.checked = !el.checked;
+  el.checked = !el.checked;
+  if (pattern === 'error') {
+    // Space the second toggle in a separate task so the browser commits
+    // each DOM mutation independently — synchronous tight-loop toggles
+    // coalesce into one render and emit only one Taptic Engine event.
+    // 60ms reads as a double-tap burst (the closest iOS analogue to the
+    // Android [15,30,15] pattern).
+    setTimeout(() => {
+      el.checked = !el.checked;
+    }, 60);
   }
 }
 
