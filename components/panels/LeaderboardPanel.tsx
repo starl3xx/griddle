@@ -161,7 +161,7 @@ export function LeaderboardPanel({
             {data.entries.map((e) => (
               <li
                 key={e.playerKey}
-                className="flex items-center gap-2 bg-white dark:bg-gray-700/40 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2"
+                className="flex items-center gap-2 px-3 py-2"
               >
                 <span className="text-xs font-bold text-gray-400 tabular-nums w-8">
                   #{e.rank}

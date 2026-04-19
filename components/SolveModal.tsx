@@ -110,19 +110,28 @@ export function SolveModal({
   };
 
   const handleShare = async () => {
-    const text = formatShareText({
+    const message = formatShareText({
       dayNumber,
       solved: true,
       timeMs: solveMs,
       unassisted,
     });
     const embedUrl = `${SITE_URL}/?puzzle=${dayNumber}`;
+    // Inline the URL in the share body. iMessage inconsistently drops
+    // the `text` field when `url` is passed separately and the URL
+    // generates a Link Presentation card — sometimes you get card +
+    // message, sometimes just the card. Embedding the URL inside
+    // `text` (and not passing a separate `url` to Web Share) sidesteps
+    // that: iMessage detects the URL, renders the card, and keeps the
+    // surrounding message. Farcaster keeps the split because its SDK
+    // takes the embed URL separately to render a playable frame.
+    const shareBody = `${message}\n${embedUrl}`;
 
     // Priority 1: Farcaster cast composer when we're inside a Farcaster
     // mini-app container. The embed becomes a playable Griddle frame in
     // the cast, so recipients can tap and play without leaving Farcaster.
     if (inMiniApp) {
-      const result = await composeCast(text, embedUrl);
+      const result = await composeCast(message, embedUrl);
       if (result === 'cast') { awardMegaphone(); return; }
       if (result === 'cancelled') return;
       // result === 'failed' → SDK threw or unavailable. Fall through to
@@ -132,7 +141,7 @@ export function SolveModal({
     // Priority 2: Web Share API — OS handles the UX, no status needed.
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: `Griddle #${dayNumber}`, text, url: embedUrl });
+        await navigator.share({ title: `Griddle #${dayNumber}`, text: shareBody });
         awardMegaphone();
         return;
       } catch (err) {
@@ -148,7 +157,7 @@ export function SolveModal({
       typeof navigator.clipboard.writeText === 'function'
     ) {
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(shareBody);
         setShareStatus('copied');
         awardMegaphone();
         return;
@@ -188,9 +197,10 @@ export function SolveModal({
         </h2>
         <p className="mt-3 text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200">
           You solved{' '}
-          <span className="tabular-nums">
+          <span className="tabular-nums text-brand">
             Griddle #{dayNumber.toString().padStart(3, '0')}
-          </span>
+          </span>{' '}
+          in
         </p>
         <p className="mt-2 flex items-baseline justify-center gap-2 text-5xl sm:text-6xl font-black tabular-nums text-gray-900 dark:text-gray-100">
           {formatMs(solveMs)}

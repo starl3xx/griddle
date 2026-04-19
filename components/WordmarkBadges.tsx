@@ -5,78 +5,82 @@ import {
   WORDMARK_BY_ID,
   WORDMARK_THEMES,
   isWordmarkId,
+  type WordmarkId,
 } from '@/lib/wordmarks/catalog';
 
 /**
  * Overlapping circular-badge row for a leaderboard entry's top
- * wordmarks. Each badge keeps its themed color ring in both light and
- * dark mode — a bright outer halo is part of the wordmark's visual
- * identity, not a dark-mode-only accent — and the outline fills the
- * overlap gap so adjacent badges read as separate discs instead of a
- * blurred strip.
+ * wordmarks. Small ring-1 treatment aligned with Let's Have A Word's
+ * leaderboard stack — the heavier ring-2 + outline-white variant
+ * still lives on the Stats grid where each badge stands alone and
+ * needs the extra visual weight. Leaderboard rows are tight; subtle
+ * reads better here.
  *
- * On tap, the badge toggles a small name label above itself — the
- * same "round info" pattern Let's Have A Word uses on leaderboard
- * rows. `title` is preserved for desktop hover; the tap label is the
- * mobile-first path since `title` tooltips don't fire on touch.
+ * Hover (desktop) or tap (mobile) surfaces the wordmark name as a
+ * dark pill tooltip below the stack. Tapping does NOT re-order the
+ * badges — the server picks the stack via wordmark priority, and
+ * reshuffling it on tap would suggest the user can change their
+ * prestige ranking.
  *
- * Client component: the tap-to-reveal tooltip needs state + a click-
- * outside listener. Used by both the client `LeaderboardPanel` and the
- * SSR `/leaderboard/[day]` page; hydrates as an island in the latter.
+ * Client component: hover/tap state + click-outside listener.
+ * Used by both the client `LeaderboardPanel` and the SSR
+ * `/leaderboard/[day]` page; hydrates as an island in the latter.
  */
 export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
   const valid = ids.filter(isWordmarkId);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<WordmarkId | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!openId) return;
+    if (!activeId) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) setOpenId(null);
+      if (!containerRef.current?.contains(e.target as Node)) setActiveId(null);
     };
-    // Auto-dismiss after 2s so a tap-and-walk-away doesn't leave the
-    // label hanging. Long enough to read "Lightning" comfortably.
-    const t = setTimeout(() => setOpenId(null), 2000);
+    // Auto-dismiss so a tap-and-walk-away doesn't leave the pill
+    // hanging. 2s is long enough to read "Lightning" comfortably.
+    const t = setTimeout(() => setActiveId(null), 2000);
     document.addEventListener('pointerdown', onPointerDown);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown);
       clearTimeout(t);
     };
-  }, [openId]);
+  }, [activeId]);
 
   if (valid.length === 0) return null;
   return (
     <div
       ref={containerRef}
-      className="flex -space-x-1.5 flex-shrink-0"
+      className="relative inline-flex items-center flex-shrink-0"
+      onMouseLeave={() => setActiveId(null)}
     >
-      {valid.map((id) => {
+      {valid.map((id, i) => {
         const w = WORDMARK_BY_ID[id];
         const theme = WORDMARK_THEMES[id];
-        const isOpen = openId === id;
         return (
           <button
             key={id}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setOpenId(isOpen ? null : id);
+              setActiveId((prev) => (prev === id ? null : id));
             }}
+            onMouseEnter={() => setActiveId(id)}
+            onFocus={() => setActiveId(id)}
+            onBlur={() => setActiveId((prev) => (prev === id ? null : prev))}
             aria-label={w.name}
-            title={`${w.name} · ${w.description}`}
-            className={`relative w-5 h-5 rounded-full ${theme.bg} ring-2 ${theme.ring} outline outline-2 outline-offset-2 outline-white dark:outline-gray-800 flex items-center justify-center text-[10px] leading-none ${
-              isOpen ? 'z-20' : ''
+            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} flex items-center justify-center text-[10px] leading-none ${
+              i > 0 ? '-ml-1.5' : ''
             }`}
           >
             <span aria-hidden>{w.emoji}</span>
-            {isOpen && (
-              <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 dark:bg-gray-700 px-2 py-0.5 text-[10px] font-bold text-white shadow-lg z-30">
-                {w.name}
-              </span>
-            )}
           </button>
         );
       })}
+      {activeId && (
+        <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-1 whitespace-nowrap rounded bg-gray-900 dark:bg-gray-700 px-2 py-1 text-xs font-bold text-white shadow-sm z-30">
+          {WORDMARK_BY_ID[activeId].name}
+        </span>
+      )}
     </div>
   );
 }

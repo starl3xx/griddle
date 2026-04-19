@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { SITE_URL, SITE_NAME } from './site';
+import { SITE_URL, SITE_HOST, SITE_NAME } from './site';
 
 /**
  * Resend email client for Griddle.
@@ -58,6 +58,14 @@ function magicLinkHtml(link: string, code?: string): string {
     ? `<p style="color:#555;margin:28px 0 8px;">Or enter this 6-digit code in Griddle:</p>
   <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:32px;font-weight:800;letter-spacing:6px;color:#111;background:#f4f4f6;border-radius:8px;padding:14px 20px;display:inline-block;">${code}</div>`
     : '';
+  // Apple's domain-bound code format. A final line of the form
+  // `@<host> #<code>` lets iOS Mail surface the code as a one-tap
+  // QuickType suggestion on any page from that origin. Paired with
+  // `autocomplete="one-time-code"` on OtpCodeInput, this is what turns
+  // "I got the code" into "iOS just autofilled it."
+  const boundCodeBlock = code
+    ? `<p style="color:#bbb;font-size:11px;margin-top:24px;">@${SITE_HOST} #${code}</p>`
+    : '';
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -68,11 +76,16 @@ function magicLinkHtml(link: string, code?: string): string {
   ${codeBlock}
   <p style="color:#888;font-size:13px;margin-top:28px;">Didn't request this? You can safely ignore this email.</p>
   <p style="color:#bbb;font-size:12px;margin-top:8px;word-break:break-all;">Or copy: ${link}</p>
+  ${boundCodeBlock}
 </body>
 </html>`;
 }
 
 function magicLinkText(link: string, code?: string): string {
   const codeLine = code ? `\nOr enter this 6-digit code in Griddle: ${code}\n` : '';
-  return `Sign in to Griddle\n\nClick the link below (expires in 15 minutes):\n\n${link}\n${codeLine}\nIf you didn't request this, ignore this email.`;
+  // See magicLinkHtml for why the `@host #code` line is here. Must be
+  // on its own line — iOS Mail's scanner keys off line-anchored tokens,
+  // not prose mentions of the code.
+  const boundCodeLine = code ? `\n@${SITE_HOST} #${code}\n` : '';
+  return `Sign in to Griddle\n\nClick the link below (expires in 15 minutes):\n\n${link}\n${codeLine}\nIf you didn't request this, ignore this email.${boundCodeLine}`;
 }

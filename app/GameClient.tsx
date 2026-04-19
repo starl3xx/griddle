@@ -22,7 +22,7 @@ import { SettingsModal, type ProfileSnapshot } from '@/components/SettingsModal'
 import { SettingsButton } from '@/components/SettingsButton';
 import { pickAvatarSeed } from '@/lib/default-avatar';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
-import { useGriddle, type SolveVerdict } from '@/lib/useGriddle';
+import { useGriddle, type CellState, type SolveVerdict } from '@/lib/useGriddle';
 import { useFarcaster } from '@/lib/farcaster';
 import { trackEvent } from '@/lib/funnel/client';
 import type { SolvePayload } from '@/lib/telemetry';
@@ -47,6 +47,20 @@ const LazyPremiumCryptoFlow = dynamic(
   () => import('@/components/LazyPremiumCryptoFlow'),
   { ssr: false, loading: () => null },
 );
+
+// Neutral props passed to the Grid / FoundWords / WordSlots while the
+// Start gate is up. A revisit of an already-solved puzzle hydrates the
+// useGriddle state with the prior solve — colored cells, sequence
+// numbers, found-words pills — and the 40% backdrop-blur tint isn't
+// enough to fully hide saturated crumbs, so the shapes leak through.
+// Replacing the live state with these blank placeholders while gated
+// renders the tiles neutral, so there's nothing color-bearing left
+// for the blur to have to hide.
+const GATE_CELL_STATES: CellState[] = Array.from({ length: 9 }, () => 'open');
+const GATE_SEQUENCE: Array<number | null> = Array.from({ length: 9 }, () => null);
+const GATE_PATH: number[] = [];
+const GATE_LETTERS: string[] = [];
+const GATE_FOUND_WORDS: string[] = [];
 
 interface InitialPuzzle {
   dayNumber: number;
@@ -1240,20 +1254,20 @@ export default function GameClient({
             }
             aria-hidden={startedAt == null}
           >
-            <FoundWords words={state.foundWords} />
+            <FoundWords words={startedAt == null ? GATE_FOUND_WORDS : state.foundWords} />
 
             <Grid
               grid={activePuzzle.grid}
-              cellStates={state.cellStates}
-              sequenceByCell={state.sequenceByCell}
-              path={state.path}
+              cellStates={startedAt == null ? GATE_CELL_STATES : state.cellStates}
+              sequenceByCell={startedAt == null ? GATE_SEQUENCE : state.sequenceByCell}
+              path={startedAt == null ? GATE_PATH : state.path}
               shakeSignal={state.shakeSignal}
-              solved={state.solved}
+              solved={startedAt != null && state.solved}
               onCellTap={actions.tapCell}
               onReorderComplete={handleReorderComplete}
             />
 
-            <WordSlots letters={state.letters} />
+            <WordSlots letters={startedAt == null ? GATE_LETTERS : state.letters} />
           </div>
 
           {startedAt == null && (
@@ -1271,17 +1285,25 @@ export default function GameClient({
                   top of gray-900, which looked like a hard-edged
                   horizontal stripe spanning the full viewport width.
 
-                  The mask-image gradient fades the bottom ~20% of the
-                  overlay so the blur + tint don't end in a visible
-                  straight line where the WordSlots row ends. Without
-                  the mask the cutoff is a pronounced horizontal edge
-                  right above the Backspace / Reset row — especially
-                  obvious in dark mode where the tint and body tones
-                  are close but not identical. `-webkit-mask-image`
-                  pair is for Safari, which still needs the vendor
-                  prefix for mask-image as of 2026. */}
+                  The mask-image gradient fades a fixed 40px at the
+                  bottom of the overlay — long enough to soften the
+                  blur-to-clear transition, short enough that the fade
+                  stays inside the WordSlots row and never eats into
+                  the Grid above. A percentage fade (e.g. 80%→100%)
+                  was pinned to total overlay height, so a tall
+                  FoundWords row (several solved-attempt crumbs) would
+                  push the fade zone up into the bottom row of tiles,
+                  making it look like the blur had a hard cutoff
+                  mid-grid. Fixed pixels decouple the fade from
+                  content height. `-webkit-mask-image` pair is for
+                  Safari, which still needs the vendor prefix for
+                  mask-image as of 2026. */}
               <div
-                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-gray-900/40 [mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)] [-webkit-mask-image:linear-gradient(to_bottom,black_80%,transparent_100%)]"
+                className="absolute inset-0 backdrop-blur-md bg-white/40 dark:bg-gray-900/40"
+                style={{
+                  maskImage: 'linear-gradient(to bottom, black calc(100% - 40px), transparent)',
+                  WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 40px), transparent)',
+                }}
                 aria-hidden
               />
               <StartGate onStart={handleStart} pending={startPending} />
