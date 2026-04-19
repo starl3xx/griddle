@@ -86,13 +86,17 @@ export function OtpCodeInput({ email, onVerified, prompt }: OtpCodeInputProps) {
           inputMode="numeric"
           autoComplete="one-time-code"
           maxLength={6}
+          size={6}
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && ready && !submitting) submit();
           }}
           placeholder="000000"
-          className="flex-1 font-mono tracking-[0.4em] text-center text-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
+          // min-w-0 lets the flex item shrink below the input's
+          // intrinsic min-width so it can sit next to Verify on
+          // narrow PWA viewports without forcing horizontal overflow.
+          className="flex-1 min-w-0 font-mono tracking-[0.4em] text-center text-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
         />
         <button
           type="button"

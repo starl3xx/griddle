@@ -60,7 +60,7 @@ export default async function LeaderboardPage({
             {entries.map((e) => (
               <li
                 key={e.playerKey}
-                className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-btn"
+                className="flex items-center gap-2 px-3 py-2"
               >
                 <span className="text-xs font-bold text-gray-400 tabular-nums w-8">
                   #{e.rank}

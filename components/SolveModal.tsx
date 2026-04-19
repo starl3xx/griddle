@@ -188,9 +188,10 @@ export function SolveModal({
         </h2>
         <p className="mt-3 text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200">
           You solved{' '}
-          <span className="tabular-nums">
+          <span className="tabular-nums text-brand">
             Griddle #{dayNumber.toString().padStart(3, '0')}
-          </span>
+          </span>{' '}
+          in
         </p>
         <p className="mt-2 flex items-baseline justify-center gap-2 text-5xl sm:text-6xl font-black tabular-nums text-gray-900 dark:text-gray-100">
           {formatMs(solveMs)}
