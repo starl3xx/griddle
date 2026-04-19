@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-
-const LS_KEY = 'griddle_haptics_v1';
+import { HAPTICS_LS_KEY } from './haptics';
 
 /**
  * Haptics preference — subtle vibrations on grid keystrokes, shake, and
@@ -21,7 +20,7 @@ export function useHaptics() {
   const [haptics, setHaptics] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     try {
-      const v = window.localStorage.getItem(LS_KEY);
+      const v = window.localStorage.getItem(HAPTICS_LS_KEY);
       return v === null ? true : v === '1';
     } catch {
       return true;
@@ -31,7 +30,7 @@ export function useHaptics() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      window.localStorage.setItem(LS_KEY, haptics ? '1' : '0');
+      window.localStorage.setItem(HAPTICS_LS_KEY, haptics ? '1' : '0');
     } catch {
       /* best-effort — private mode / quota errors */
     }

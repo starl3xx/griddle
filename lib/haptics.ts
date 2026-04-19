@@ -19,14 +19,19 @@
 
 export type HapticPattern = 'tap' | 'error' | 'success';
 
-const LS_KEY = 'griddle_haptics_v1';
+/**
+ * Single source of truth for the haptics preference's localStorage key.
+ * Imported by `useHaptics.ts` so the writer (the hook) and the reader
+ * (`fireHaptic` below) cannot silently desync if the key is ever bumped.
+ */
+export const HAPTICS_LS_KEY = 'griddle_haptics_v1';
 
 let iosSwitch: HTMLInputElement | null = null;
 
 function userPrefersOff(): boolean {
   if (typeof window === 'undefined') return true;
   try {
-    if (window.localStorage.getItem(LS_KEY) === '0') return true;
+    if (window.localStorage.getItem(HAPTICS_LS_KEY) === '0') return true;
   } catch {
     /* private mode — fall through */
   }
