@@ -30,8 +30,15 @@ const LEADERBOARD_BADGE_LIMIT = 3;
 
 /**
  * Given an arbitrary list of earned wordmark ids (may contain
- * duplicates, unknown ids, or already-deduped sets), return the top 3
- * ids to display on the leaderboard row.
+ * duplicates, unknown ids, or already-deduped sets), return up to 3
+ * ids in leaderboard-render order (left → right = least → most
+ * prestigious).
+ *
+ * The render-order flip matters: `WordmarkBadges` stacks badges with a
+ * negative left margin, and later DOM siblings paint on top of their
+ * earlier ones in an overlap. Ordering the rarest last puts it on the
+ * right AND on top of the stack — the visual hierarchy the design
+ * calls for ("rarest on top on the right").
  *
  * Unknown ids are dropped silently — the server may have stored a
  * wordmark id that the client bundle hasn't shipped yet (future-compat
@@ -48,10 +55,12 @@ export function getLeaderboardWordmarks(ids: readonly string[]): WordmarkId[] {
   collapseGroup(held, SPEED_GROUP);
   collapseGroup(held, STREAK_GROUP);
 
-  // Sort the survivors by Z-index — lowest zIndex = most prestigious.
+  // Sort by Z-index ascending (most prestigious first) to select the
+  // top 3, then reverse so the rarest renders rightmost / on top.
   return Array.from(held)
     .sort((a, b) => WORDMARK_BY_ID[a].zIndex - WORDMARK_BY_ID[b].zIndex)
-    .slice(0, LEADERBOARD_BADGE_LIMIT);
+    .slice(0, LEADERBOARD_BADGE_LIMIT)
+    .reverse();
 }
 
 function collapseGroup(held: Set<WordmarkId>, group: readonly WordmarkId[]): void {
