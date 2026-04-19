@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { SITE_URL, SITE_NAME } from './site';
+import { SITE_URL, SITE_HOST, SITE_NAME } from './site';
 
 /**
  * Resend email client for Griddle.
