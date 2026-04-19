@@ -188,24 +188,72 @@ function StatsSkeleton() {
   );
 }
 
+/**
+ * Three stacked cards — All time, Streaks, Times. Each card holds two
+ * label/value pairs side-by-side. Modeled on Let's Have A Word's stats
+ * surface: titled cards with a light tinted background, big bold
+ * numbers under small uppercase labels.
+ */
 function StatsGrid({ stats }: { stats: WalletStats }) {
   return (
-    <div className="grid grid-cols-3 gap-3">
-      <StatCell label="Solves" value={stats.totalSolves.toString()} />
-      <StatCell label="Unassisted" value={stats.unassistedSolves.toString()} />
-      <StatCell label="Current" value={stats.currentStreak > 0 ? `${stats.currentStreak}🔥` : '0'} />
-      <StatCell label="Longest" value={stats.longestStreak.toString()} />
-      <StatCell label="Fastest" value={stats.fastestMs != null ? formatMs(stats.fastestMs) : '—'} />
-      <StatCell label="Average" value={stats.averageMs != null ? formatMs(stats.averageMs) : '—'} />
+    <div className="space-y-3">
+      <StatGroupCard
+        title="All time"
+        items={[
+          { label: 'Solves', value: stats.totalSolves.toString() },
+          { label: 'Unassisted', value: stats.unassistedSolves.toString() },
+        ]}
+      />
+      <StatGroupCard
+        title="Streaks"
+        items={[
+          {
+            label: 'Current',
+            value: stats.currentStreak > 0 ? `${stats.currentStreak}🔥` : '0',
+          },
+          { label: 'Longest', value: stats.longestStreak.toString() },
+        ]}
+      />
+      <StatGroupCard
+        title="Times"
+        items={[
+          {
+            label: 'Fastest',
+            value: stats.fastestMs != null ? formatMs(stats.fastestMs) : '—',
+          },
+          {
+            label: 'Average',
+            value: stats.averageMs != null ? formatMs(stats.averageMs) : '—',
+          },
+        ]}
+      />
     </div>
   );
 }
 
-function StatCell({ label, value }: { label: string; value: string }) {
+interface StatGroupCardProps {
+  title: string;
+  items: Array<{ label: string; value: string }>;
+}
+
+function StatGroupCard({ title, items }: StatGroupCardProps) {
   return (
-    <div className="bg-gray-50 dark:bg-gray-800 rounded-md p-3 text-center">
-      <div className="text-base font-black text-gray-900 dark:text-gray-100 tabular-nums">{value}</div>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mt-0.5">{label}</div>
-    </div>
+    <section className="bg-gray-50 dark:bg-gray-800/60 rounded-lg p-4">
+      <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">
+        {title}
+      </h3>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        {items.map((item) => (
+          <div key={item.label}>
+            <div className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              {item.label}
+            </div>
+            <div className="mt-1 text-2xl font-black text-gray-900 dark:text-gray-100 tabular-nums">
+              {item.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
