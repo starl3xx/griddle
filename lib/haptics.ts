@@ -67,13 +67,25 @@ function fireIos(pattern: HapticPattern): void {
   // assignment flips the state but never ticks the haptic. .click()
   // synthesizes the activation iOS recognizes, which both toggles the
   // switch AND fires the haptic. Called from within a real user gesture
-  // (keydown / onClick) so iOS's user-activation requirement is met.
+  // (keydown / onClick) so iOS's user-activation requirement is met for
+  // the `tap` and `error` patterns. The `success` pattern fires after
+  // the async solve verdict resolves — outside the user-activation
+  // window — so on iOS it likely no-ops; the visual glow + SolveModal
+  // carry the celebration. On Android, navigator.vibrate works without
+  // a gesture, so success still fires there.
   el.click();
+  // Each pattern gets a distinct rhythm so they feel different in the
+  // hand. We can't vary amplitude on iOS — only count + spacing.
+  //   tap     → 1 click          (single light selection)
+  //   error   → 2 clicks @ 60ms  (tense rapid burst)
+  //   success → 3 clicks @ 80ms  (deliberate triumphant beat)
+  // Synchronous back-to-back clicks coalesce into one Taptic event, so
+  // each follow-up runs in its own task via setTimeout.
   if (pattern === 'error') {
-    // 60ms gap so the second click is its own activation event — iOS
-    // coalesces back-to-back synchronous events into one tick. Reads
-    // as a double-tap burst (closest analogue to Android [15,30,15]).
     setTimeout(() => el.click(), 60);
+  } else if (pattern === 'success') {
+    setTimeout(() => el.click(), 80);
+    setTimeout(() => el.click(), 160);
   }
 }
 
