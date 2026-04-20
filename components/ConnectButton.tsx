@@ -3,13 +3,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { WalletIcon, connectorLabel, connectorKind } from './WalletIcon';
-import { useFarcaster } from '@/lib/farcaster';
 
 interface ConnectButtonProps {
   /** Called once a wallet successfully connects, with the address. */
   onConnect?: (address: string) => void;
   /** Called once a wallet disconnects (or session expires). */
   onDisconnect?: () => void;
+  /**
+   * Whether the app is running inside a Farcaster mini-app client
+   * (Warpcast / Base App). Plumbed as a prop rather than fetched via
+   * a local `useFarcaster()` call so we share the already-resolved
+   * value from `GameClient` — a second call would restart the async
+   * detection cycle and leave `inMiniApp=false` for ~2s, long enough
+   * for a first-time Warpcast user to open the picker and miss the
+   * Farcaster tile. Matches the SolveModal plumbing pattern.
+   */
+  inMiniApp: boolean;
 }
 
 /**
@@ -27,11 +36,10 @@ interface ConnectButtonProps {
  * elsewhere in the game. Sized to fit in the page header without
  * disrupting the Griddle wordmark layout.
  */
-export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
+export function ConnectButton({ onConnect, onDisconnect, inMiniApp }: ConnectButtonProps) {
   const { address, isConnected } = useAccount();
   const { connectors, connect, isPending } = useConnect();
   const { disconnect } = useDisconnect();
-  const { inMiniApp } = useFarcaster();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   // Hide the Farcaster connector when we aren't inside a Farcaster
@@ -39,10 +47,7 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
   // connector's `connect()` silently no-ops because there's no
   // `sdk.wallet.ethProvider` to attach to — the picker closes and the
   // user sees nothing. Filtering keeps the tile only on surfaces where
-  // it actually works. Inside Warpcast, Farcaster auto-connect
-  // typically reconnects before the picker is ever opened, so the
-  // initial-hydration gap (a second or two before `inMiniApp` resolves)
-  // doesn't matter in practice.
+  // it actually works.
   const visibleConnectors = useMemo(
     () => connectors.filter((c) => connectorKind(c) !== 'farcaster' || inMiniApp),
     [connectors, inMiniApp],
