@@ -309,13 +309,22 @@ export async function getDailyLeaderboard(
     FROM eligible e
     LEFT JOIN profiles p ON p.id = e.profile_id
     WHERE e.rn = 1
-      AND (
-        p.handle IS NULL
-        OR p.handle NOT IN (${sql.join(
-          LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h}`),
-          sql`, `,
-        )})
-      )
+      AND ${
+        // Emit an always-true predicate when the exclusion list is
+        // empty — sql.join on an empty array would render `NOT IN ()`,
+        // which is a Postgres syntax error and would break the whole
+        // leaderboard query. Guarding here keeps the exclusion list
+        // safe to empty without regressing the board.
+        LEADERBOARD_EXCLUDED_HANDLES.length === 0
+          ? sql`true`
+          : sql`(
+              p.handle IS NULL
+              OR p.handle NOT IN (${sql.join(
+                LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h}`),
+                sql`, `,
+              )})
+            )`
+      }
     ORDER BY e.server_solve_ms ASC
     LIMIT ${limit}
   `);
