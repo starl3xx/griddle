@@ -74,6 +74,19 @@
     @apply outline-2 outline-offset-2 outline-brand;
   }
 
+  /* Recharts' SVG elements (paths, layers, surface) pick up the global
+     focus-visible outline when tapped on touch devices — iOS Safari in
+     particular flags the chart as focused on the first tap, which
+     paints a brand-colored rectangle around the whole graph. Charts
+     aren't meant to be focusable UI, so suppress the outline on any
+     descendant of a .recharts-wrapper. */
+  .recharts-wrapper :focus,
+  .recharts-wrapper :focus-visible,
+  .recharts-surface:focus,
+  .recharts-surface:focus-visible {
+    outline: none;
+  }
+
   * {
     -webkit-tap-highlight-color: transparent;
   }
