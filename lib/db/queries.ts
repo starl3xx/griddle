@@ -1420,21 +1420,73 @@ export async function grantPremium(input: GrantPremiumInput): Promise<GrantPremi
     return { kind: 'wallet', wallet: normalizedWallet };
   }
 
-  // Handle path: upsert into profiles with premium_source='admin_grant'.
+  // Handle path. An admin has explicitly named this handle, so we
+  // intentionally do NOT round-trip through `upsertProfile` — that
+  // function's trust-boundary guard treats any handle match whose
+  // profile carries a verified identity anchor (verified email,
+  // Stripe session, Farcaster fid) as an attempted takeover and
+  // throws HandleTakenError. That guard is correct for user-facing
+  // identity binding, but irrelevant here: the admin isn't claiming
+  // identity, they're setting premium_source on the profile that
+  // already owns the handle. Before this split, granting premium via
+  // the Users tab to any profile with a verified email 500'd.
+  //
   // Note: the game's premium check currently only reads from
   // premium_users (keyed on wallet). Handle-only premium becomes
-  // effective when M5-premium-checkout wires the leaderboard/premium reads through
-  // profiles. The grant is recorded now so the audit trail is intact.
-  const profile = await upsertProfile({
-    handle,
+  // effective when M5-premium-checkout wires the leaderboard/premium
+  // reads through profiles. The grant is recorded now so the audit
+  // trail is intact.
+  const normalizedHandle = handle as string;
+  const existing = await getProfileByHandle(normalizedHandle);
+  if (existing) {
+    const updated = await updateProfileInPlace(existing.id, {
+      wallet: existing.wallet,
+      handle: existing.handle,
+      premiumSource: 'admin_grant',
+      grantedBy,
+      reason,
+      stripeSessionId: existing.stripeSessionId,
+      email: existing.email,
+    });
+    return { kind: 'handle', profileId: updated.id, handle: normalizedHandle };
+  }
+
+  // Handle doesn't belong to any profile yet — insert a fresh
+  // handle-only row so the grant is audit-attributable. `onConflictDoNothing`
+  // guards the narrow race where another writer claims this handle
+  // between the lookup above and this insert.
+  const inserted = await db
+    .insert(profiles)
+    .values({
+      handle: normalizedHandle,
+      premiumSource: 'admin_grant',
+      grantedBy,
+      reason,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (inserted.length > 0) {
+    return { kind: 'handle', profileId: inserted[0].id, handle: normalizedHandle };
+  }
+
+  // Race: someone claimed the handle under us. Re-fetch and update in
+  // place so the admin grant still lands on whichever profile owns it.
+  const raceWinner = await getProfileByHandle(normalizedHandle);
+  if (!raceWinner) {
+    throw new Error(
+      'grantPremium: handle insert rejected but row not findable on re-query',
+    );
+  }
+  const finalUpdate = await updateProfileInPlace(raceWinner.id, {
+    wallet: raceWinner.wallet,
+    handle: raceWinner.handle,
     premiumSource: 'admin_grant',
-    // Coalesce nulls to undefined: upsertProfile's type narrows these
-    // non-clearable fields to `string | undefined`, so "omitted" is
-    // the only way to express "keep existing".
-    grantedBy: grantedBy ?? undefined,
-    reason: reason ?? undefined,
+    grantedBy,
+    reason,
+    stripeSessionId: raceWinner.stripeSessionId,
+    email: raceWinner.email,
   });
-  return { kind: 'handle', profileId: profile.id, handle: handle as string };
+  return { kind: 'handle', profileId: finalUpdate.id, handle: normalizedHandle };
 }
 
 /**
