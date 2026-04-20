@@ -1,14 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
-import { WalletIcon, connectorLabel } from './WalletIcon';
+import { WalletIcon, connectorLabel, connectorKind } from './WalletIcon';
 
 interface ConnectButtonProps {
   /** Called once a wallet successfully connects, with the address. */
   onConnect?: (address: string) => void;
   /** Called once a wallet disconnects (or session expires). */
   onDisconnect?: () => void;
+  /**
+   * Whether the app is running inside a Farcaster mini-app client
+   * (Warpcast / Base App). Plumbed as a prop rather than fetched via
+   * a local `useFarcaster()` call so we share the already-resolved
+   * value from `GameClient` — a second call would restart the async
+   * detection cycle and leave `inMiniApp=false` for ~2s, long enough
+   * for a first-time Warpcast user to open the picker and miss the
+   * Farcaster tile. Matches the SolveModal plumbing pattern.
+   */
+  inMiniApp: boolean;
 }
 
 /**
@@ -26,11 +36,22 @@ interface ConnectButtonProps {
  * elsewhere in the game. Sized to fit in the page header without
  * disrupting the Griddle wordmark layout.
  */
-export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
+export function ConnectButton({ onConnect, onDisconnect, inMiniApp }: ConnectButtonProps) {
   const { address, isConnected } = useAccount();
   const { connectors, connect, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Hide the Farcaster connector when we aren't inside a Farcaster
+  // mini-app client (Warpcast / Base App). Outside that context the
+  // connector's `connect()` silently no-ops because there's no
+  // `sdk.wallet.ethProvider` to attach to — the picker closes and the
+  // user sees nothing. Filtering keeps the tile only on surfaces where
+  // it actually works.
+  const visibleConnectors = useMemo(
+    () => connectors.filter((c) => connectorKind(c) !== 'farcaster' || inMiniApp),
+    [connectors, inMiniApp],
+  );
 
   // Fire onConnect once on the first time we transition into a connected
   // state, and onDisconnect on the disconnect transition. Track the
@@ -104,7 +125,7 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
             </p>
 
             <div className="flex flex-col gap-2 mt-5">
-              {connectors.map((connector) => (
+              {visibleConnectors.map((connector) => (
                 <button
                   key={connector.uid}
                   type="button"

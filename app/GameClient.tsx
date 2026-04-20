@@ -1145,6 +1145,7 @@ export default function GameClient({
             onConnect={handleWalletConnect}
             onDisconnect={handleWalletDisconnect}
             openKey={pickerOpenKey}
+            inMiniApp={inMiniApp}
           />
         </div>
       )}

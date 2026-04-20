@@ -16,6 +16,12 @@ interface LazyConnectFlowProps {
    * become silent no-ops because LazyConnectFlow never re-mounts.
    */
   openKey?: number;
+  /**
+   * Forwarded to ConnectButton so the Farcaster tile filter reads the
+   * already-resolved mini-app state from GameClient — avoids the 2s
+   * hydration gap a local useFarcaster() in ConnectButton would create.
+   */
+  inMiniApp: boolean;
 }
 
 /**
@@ -35,10 +41,11 @@ export default function LazyConnectFlow({
   onConnect,
   onDisconnect,
   openKey = 0,
+  inMiniApp,
 }: LazyConnectFlowProps) {
   return (
     <WalletProvider>
-      <ConnectButton onConnect={onConnect} onDisconnect={onDisconnect} />
+      <ConnectButton onConnect={onConnect} onDisconnect={onDisconnect} inMiniApp={inMiniApp} />
       <AutoOpener openKey={openKey} />
     </WalletProvider>
   );
