@@ -233,6 +233,13 @@ export interface LeaderboardEntry {
  * ranking — anonymous / handle-less rows are preserved (NULL handle is
  * not in the list by definition of `NOT IN`, so we also allow NULL
  * explicitly).
+ *
+ * Store and compare in lowercase. The handle unique index in the db is
+ * `lower(handle)` and most read paths already normalize, but a couple
+ * of write paths (e.g. grantPremium → upsertProfile) can land
+ * mixed-case rows. Lowercasing both sides of the filter means we
+ * reliably catch the row regardless of what casing made it into the
+ * profiles table.
  */
 const LEADERBOARD_EXCLUDED_HANDLES: readonly string[] = ['jake'];
 
@@ -315,12 +322,16 @@ export async function getDailyLeaderboard(
         // which is a Postgres syntax error and would break the whole
         // leaderboard query. Guarding here keeps the exclusion list
         // safe to empty without regressing the board.
+        //
+        // Compare lower(p.handle) vs. lowercased constants so casing
+        // drift in the profiles table doesn't let an excluded row
+        // slip past the filter.
         LEADERBOARD_EXCLUDED_HANDLES.length === 0
           ? sql`true`
           : sql`(
               p.handle IS NULL
-              OR p.handle NOT IN (${sql.join(
-                LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h}`),
+              OR lower(p.handle) NOT IN (${sql.join(
+                LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h.toLowerCase()}`),
                 sql`, `,
               )})
             )`
