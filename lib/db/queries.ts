@@ -3685,12 +3685,31 @@ export async function getPostSolveSummary(
           MIN(s.server_solve_ms) AS best_ms
         FROM solves s
         JOIN puzzles p ON p.id = s.puzzle_id
+        LEFT JOIN profiles pr ON pr.id = s.profile_id
         WHERE p.day_number = ${dayNumber}
           AND s.solved = true
           AND (s.flag IS NULL OR s.flag = 'suspicious')
           AND (s.wallet IS NOT NULL OR s.profile_id IS NOT NULL)
           AND s.server_solve_ms IS NOT NULL
           AND s.created_at::date = p.date::date
+          AND ${
+            // Same exclusion as getDailyLeaderboard — if an owner alt
+            // is hidden from the public board it MUST also be hidden
+            // from the rank/percentile computation powering the
+            // SolveModal's dailyRank + percentile, or the stats
+            // dashboard would diverge from the leaderboard a single
+            // scroll away. Docstring on this function explicitly
+            // warns against that drift. Mirror the lowercase guard.
+            LEADERBOARD_EXCLUDED_HANDLES.length === 0
+              ? sql`true`
+              : sql`(
+                  pr.handle IS NULL
+                  OR lower(pr.handle) NOT IN (${sql.join(
+                    LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h.toLowerCase()}`),
+                    sql`, `,
+                  )})
+                )`
+          }
         GROUP BY player_key
       )
       SELECT
