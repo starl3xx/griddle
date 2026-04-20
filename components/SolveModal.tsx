@@ -308,7 +308,7 @@ export function SolveModal({
           />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">
-              Want to play another?
+              Wanna play another?
             </p>
             <p className="mt-0.5 text-sm font-semibold text-brand">
               Visit the Archive →

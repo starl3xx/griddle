@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Crown, Backspace, ArrowCounterClockwise, Info } from '@phosphor-icons/react';
+import { Crown, Backspace, ArrowCounterClockwise, Info, Medal } from '@phosphor-icons/react';
 import { formatLongDate } from '@/lib/format';
 import { useDarkMode } from '@/lib/useDarkMode';
 import { useZenMode } from '@/lib/useZenMode';
@@ -376,6 +376,13 @@ export default function GameClient({
   const openTutorial = useCallback(() => setShowTutorial(true), []);
 
   const [solveResult, setSolveResult] = useState<SolveResult | null>(null);
+  // Visibility of SolveModal, independent of `solveResult`. We keep the
+  // result around after the user closes the modal so the post-solve
+  // UI can offer a pill that re-opens it — the user loses the share /
+  // leaderboard / archive links otherwise. `solveResult` is cleared
+  // only on puzzle change; `solveModalOpen` toggles as the modal shows
+  // and hides.
+  const [solveModalOpen, setSolveModalOpen] = useState(false);
 
   // Solve reveal is a two-step handoff: /api/solve verdict lands first
   // and populates `pendingSolveResultRef`, then Grid fires
@@ -556,6 +563,7 @@ export default function GameClient({
     if (pending === null) return;
     pendingSolveResultRef.current = null;
     setSolveResult(pending);
+    setSolveModalOpen(true);
   }, []);
 
   // Unassisted mode — read from /api/settings on wallet connect. When
@@ -611,6 +619,7 @@ export default function GameClient({
     if (prevDayRef.current !== activePuzzle.dayNumber) {
       prevDayRef.current = activePuzzle.dayNumber;
       setSolveResult(null);
+      setSolveModalOpen(false);
       // finalSolveMs is intentionally NOT cleared here — the nav
       // function (loadArchivePuzzle / returnToToday) is authoritative
       // for that value per puzzle. Clearing here would race with the
@@ -1167,7 +1176,15 @@ export default function GameClient({
                   centered whether this cell renders the timer or
                   stays empty, so toggling zen mid-play doesn't
                   reflow the wordmark. */}
-              {!zen && startedAt != null && !solveResult && (
+              {/* Hide the timer only while the SolveModal is on
+                  screen — the modal shows the hero time and the
+                  background timer would compete. Post-close we still
+                  want the frozen solve time visible in the header.
+                  Gating on `!solveResult` used to work because the
+                  result cleared on close, but now that it persists
+                  for the re-open pill we gate on the modal's own
+                  open state instead. */}
+              {!zen && startedAt != null && !solveModalOpen && (
                 <GameTimer startedAt={startedAt} frozenMs={finalSolveMs} />
               )}
             </div>
@@ -1311,26 +1328,42 @@ export default function GameClient({
           )}
         </div>
 
-        <div className="flex gap-2 mt-1">
+        {/* Post-solve the Backspace / Reset row is dead weight (the
+            grid is locked). Swap it for a pill that re-opens the
+            SolveModal so Share / Leaderboard / Archive stay reachable
+            after the user dismisses the modal — the only other paths
+            to them were the modal itself. */}
+        {state.solved && solveResult ? (
           <button
             type="button"
-            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-            onClick={actions.backspace}
-            disabled={state.pendingSolve || startedAt == null}
+            onClick={() => setSolveModalOpen(true)}
+            className="mt-1 inline-flex items-center gap-1.5 rounded-pill bg-brand-50 dark:bg-brand-900/30 ring-1 ring-brand-200 dark:ring-brand-700 px-4 py-2 text-sm font-bold text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
-            <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
-            Backspace
+            <Medal className="w-4 h-4" weight="fill" aria-hidden />
+            View your result
           </button>
-          <button
-            type="button"
-            className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
-            onClick={actions.reset}
-            disabled={state.pendingSolve || startedAt == null}
-          >
-            <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
-            Reset
-          </button>
-        </div>
+        ) : (
+          <div className="flex gap-2 mt-1">
+            <button
+              type="button"
+              className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+              onClick={actions.backspace}
+              disabled={state.pendingSolve || startedAt == null}
+            >
+              <Backspace className="w-3.5 h-3.5" weight="bold" aria-hidden />
+              Backspace
+            </button>
+            <button
+              type="button"
+              className="btn-secondary inline-flex items-center gap-1.5 !py-2 !px-3 text-sm"
+              onClick={actions.reset}
+              disabled={state.pendingSolve || startedAt == null}
+            >
+              <ArrowCounterClockwise className="w-3.5 h-3.5" weight="bold" aria-hidden />
+              Reset
+            </button>
+          </div>
+        )}
 
         <HomeTiles onTileClick={handleTileClick} />
 
@@ -1435,7 +1468,7 @@ export default function GameClient({
         </div>
       )}
 
-      {solveResult && (
+      {solveResult && solveModalOpen && (
         <SolveModal
           dayNumber={activePuzzle.dayNumber}
           word={solveResult.word}
@@ -1448,7 +1481,7 @@ export default function GameClient({
           dailyRank={solveResult.dailyRank}
           isPremium={solveResult.isPremium}
           inMiniApp={inMiniApp}
-          onClose={() => setSolveResult(null)}
+          onClose={() => setSolveModalOpen(false)}
           onOpenLeaderboard={() => {
             // Seed the leaderboard tab with the puzzle that was just
             // solved — critical for archive solves (would otherwise
@@ -1456,11 +1489,11 @@ export default function GameClient({
             // just completed). For today's solve this equals today so
             // it's a no-op relative to the default.
             setLeaderboardInitialDay(activePuzzle.dayNumber);
-            setSolveResult(null);
+            setSolveModalOpen(false);
             setBrowseTab('leaderboard');
           }}
           onOpenArchive={() => {
-            setSolveResult(null);
+            setSolveModalOpen(false);
             setBrowseTab('archive');
           }}
         />
