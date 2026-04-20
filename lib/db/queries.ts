@@ -226,6 +226,17 @@ export interface LeaderboardEntry {
 }
 
 /**
+ * Handles that should never appear on the daily leaderboard. Owner-side
+ * alt accounts used for smoke-testing end up polluting the top of the
+ * board with clearly-not-public solves. The filter is applied in the
+ * outer SELECT of `getDailyLeaderboard` so the row is dropped before
+ * ranking — anonymous / handle-less rows are preserved (NULL handle is
+ * not in the list by definition of `NOT IN`, so we also allow NULL
+ * explicitly).
+ */
+const LEADERBOARD_EXCLUDED_HANDLES = ['jake'] as const;
+
+/**
  * Top N solvers for a given day. Filters:
  *   - solved = true (no failed attempts)
  *   - flag is NULL or 'suspicious' (only 'ineligible' is excluded)
@@ -235,6 +246,7 @@ export interface LeaderboardEntry {
  *     they can appear on the board under their handle.
  *   - same-day only: solve created_at matches the puzzle date
  *     (archive solves don't qualify for leaderboard placement).
+ *   - handle not in `LEADERBOARD_EXCLUDED_HANDLES` (owner alt list).
  *
  * Each player appears once with their fastest serverSolveMs. Grouping
  * uses the same synthetic player_key as getPremiumStats — profile_id
@@ -297,6 +309,13 @@ export async function getDailyLeaderboard(
     FROM eligible e
     LEFT JOIN profiles p ON p.id = e.profile_id
     WHERE e.rn = 1
+      AND (
+        p.handle IS NULL
+        OR p.handle NOT IN (${sql.join(
+          LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h}`),
+          sql`, `,
+        )})
+      )
     ORDER BY e.server_solve_ms ASC
     LIMIT ${limit}
   `);
