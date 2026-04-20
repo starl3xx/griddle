@@ -27,6 +27,7 @@ type ConnectorKind =
   | 'rainbow'
   | 'trust'
   | 'phantom'
+  | 'walletconnect'
   | 'browser';
 
 export interface ConnectorIdentity {
@@ -41,6 +42,7 @@ export function connectorKind(c: ConnectorIdentity): ConnectorKind {
 
   if (id.includes('farcaster') || name.includes('farcaster')) return 'farcaster';
   if (id.includes('coinbase') || name.includes('coinbase')) return 'coinbase';
+  if (id.includes('walletconnect') || name.includes('walletconnect')) return 'walletconnect';
   if (name.includes('metamask')) return 'metamask';
   if (name.includes('rabby')) return 'rabby';
   if (name.includes('brave')) return 'brave';
@@ -71,11 +73,21 @@ const LABELS: Record<ConnectorKind, string> = {
   rainbow: 'Rainbow',
   trust: 'Trust Wallet',
   phantom: 'Phantom',
+  walletconnect: 'WalletConnect',
   browser: 'Browser wallet',
 };
 
 export function connectorLabel(c: ConnectorIdentity): string {
-  return LABELS[connectorKind(c)];
+  const kind = connectorKind(c);
+  // For unrecognized EIP-6963 providers, use the wallet's announced name
+  // (e.g. "OKX Wallet", "Frame") rather than the generic "Browser wallet"
+  // label — wagmi v2 populates connector.name from the provider's
+  // EIP-6963 info.name. Only fall back when the connector is actually
+  // the plain wagmi `injected` connector with no better name.
+  if (kind === 'browser' && c.name && c.name.toLowerCase() !== 'injected') {
+    return c.name;
+  }
+  return LABELS[kind];
 }
 
 const ICON_SRC: Record<Exclude<ConnectorKind, 'browser'>, string> = {
@@ -87,11 +99,27 @@ const ICON_SRC: Record<Exclude<ConnectorKind, 'browser'>, string> = {
   rainbow: '/wallet-icons/rainbow.svg',
   trust: '/wallet-icons/trust.svg',
   phantom: '/wallet-icons/phantom.svg',
+  walletconnect: '/wallet-icons/walletconnect.svg',
 };
 
 export function WalletIcon({ connector }: { connector: ConnectorIdentity }) {
   const kind = connectorKind(connector);
   if (kind === 'browser') {
+    // EIP-6963 providers announce their own icon (base64 data URL). Prefer
+    // that over the generic phosphor fallback so unknown-but-detected
+    // wallets (e.g. OKX, Frame) show their real brand mark.
+    if (connector.icon) {
+      return (
+        <img
+          src={connector.icon}
+          alt=""
+          aria-hidden
+          width={36}
+          height={36}
+          className="w-9 h-9 rounded-lg flex-shrink-0"
+        />
+      );
+    }
     return (
       <span
         className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-100"

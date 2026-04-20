@@ -15,5 +15,6 @@ Referenced by `components/WalletIcon.tsx`.
 | `rainbow.svg`    | rainbow-me/rainbowkit (`rainbowWallet.svg`)                     | MIT     |
 | `trust.svg`      | rainbow-me/rainbowkit (`trustWallet.svg`)                       | MIT     |
 | `phantom.svg`    | rainbow-me/rainbowkit (`phantomWallet.svg`)                     | MIT     |
+| `walletconnect.svg` | simple-icons (`cdn.simpleicons.org/walletconnect`), brand-blue tile added | CC0     |
 
 Brand names and marks remain trademarks of their respective owners.
