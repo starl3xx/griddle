@@ -4,6 +4,7 @@ import { http, createConfig } from 'wagmi';
 import { base } from 'wagmi/chains';
 import { coinbaseWallet, walletConnect } from 'wagmi/connectors';
 import { farcasterMiniApp } from '@farcaster/miniapp-wagmi-connector';
+import { SITE_NAME, SITE_URL, SITE_DESCRIPTION } from './site';
 
 /**
  * wagmi config for Griddle's wallet integration.
@@ -39,7 +40,7 @@ export const wagmiConfig = createConfig({
   connectors: [
     farcasterMiniApp(),
     coinbaseWallet({
-      appName: 'Griddle',
+      appName: SITE_NAME,
       preference: 'smartWalletOnly',
     }),
     ...(wcProjectId
@@ -47,10 +48,10 @@ export const wagmiConfig = createConfig({
           walletConnect({
             projectId: wcProjectId,
             metadata: {
-              name: 'Griddle',
-              description: 'Daily on-chain word puzzle on Base.',
-              url: 'https://griddle.fun',
-              icons: ['https://griddle.fun/icon.png'],
+              name: SITE_NAME,
+              description: SITE_DESCRIPTION,
+              url: SITE_URL,
+              icons: [`${SITE_URL}/icons/icon-512.png`],
             },
             showQrModal: true,
           }),
