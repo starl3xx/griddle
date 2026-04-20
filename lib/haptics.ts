@@ -1,14 +1,16 @@
 /**
- * Haptic feedback wrapper. Subtle, additive — fires on grid keystrokes,
- * shake/error moments, and the solve.
+ * Haptic feedback wrapper. Subtle, additive — fires on grid taps,
+ * keystrokes, shake/error moments, and the solve.
  *
- * Two implementation paths:
- *   - **Android / Chrome**: standard `navigator.vibrate` Web Vibration API.
- *   - **iOS Safari (17.4+)**: Apple does not expose `navigator.vibrate` to
- *     the web, but toggling a hidden `<input type="checkbox" switch>`
- *     triggers the Taptic Engine as a side-effect of the native switch
- *     animation. Capability-detected via `'switch' in HTMLInputElement
- *     .prototype`. iOS < 17.4 is silent — no audible/visible fallback.
+ * Android / Chrome: standard `navigator.vibrate` Web Vibration API.
+ *
+ * iOS Safari (incl. PWA): silent. Apple does not expose the Vibration
+ * API to the web, and the iOS 17.4 `<input type="checkbox" switch>`
+ * Taptic trick only fires when the user's finger lands directly on the
+ * switch UI — synthetic `.click()` dispatched from a tap handler does
+ * not drive the Taptic Engine in practice. We previously shipped that
+ * approach and it produced no perceptible feedback on device, so it has
+ * been removed to keep the module honest about its support matrix.
  *
  * Always honors:
  *   - `griddle_haptics_v1` localStorage preference (default on, '0' = off)
@@ -26,8 +28,6 @@ export type HapticPattern = 'tap' | 'error' | 'success';
  */
 export const HAPTICS_LS_KEY = 'griddle_haptics_v1';
 
-let iosSwitch: HTMLInputElement | null = null;
-
 function userPrefersOff(): boolean {
   if (typeof window === 'undefined') return true;
   try {
@@ -41,52 +41,6 @@ function userPrefersOff(): boolean {
     /* very old browsers — ignore */
   }
   return false;
-}
-
-function getIosSwitch(): HTMLInputElement | null {
-  if (typeof document === 'undefined') return null;
-  if (!('switch' in HTMLInputElement.prototype)) return null;
-  if (iosSwitch && iosSwitch.isConnected) return iosSwitch;
-  const el = document.createElement('input');
-  el.type = 'checkbox';
-  el.setAttribute('switch', '');
-  el.setAttribute('aria-hidden', 'true');
-  el.tabIndex = -1;
-  el.style.cssText =
-    'position:absolute;opacity:0;pointer-events:none;width:0;height:0;left:-9999px;';
-  document.body.appendChild(el);
-  iosSwitch = el;
-  return el;
-}
-
-function fireIos(pattern: HapticPattern): void {
-  const el = getIosSwitch();
-  if (!el) return;
-  // Use .click() rather than mutating .checked directly. iOS only fires
-  // the Taptic Engine on user-interaction-style events; a bare property
-  // assignment flips the state but never ticks the haptic. .click()
-  // synthesizes the activation iOS recognizes, which both toggles the
-  // switch AND fires the haptic. Called from within a real user gesture
-  // (keydown / onClick) so iOS's user-activation requirement is met for
-  // the `tap` and `error` patterns. The `success` pattern fires after
-  // the async solve verdict resolves — outside the user-activation
-  // window — so on iOS it likely no-ops; the visual glow + SolveModal
-  // carry the celebration. On Android, navigator.vibrate works without
-  // a gesture, so success still fires there.
-  el.click();
-  // Each pattern gets a distinct rhythm so they feel different in the
-  // hand. We can't vary amplitude on iOS — only count + spacing.
-  //   tap     → 1 click          (single light selection)
-  //   error   → 2 clicks @ 60ms  (tense rapid burst)
-  //   success → 3 clicks @ 80ms  (deliberate triumphant beat)
-  // Synchronous back-to-back clicks coalesce into one Taptic event, so
-  // each follow-up runs in its own task via setTimeout.
-  if (pattern === 'error') {
-    setTimeout(() => el.click(), 60);
-  } else if (pattern === 'success') {
-    setTimeout(() => el.click(), 80);
-    setTimeout(() => el.click(), 160);
-  }
 }
 
 function fireAndroid(pattern: HapticPattern): boolean {
@@ -106,23 +60,22 @@ function fireAndroid(pattern: HapticPattern): boolean {
 export function fireHaptic(pattern: HapticPattern): void {
   if (userPrefersOff()) return;
   try {
-    if (fireAndroid(pattern)) return;
-    fireIos(pattern);
+    fireAndroid(pattern);
   } catch {
     /* swallow — haptics never break the game */
   }
 }
 
 /**
- * True if the current device exposes any haptic surface (Vibration API
- * or iOS switch). Used to hide the Settings toggle on devices where it
- * would have no effect.
+ * True if the current device exposes a haptic surface (Web Vibration
+ * API on a touch device). Used to hide the Settings toggle on devices
+ * where it would have no effect.
  *
  * Gated on `(pointer: coarse)` first: `navigator.vibrate` is present on
  * desktop Chrome/Firefox as a no-op even without vibration hardware, so
  * checking only the API would surface the toggle on laptops where it
- * does nothing perceptible. The iOS switch path is also touch-only
- * (Safari on iPhone/iPad), so the same gate covers both.
+ * does nothing perceptible. iOS Safari returns false here — it has no
+ * Vibration API and no other reliable web-exposed taptic hook.
  */
 export function hapticsAvailable(): boolean {
   if (typeof window === 'undefined') return false;
@@ -131,11 +84,5 @@ export function hapticsAvailable(): boolean {
   } catch {
     return false;
   }
-  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-    return true;
-  }
-  if (typeof HTMLInputElement !== 'undefined' && 'switch' in HTMLInputElement.prototype) {
-    return true;
-  }
-  return false;
+  return typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
 }
