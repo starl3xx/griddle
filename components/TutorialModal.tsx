@@ -25,18 +25,24 @@ export function TutorialModal({ open, onDismiss }: TutorialModalProps) {
         <ul className="space-y-2 text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
           <li className="flex gap-2">
             <span className="text-brand font-bold">1.</span>
-            <span>Find the hidden 9-letter word using every cell exactly once.</span>
+            <span>
+              Find the hidden 9-letter word using every tile exactly once.
+              Words can begin with any tile.
+            </span>
           </li>
           <li className="flex gap-2">
             <span className="text-brand font-bold">2.</span>
             <span>
-              Consecutive letters can’t be direct neighbors — dimmed cells are
-              off-limits.
+              Consecutive letters <strong>cannot be</strong> direct neighbors —
+              dimmed tiles are off-limits.
             </span>
           </li>
           <li className="flex gap-2">
             <span className="text-brand font-bold">3.</span>
-            <span>Type on your keyboard or tap cells. Backspace to undo.</span>
+            <span>
+              Type on your keyboard or tap tiles. Backspace to undo, Reset to
+              clear.
+            </span>
           </li>
         </ul>
 
