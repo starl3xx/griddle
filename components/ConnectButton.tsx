@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
-import { WalletIcon, connectorLabel } from './WalletIcon';
+import { WalletIcon, connectorLabel, connectorKind } from './WalletIcon';
+import { useFarcaster } from '@/lib/farcaster';
 
 interface ConnectButtonProps {
   /** Called once a wallet successfully connects, with the address. */
@@ -30,7 +31,22 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
   const { address, isConnected } = useAccount();
   const { connectors, connect, isPending } = useConnect();
   const { disconnect } = useDisconnect();
+  const { inMiniApp } = useFarcaster();
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Hide the Farcaster connector when we aren't inside a Farcaster
+  // mini-app client (Warpcast / Base App). Outside that context the
+  // connector's `connect()` silently no-ops because there's no
+  // `sdk.wallet.ethProvider` to attach to — the picker closes and the
+  // user sees nothing. Filtering keeps the tile only on surfaces where
+  // it actually works. Inside Warpcast, Farcaster auto-connect
+  // typically reconnects before the picker is ever opened, so the
+  // initial-hydration gap (a second or two before `inMiniApp` resolves)
+  // doesn't matter in practice.
+  const visibleConnectors = useMemo(
+    () => connectors.filter((c) => connectorKind(c) !== 'farcaster' || inMiniApp),
+    [connectors, inMiniApp],
+  );
 
   // Fire onConnect once on the first time we transition into a connected
   // state, and onDisconnect on the disconnect transition. Track the
@@ -104,7 +120,7 @@ export function ConnectButton({ onConnect, onDisconnect }: ConnectButtonProps) {
             </p>
 
             <div className="flex flex-col gap-2 mt-5">
-              {connectors.map((connector) => (
+              {visibleConnectors.map((connector) => (
                 <button
                   key={connector.uid}
                   type="button"
