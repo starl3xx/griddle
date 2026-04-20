@@ -1176,7 +1176,15 @@ export default function GameClient({
                   centered whether this cell renders the timer or
                   stays empty, so toggling zen mid-play doesn't
                   reflow the wordmark. */}
-              {!zen && startedAt != null && !solveResult && (
+              {/* Hide the timer only while the SolveModal is on
+                  screen — the modal shows the hero time and the
+                  background timer would compete. Post-close we still
+                  want the frozen solve time visible in the header.
+                  Gating on `!solveResult` used to work because the
+                  result cleared on close, but now that it persists
+                  for the re-open pill we gate on the modal's own
+                  open state instead. */}
+              {!zen && startedAt != null && !solveModalOpen && (
                 <GameTimer startedAt={startedAt} frozenMs={finalSolveMs} />
               )}
             </div>
