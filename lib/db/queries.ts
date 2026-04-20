@@ -234,7 +234,7 @@ export interface LeaderboardEntry {
  * not in the list by definition of `NOT IN`, so we also allow NULL
  * explicitly).
  */
-const LEADERBOARD_EXCLUDED_HANDLES = ['jake'] as const;
+const LEADERBOARD_EXCLUDED_HANDLES: readonly string[] = ['jake'];
 
 /**
  * Top N solvers for a given day. Filters:
