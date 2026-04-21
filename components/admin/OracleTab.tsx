@@ -6,6 +6,10 @@ import { Button } from '@/components/ui/button';
 import { CircleNotch, ArrowClockwise, CheckCircle, Warning, Copy, Rocket } from '@phosphor-icons/react';
 
 interface OracleStatus {
+  /** True when the oracle_config table doesn't exist yet (0022 migration
+   *  not applied). UI shows the "Apply DB migration" button in this
+   *  state instead of the normal config form. */
+  needsMigration?: boolean;
   config: {
     poolId: string;
     cronEnabled: boolean;
@@ -54,6 +58,8 @@ export function OracleTab() {
     { oracleAddress: string; txHash: string } | null
   >(null);
   const [deployError, setDeployError] = useState<string | null>(null);
+  const [migrating, setMigrating] = useState(false);
+  const [migrateError, setMigrateError] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<string | null>(null);
 
   const fetchStatus = async () => {
@@ -98,6 +104,29 @@ export function OracleTab() {
       setActionResult(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const applyMigration = async () => {
+    if (migrating) return;
+    setMigrating(true);
+    setMigrateError(null);
+    try {
+      const res = await fetch('/api/admin/deploy/migrate-oracle-config', {
+        method: 'POST',
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean; error?: string;
+      };
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error ?? `Migration failed (${res.status})`);
+      }
+      // Re-fetch status to flip out of the needsMigration state.
+      await fetchStatus();
+    } catch (err) {
+      setMigrateError(err instanceof Error ? err.message : 'Migration failed');
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -199,6 +228,34 @@ export function OracleTab() {
 
   return (
     <div className="space-y-6">
+      {/* Migration — only shown on first visit to an env that's never run 0022 */}
+      {status.needsMigration && (
+        <Card>
+          <CardContent className="p-4 space-y-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+            <div className="flex items-start gap-2">
+              <Warning className="w-5 h-5 mt-0.5 shrink-0 text-amber-700 dark:text-amber-400" weight="fill" />
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                  Database migration needed
+                </h3>
+                <p className="text-[12px] text-amber-800 dark:text-amber-300 mt-1 leading-relaxed">
+                  The <code>oracle_config</code> table hasn't been created yet.
+                  Click below to apply the 0022 migration to this environment's
+                  Neon database. One-time per environment; safe to retry.
+                </p>
+              </div>
+            </div>
+            <Button variant="default" size="sm" onClick={applyMigration} disabled={migrating}>
+              {migrating ? <CircleNotch className="w-4 h-4 animate-spin" weight="bold" /> : <CheckCircle className="w-4 h-4" weight="bold" />}
+              Apply DB migration
+            </Button>
+            {migrateError && (
+              <p className="text-[12px] font-semibold text-error-700 dark:text-error-300">{migrateError}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Deploy */}
       <Card>
         <CardContent className="p-4 space-y-3">

@@ -48,12 +48,35 @@ export async function GET(): Promise<NextResponse> {
   const admin = await requireAdminWallet();
   if (!admin) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
-  const rows = await db
-    .select()
-    .from(oracleConfig)
-    .where(eq(oracleConfig.id, 1))
-    .limit(1);
-  const cfg = rows[0];
+  // Handle the bootstrap case where the 0022 migration hasn't run yet —
+  // the table won't exist and drizzle throws. Return a `needsMigration`
+  // flag so the UI can surface the "Apply DB migration" button instead
+  // of a generic 500. Any other DB error still propagates.
+  let cfg:
+    | {
+        poolId: string;
+        cronEnabled: boolean;
+        oracleAddress: string | null;
+        updatedAt: Date;
+        updatedBy: string | null;
+      }
+    | undefined;
+  let needsMigration = false;
+  try {
+    const rows = await db
+      .select()
+      .from(oracleConfig)
+      .where(eq(oracleConfig.id, 1))
+      .limit(1);
+    cfg = rows[0];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/oracle_config.*does not exist|relation .* oracle_config/i.test(msg)) {
+      needsMigration = true;
+    } else {
+      throw err;
+    }
+  }
 
   // DB-first oracle address; env fallback preserves pre-UI deploys.
   const oracleAddress = (cfg?.oracleAddress ?? process.env.WORD_ORACLE_ADDRESS) as
@@ -133,6 +156,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   return NextResponse.json({
+    needsMigration,
     config: cfg
       ? {
           poolId: cfg.poolId,
