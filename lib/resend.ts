@@ -66,10 +66,17 @@ function magicLinkHtml(link: string, code?: string): string {
   const boundCodeBlock = code
     ? `<p style="color:#bbb;font-size:11px;margin-top:24px;">@${SITE_HOST} #${code}</p>`
     : '';
+  // The logo is served from /public/icons/icon-256.png. Email clients
+  // strip relative paths, so this has to be an absolute URL hitting
+  // the deployed site. width/height are set as HTML attributes
+  // (Outlook ignores CSS sizing on <img>) and `display:block` removes
+  // the baseline whitespace that otherwise pushes the h2 down an
+  // inconsistent amount per client.
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;line-height:1.6;color:#111;max-width:520px;margin:0 auto;padding:40px 20px;">
+  <img src="${SITE_URL}/icons/icon-256.png" alt="${SITE_NAME}" width="48" height="48" style="display:block;margin:0 0 20px;border-radius:8px;" />
   <h2 style="font-size:22px;font-weight:800;margin:0 0 8px;">Sign in to Griddle</h2>
   <p style="color:#555;margin:0 0 28px;">Click the button below to sign in. This link expires in 15 minutes and can only be used once.</p>
   <a href="${link}" style="display:inline-block;background:#2D68C7;color:#fff;padding:13px 28px;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;">Sign in to Griddle</a>
