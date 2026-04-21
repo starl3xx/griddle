@@ -577,3 +577,29 @@ export const adminCosts = pgTable('admin_costs', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   updatedBy: varchar('updated_by', { length: 42 }),
 });
+
+/**
+ * Runtime config for the $WORD price push oracle (PushedWordOracle.sol).
+ *
+ * One-row table. The cron route (/api/cron/oracle-update) reads this on
+ * each run to decide the data source + whether to push at all; the admin
+ * UI edits it via PATCH /api/admin/oracle. Kept in DB rather than env
+ * vars so ops changes don't require a Vercel redeploy.
+ *
+ * `pool_id` is the GeckoTerminal pool identifier (hex string, no 0x
+ * prefix stripping — whatever GeckoTerminal's API expects in the URL).
+ * `cron_enabled` is the on/off toggle for the scheduled push. Manual
+ * force-update from /admin ignores this toggle (useful for verifying
+ * the pipeline while the cron is paused).
+ *
+ * Schema guarantees a single row via `id` being a hard-coded `1`
+ * primary key — any INSERT with a different id is a bug. Keeps lookups
+ * trivial (`SELECT ... WHERE id = 1`).
+ */
+export const oracleConfig = pgTable('oracle_config', {
+  id: integer('id').primaryKey(),
+  poolId: varchar('pool_id', { length: 80 }).notNull(),
+  cronEnabled: boolean('cron_enabled').notNull().default(true),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedBy: varchar('updated_by', { length: 42 }),
+});

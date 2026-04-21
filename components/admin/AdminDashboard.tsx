@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { useDarkMode } from '@/lib/useDarkMode';
 import { PulseTab } from './PulseTab';
-import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins, Moon, Sun } from '@phosphor-icons/react';
+import { Gauge, Funnel, Warning, Gift, Users, Receipt, ChartLine, PuzzlePiece, Coins, Broadcast, Moon, Sun } from '@phosphor-icons/react';
 
 // Pulse is the default tab, so it's statically imported (the user sees
 // it on every admin page load). The remaining 8 tabs render only when
@@ -21,8 +21,9 @@ const UsersTab = dynamic(() => import('./UsersTab').then((m) => ({ default: m.Us
 const PuzzlesTab = dynamic(() => import('./PuzzlesTab').then((m) => ({ default: m.PuzzlesTab })), { ssr: false });
 const TransactionsTab = dynamic(() => import('./TransactionsTab').then((m) => ({ default: m.TransactionsTab })), { ssr: false });
 const CostsTab = dynamic(() => import('./CostsTab').then((m) => ({ default: m.CostsTab })), { ssr: false });
+const OracleTab = dynamic(() => import('./OracleTab').then((m) => ({ default: m.OracleTab })), { ssr: false });
 
-type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs';
+type Tab = 'pulse' | 'funnel' | 'retention' | 'anomalies' | 'grant' | 'users' | 'puzzles' | 'transactions' | 'costs' | 'oracle';
 
 interface AdminDashboardProps {
   /** Connected admin wallet — shown in the header for context. */
@@ -96,6 +97,8 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
         <TabGroup title="Settings">
           <TabButton active={activeTab === 'costs'} onClick={() => setActiveTab('costs')}
             icon={<Coins className="h-4 w-4" weight="bold" />} label="Costs" />
+          <TabButton active={activeTab === 'oracle'} onClick={() => setActiveTab('oracle')}
+            icon={<Broadcast className="h-4 w-4" weight="bold" />} label="Oracle" />
         </TabGroup>
 
         <div className="mt-6">
@@ -108,6 +111,7 @@ export function AdminDashboard({ adminWallet }: AdminDashboardProps) {
           {activeTab === 'anomalies' && <AnomaliesTab />}
           {activeTab === 'grant' && <GrantTab />}
           {activeTab === 'costs' && <CostsTab />}
+          {activeTab === 'oracle' && <OracleTab />}
         </div>
       </div>
     </div>

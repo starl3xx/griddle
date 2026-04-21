@@ -7,5 +7,6 @@ export { UsersTab } from './UsersTab';
 export { PuzzlesTab } from './PuzzlesTab';
 export { TransactionsTab } from './TransactionsTab';
 export { CostsTab } from './CostsTab';
+export { OracleTab } from './OracleTab';
 export { UserDossierModal } from './UserDossierModal';
 export { AdminDashboard } from './AdminDashboard';
