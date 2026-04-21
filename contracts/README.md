@@ -68,6 +68,58 @@ NEXT_PUBLIC_GRIDDLE_PREMIUM_ADDRESS=0x...
 NEXT_PUBLIC_GRIDDLE_REWARDS_ADDRESS=0x...
 ```
 
+## Deploy the PushedWordOracle (oracle migration)
+
+The original `WordOracle.sol` proxies LHAW's `JackpotManagerV3.clanktonMarketCapUsd`, which depends on LHAW's cron being up. `PushedWordOracle.sol` replaces that with a feed we control — our own 2-min Vercel cron writes the price. See the contract docblock for the full rationale.
+
+### 1. Deploy the new oracle
+
+One-liner via `forge create`, since the constructor only takes an updater EOA address:
+
+```bash
+source .env
+
+forge create src/PushedWordOracle.sol:PushedWordOracle \
+  --rpc-url base \
+  --private-key "$PRIVATE_KEY" \
+  --constructor-args 0x6B7c29665F120ca4f5a3C5551eFD503A88a8072F \
+  --verify \
+  --etherscan-api-key "$BASESCAN_API_KEY"
+```
+
+(The `0x6B7c…` address above is the one generated for production. Pass a different address if deploying to a different environment.)
+
+### 2. Fund the updater EOA
+
+Send ~0.0005 Base ETH (≈ $1) to the updater address so it can pay gas for ~720 daily `setPrice` txs at Base gas prices. Refill from the admin UI's "Updater EOA" row whenever the balance drops.
+
+### 3. Wire it into the app
+
+Set the following in Vercel env (Production + Preview):
+
+```
+WORD_ORACLE_ADDRESS=<deployed address from step 1>
+ORACLE_UPDATER_PRIVATE_KEY=<0x + 64 hex chars, matching the address from step 1>
+CRON_SECRET=<random 32-byte hex; Vercel cron sends this as Bearer>
+BASE_RPC_URL=<same as used for contracts/.env>
+```
+
+### 4. Point GriddlePremium at the new oracle
+
+One `setOracle` call from the owner wallet, then the existing `unlockWithUsdc` path reads from the new feed on the next call:
+
+```bash
+cast send "$GRIDDLE_PREMIUM_ADDRESS" \
+  "setOracle(address)" \
+  "$WORD_ORACLE_ADDRESS" \
+  --rpc-url base \
+  --private-key "$PRIVATE_KEY"
+```
+
+### 5. Verify
+
+Open `/admin` → **Oracle** tab. Status card should show the contract address, updater balance, and a "never set" price. Click **Force update now** — within 5 seconds the card should flip to a live price + "0s ago" staleness. Leave `Cron enabled` on; Vercel's schedule will keep pushing every 2 min.
+
 ## Design notes
 
 ### Why escrow-then-burn on the fiat path

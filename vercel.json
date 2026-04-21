@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/sync-escrow-burns",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/oracle-update",
+      "schedule": "*/2 * * * *"
     }
   ]
 }
