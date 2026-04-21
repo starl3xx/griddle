@@ -226,6 +226,24 @@ export interface LeaderboardEntry {
 }
 
 /**
+ * Handles that should never appear on the daily leaderboard. Owner-side
+ * alt accounts used for smoke-testing end up polluting the top of the
+ * board with clearly-not-public solves. The filter is applied in the
+ * outer SELECT of `getDailyLeaderboard` so the row is dropped before
+ * ranking — anonymous / handle-less rows are preserved (NULL handle is
+ * not in the list by definition of `NOT IN`, so we also allow NULL
+ * explicitly).
+ *
+ * Store and compare in lowercase. The handle unique index in the db is
+ * `lower(handle)` and most read paths already normalize, but a couple
+ * of write paths (e.g. grantPremium → upsertProfile) can land
+ * mixed-case rows. Lowercasing both sides of the filter means we
+ * reliably catch the row regardless of what casing made it into the
+ * profiles table.
+ */
+const LEADERBOARD_EXCLUDED_HANDLES: readonly string[] = ['jake'];
+
+/**
  * Top N solvers for a given day. Filters:
  *   - solved = true (no failed attempts)
  *   - flag is NULL or 'suspicious' (only 'ineligible' is excluded)
@@ -235,6 +253,7 @@ export interface LeaderboardEntry {
  *     they can appear on the board under their handle.
  *   - same-day only: solve created_at matches the puzzle date
  *     (archive solves don't qualify for leaderboard placement).
+ *   - handle not in `LEADERBOARD_EXCLUDED_HANDLES` (owner alt list).
  *
  * Each player appears once with their fastest serverSolveMs. Grouping
  * uses the same synthetic player_key as getPremiumStats — profile_id
@@ -297,6 +316,26 @@ export async function getDailyLeaderboard(
     FROM eligible e
     LEFT JOIN profiles p ON p.id = e.profile_id
     WHERE e.rn = 1
+      AND ${
+        // Emit an always-true predicate when the exclusion list is
+        // empty — sql.join on an empty array would render `NOT IN ()`,
+        // which is a Postgres syntax error and would break the whole
+        // leaderboard query. Guarding here keeps the exclusion list
+        // safe to empty without regressing the board.
+        //
+        // Compare lower(p.handle) vs. lowercased constants so casing
+        // drift in the profiles table doesn't let an excluded row
+        // slip past the filter.
+        LEADERBOARD_EXCLUDED_HANDLES.length === 0
+          ? sql`true`
+          : sql`(
+              p.handle IS NULL
+              OR lower(p.handle) NOT IN (${sql.join(
+                LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h.toLowerCase()}`),
+                sql`, `,
+              )})
+            )`
+      }
     ORDER BY e.server_solve_ms ASC
     LIMIT ${limit}
   `);
@@ -3646,12 +3685,31 @@ export async function getPostSolveSummary(
           MIN(s.server_solve_ms) AS best_ms
         FROM solves s
         JOIN puzzles p ON p.id = s.puzzle_id
+        LEFT JOIN profiles pr ON pr.id = s.profile_id
         WHERE p.day_number = ${dayNumber}
           AND s.solved = true
           AND (s.flag IS NULL OR s.flag = 'suspicious')
           AND (s.wallet IS NOT NULL OR s.profile_id IS NOT NULL)
           AND s.server_solve_ms IS NOT NULL
           AND s.created_at::date = p.date::date
+          AND ${
+            // Same exclusion as getDailyLeaderboard — if an owner alt
+            // is hidden from the public board it MUST also be hidden
+            // from the rank/percentile computation powering the
+            // SolveModal's dailyRank + percentile, or the stats
+            // dashboard would diverge from the leaderboard a single
+            // scroll away. Docstring on this function explicitly
+            // warns against that drift. Mirror the lowercase guard.
+            LEADERBOARD_EXCLUDED_HANDLES.length === 0
+              ? sql`true`
+              : sql`(
+                  pr.handle IS NULL
+                  OR lower(pr.handle) NOT IN (${sql.join(
+                    LEADERBOARD_EXCLUDED_HANDLES.map((h) => sql`${h.toLowerCase()}`),
+                    sql`, `,
+                  )})
+                )`
+          }
         GROUP BY player_key
       )
       SELECT

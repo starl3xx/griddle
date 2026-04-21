@@ -9,12 +9,14 @@ import {
 } from '@/lib/wordmarks/catalog';
 
 /**
- * Overlapping circular-badge row for a leaderboard entry's top
- * wordmarks. Small ring-1 treatment aligned with Let's Have A Word's
- * leaderboard stack — the heavier ring-2 + outline-white variant
- * still lives on the Stats grid where each badge stands alone and
- * needs the extra visual weight. Leaderboard rows are tight; subtle
- * reads better here.
+ * Circular-badge row for a leaderboard entry's top wordmarks. Small
+ * ring-1 treatment, with a 2px gap between badges so the page
+ * background shows between them (previously badges stacked with
+ * `-ml-1.5` overlap; users read the overlap as "touching" rather than
+ * "stacked" on the narrow leaderboard row). The heavier ring-2 +
+ * outline-white variant still lives on the Stats grid where each
+ * badge stands alone and needs the extra visual weight. Leaderboard
+ * rows are tight; subtle reads better here.
  *
  * Hover (desktop) or tap (mobile) surfaces the wordmark name as a
  * dark pill tooltip below the stack. Tapping does NOT re-order the
@@ -50,10 +52,10 @@ export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
   return (
     <div
       ref={containerRef}
-      className="relative inline-flex items-center flex-shrink-0"
+      className="relative inline-flex items-center flex-shrink-0 gap-0.5"
       onMouseLeave={() => setActiveId(null)}
     >
-      {valid.map((id, i) => {
+      {valid.map((id) => {
         const w = WORDMARK_BY_ID[id];
         const theme = WORDMARK_THEMES[id];
         return (
@@ -68,9 +70,7 @@ export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
             onFocus={() => setActiveId(id)}
             onBlur={() => setActiveId((prev) => (prev === id ? null : prev))}
             aria-label={w.name}
-            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} flex items-center justify-center text-[10px] leading-none ${
-              i > 0 ? '-ml-1.5' : ''
-            }`}
+            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} flex items-center justify-center text-[10px] leading-none`}
           >
             <span aria-hidden>{w.emoji}</span>
           </button>
