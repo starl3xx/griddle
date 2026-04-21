@@ -20,6 +20,29 @@ interface PremiumCryptoFlowProps {
   onCancel: () => void;
 }
 
+/**
+ * Sentinel for the StaleOraclePrice pre-flight bail. Throwing a typed
+ * error lets the top-level catch distinguish "contract would revert
+ * because the LHAW market-cap cron has fallen behind" from every other
+ * failure, so we can surface a retry-friendly message + fiat nudge
+ * instead of dumping the user into the generic "Close" error pane.
+ *
+ * Matches the semantic of the on-chain check at GriddlePremium.sol:262,
+ * performed client-side so we never ask the user for a permit signature
+ * for a tx that's guaranteed to revert.
+ */
+class StaleOracleError extends Error {
+  constructor() {
+    super('stale-oracle-price');
+    this.name = 'StaleOracleError';
+  }
+}
+
+/** Matches the `MAX_ORACLE_AGE` constant on GriddlePremium. Kept in
+ *  sync by hand — the contract reads from the same constant on-chain.
+ *  If the contract value ever changes, update here too. */
+const MAX_ORACLE_AGE_SECONDS = 5n * 60n;
+
 type Phase =
   | 'identity'  // collecting handle (+ optional email) before tx
   | 'idle'      // waiting for user to click Unlock
@@ -77,6 +100,11 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
 
   const [phase, setPhase] = useState<Phase>('identity');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // 'stale_oracle' flags the specific StaleOraclePrice revert case so
+  // the error pane can render a retry button + a fiat nudge instead
+  // of the generic "Close" CTA. Any other error (user reject, RPC
+  // flake, handle collision) stays on 'generic'.
+  const [errorKind, setErrorKind] = useState<'generic' | 'stale_oracle'>('generic');
 
   // Identity form state. `handle` is the input value; `identityDraft`
   // is the submitted-to-unlock snapshot the tx path reads.
@@ -299,7 +327,7 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         }),
       ]);
 
-      const [price] = await publicClient.readContract({
+      const [price, updatedAt] = await publicClient.readContract({
         address: oracleAddress as `0x${string}`,
         abi: wordOracleAbi,
         functionName: 'getWordUsdPrice',
@@ -307,6 +335,19 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
 
       if (price === 0n) {
         throw new Error('Oracle returned zero price. Try again in a moment.');
+      }
+
+      // Pre-flight the staleness check that GriddlePremium runs on-chain
+      // at `unlockWithUsdc`. Without this, if the LHAW market-cap cron
+      // falls behind >5 minutes, the user signs a permit and then the
+      // tx reverts — they see a cryptic wallet-level error and no money
+      // moved. Checking client-side means we bail before the signature
+      // prompt and can show a retry-friendly message. Uses the latest
+      // block's timestamp (matches what the contract sees) rather than
+      // Date.now() to avoid clock-skew false positives.
+      const latestBlock = await publicClient.getBlock();
+      if (latestBlock.timestamp - updatedAt > MAX_ORACLE_AGE_SECONDS) {
+        throw new StaleOracleError();
       }
 
       // Mirror the contract's floor:
@@ -415,17 +456,26 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
       setPhase('done');
       onUnlocked(result.wallet);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'unlock failed';
-      setErrorMessage(message);
-      const isUserReject =
-        err instanceof Error &&
-        (err.name === 'UserRejectedRequestError' || /rejected|denied|user rejected/i.test(err.message));
       let reason: string = 'unknown';
-      if (isUserReject) reason = 'user_rejected';
-      else if (currentPhase === 'quoting') reason = 'quote_failed';
-      else if (currentPhase === 'signing') reason = 'sign_failed';
-      else if (currentPhase === 'submitting') reason = 'submit_failed';
-      else if (currentPhase === 'verifying') reason = 'verify_failed';
+      if (err instanceof StaleOracleError) {
+        setErrorKind('stale_oracle');
+        setErrorMessage(
+          'The $WORD price feed is catching up. This usually clears within a minute — try again, or pay with card instead.',
+        );
+        reason = 'stale_oracle';
+      } else {
+        const message = err instanceof Error ? err.message : 'unlock failed';
+        setErrorKind('generic');
+        setErrorMessage(message);
+        const isUserReject =
+          err instanceof Error &&
+          (err.name === 'UserRejectedRequestError' || /rejected|denied|user rejected/i.test(err.message));
+        if (isUserReject) reason = 'user_rejected';
+        else if (currentPhase === 'quoting') reason = 'quote_failed';
+        else if (currentPhase === 'signing') reason = 'sign_failed';
+        else if (currentPhase === 'submitting') reason = 'submit_failed';
+        else if (currentPhase === 'verifying') reason = 'verify_failed';
+      }
       trackEvent({ name: 'checkout_failed', method: 'crypto', reason });
       setPhase('error');
     }
@@ -455,6 +505,20 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
     unlockStartedRef.current = true;
     handleUnlock(identityDraft);
   }, [phase, identityDraft, isConnected, contractsReady, handleUnlock, retryVerify]);
+
+  // Retry entry point from the stale-oracle error pane. Safe because
+  // the staleness check lives in the quoting phase — we throw BEFORE
+  // signing the permit and BEFORE writeContractAsync fires, so
+  // paidTxHashRef is still null and handleUnlock is re-entrant. Reset
+  // the unlock-started ref and bounce phase through 'idle' so the
+  // existing phase effect re-invokes handleUnlock with the same draft.
+  const retryQuote = useCallback(() => {
+    if (!identityDraft) return;
+    setErrorMessage(null);
+    setErrorKind('generic');
+    unlockStartedRef.current = false;
+    setPhase('idle');
+  }, [identityDraft]);
 
   const handleIdentitySubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -607,7 +671,25 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
           Your email was already on another Griddle account, so we didn’t save it to this profile. You can still claim premium here.
         </p>
       )}
-      {phase === 'error' && (
+      {phase === 'error' && errorKind === 'stale_oracle' && (
+        <div className="flex flex-col items-stretch gap-2 w-full max-w-xs">
+          <button
+            type="button"
+            onClick={retryQuote}
+            className="rounded-md bg-accent text-white px-3 py-2 text-sm font-bold hover:bg-accent/90 transition-colors"
+          >
+            Try again
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-[12px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+          >
+            Pay with card instead
+          </button>
+        </div>
+      )}
+      {phase === 'error' && errorKind === 'generic' && (
         <button type="button" onClick={onCancel} className="btn-secondary text-sm">
           Close
         </button>
