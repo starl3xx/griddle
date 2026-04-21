@@ -11,15 +11,20 @@ import {
 /**
  * Overlapping circular-badge row for a leaderboard entry's top
  * wordmarks. Avatar-stack pattern: each badge carries the colored
- * theme accent via `ring-1` (inner) plus a modal-bg-matching
+ * theme accent via `ring-1` (inner) plus a surface-bg-matching
  * `outline` (outer). When badges overlap, the front badge's outline
  * paints over the back badge's ring, creating the visual illusion of
  * gap between them without widening the cluster horizontally.
  *
- * The outline color follows the leaderboard modal sheet
- * (`bg-white` / `dark:bg-gray-800` via the `.modal-sheet` component
- * class in globals.css). If that ever changes, the outline color
- * here must track it or the separator will go out of sync.
+ * `surface` picks the outline color so it blends into whichever
+ * container renders the cluster:
+ *   - 'modal' (default): `.modal-sheet` inside BrowseModal —
+ *     bg-white / dark:bg-gray-800
+ *   - 'page': the SSR `/leaderboard/[day]` route which sits directly
+ *     on the <body> — bg-white / dark:bg-gray-900
+ * Light mode collapses to `outline-white` either way; only dark
+ * mode diverges. If a new surface is added, extend the union here
+ * or the separator effect goes out of sync.
  *
  * Outline-follows-border-radius needs Safari 16.4+ (March 2023);
  * older iOS renders a square outline around the circle. We treat
@@ -37,10 +42,18 @@ import {
  * Used by both the client `LeaderboardPanel` and the SSR
  * `/leaderboard/[day]` page; hydrates as an island in the latter.
  */
-export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
+export function WordmarkBadges({
+  ids,
+  surface = 'modal',
+}: {
+  ids: readonly string[];
+  surface?: 'modal' | 'page';
+}) {
   const valid = ids.filter(isWordmarkId);
   const [activeId, setActiveId] = useState<WordmarkId | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const outlineDarkClass =
+    surface === 'page' ? 'dark:outline-gray-900' : 'dark:outline-gray-800';
 
   useEffect(() => {
     if (!activeId) return;
@@ -79,7 +92,7 @@ export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
             onFocus={() => setActiveId(id)}
             onBlur={() => setActiveId((prev) => (prev === id ? null : prev))}
             aria-label={w.name}
-            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} outline outline-2 outline-white dark:outline-gray-800 flex items-center justify-center text-[10px] leading-none ${
+            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} outline outline-2 outline-white ${outlineDarkClass} flex items-center justify-center text-[10px] leading-none ${
               i > 0 ? '-ml-1.5' : ''
             }`}
           >
