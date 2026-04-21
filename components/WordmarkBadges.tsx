@@ -16,6 +16,12 @@ import {
  * paints over the back badge's ring, creating the visual illusion of
  * gap between them without widening the cluster horizontally.
  *
+ * Stacking math: ring lives at pixels 0-1 outside the border-box,
+ * outline starts at offset 1 and fills 1-3. Without the offset the
+ * outline paints directly over the ring and the theme accent
+ * disappears — that's what the previous iteration shipped before
+ * this fix.
+ *
  * `surface` picks the outline color so it blends into whichever
  * container renders the cluster:
  *   - 'modal' (default): `.modal-sheet` inside BrowseModal —
@@ -92,8 +98,8 @@ export function WordmarkBadges({
             onFocus={() => setActiveId(id)}
             onBlur={() => setActiveId((prev) => (prev === id ? null : prev))}
             aria-label={w.name}
-            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} outline outline-2 outline-offset-0 outline-white ${outlineDarkClass} focus-visible:outline-brand focus-visible:outline-offset-2 flex items-center justify-center text-[10px] leading-none ${
-              i > 0 ? '-ml-1.5' : ''
+            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} outline outline-2 outline-offset-1 outline-white ${outlineDarkClass} focus-visible:outline-brand focus-visible:outline-offset-2 flex items-center justify-center text-[10px] leading-none ${
+              i > 0 ? '-ml-1' : ''
             }`}
           >
             <span aria-hidden>{w.emoji}</span>
