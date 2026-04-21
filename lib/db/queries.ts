@@ -2486,11 +2486,14 @@ async function updateProfileRowRetryingHandle(
  * customized their handle shouldn't have it reverted to their current
  * FC @username on the next auto-connect.
  *
- * Otherwise tries the FC @username slugified directly; if that collides
- * with a *different* profile, falls back to `<slug>_<hex4>` where hex4
- * is the last four hex chars of the user's wallet. Readable, stable,
- * and specific to this user. Returns null if nothing safe can be seeded
- * (no FC username, invalid slug, or the fallback also collides).
+ * If the FC @username slug is free, returns it so the user skips
+ * onboarding. If it's already taken by a different profile, returns
+ * null — the user lands on the onboarding step and picks something
+ * else. A previous version auto-derived `<slug>_<hex4>` as a fallback,
+ * but that turned a "handle taken" collision into a silent rename:
+ * the user then couldn't claim their canonical slug in onboarding
+ * without hitting the Premium-gated rename path. Simpler to stay null
+ * on collision and let the user choose.
  *
  * Note: the SELECT/INSERT isn't transactional, so a narrow race can
  * still land two profiles on the same handle. The insert path guards
@@ -2500,7 +2503,6 @@ async function updateProfileRowRetryingHandle(
  */
 async function resolveHandleForFarcaster(args: {
   username: string | null;
-  wallet: string | null;
   /** The profile this handle would be applied to; null for brand-new inserts. */
   ownerProfileId: number | null;
   /** Current handle on the row (if any) — always preserved. */
@@ -2517,17 +2519,6 @@ async function resolveHandleForFarcaster(args: {
     return slug;
   }
 
-  if (!args.wallet) return null;
-  const hex = args.wallet.toLowerCase().replace(/[^a-f0-9]/g, '').slice(-4);
-  if (!hex) return null;
-
-  const fallback = slugifyUsername(`${slug}_${hex}`);
-  if (!validateUsername(fallback).valid) return null;
-
-  const fallbackConflict = await getProfileByHandle(fallback);
-  if (!fallbackConflict || fallbackConflict.id === args.ownerProfileId) {
-    return fallback;
-  }
   return null;
 }
 
@@ -2606,7 +2597,6 @@ export async function upsertProfileForFarcaster(input: {
     if (!merged.handle) {
       const seed = await resolveHandleForFarcaster({
         username: input.username,
-        wallet,
         ownerProfileId: merged.id,
         existingHandle: null,
       });
@@ -2654,7 +2644,6 @@ export async function upsertProfileForFarcaster(input: {
   // ForFarcaster preserves any existing non-null handle.
   const seededHandle = await resolveHandleForFarcaster({
     username: input.username,
-    wallet,
     ownerProfileId: existing?.id ?? null,
     existingHandle: existing?.handle ?? null,
   });
@@ -2720,6 +2709,25 @@ export async function upsertProfileForFarcaster(input: {
       if (!r) throw new Error('upsertProfileForFarcaster: insert conflict but no row found on re-fetch');
     }
   }
+
+  // Heal refetched rows with a stale wallet — this is the diagnostic fix
+  // for orphan profiles like #23 that showed up with `wallet=null`
+  // despite the route requiring a valid wallet. If a prior run landed
+  // the row without its wallet (earlier bug, schema migration, or any
+  // pre-validation state), subsequent FID-matched reconnects were
+  // returning it as-is. Now we patch the wallet in place when the
+  // caller supplied one and the row is missing or holds a different
+  // value. Preserves the row's other state (handle, avatar, solves) —
+  // we only touch the wallet column.
+  if (wallet && r.wallet !== wallet) {
+    const patched = await db
+      .update(profiles)
+      .set({ wallet, updatedAt: new Date() })
+      .where(eq(profiles.id, r.id))
+      .returning();
+    if (patched[0]) r = patched[0];
+  }
+
   return toProfileRow(r);
 }
 

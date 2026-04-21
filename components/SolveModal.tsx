@@ -109,7 +109,12 @@ export function SolveModal({
     });
   };
 
-  const handleShare = async () => {
+  // Shared share-text + embed-url computation. Kept local so each
+  // handler below reads the freshest copy — the inputs (dayNumber,
+  // solveMs, unassisted) are modal-instance props, so the values are
+  // stable for the life of this modal and we're not paying for
+  // useMemo complexity.
+  const buildShare = () => {
     const message = formatShareText({
       dayNumber,
       solved: true,
@@ -117,28 +122,35 @@ export function SolveModal({
       unassisted,
     });
     const embedUrl = `${SITE_URL}/?puzzle=${dayNumber}`;
-    // Inline the URL in the share body. iMessage inconsistently drops
-    // the `text` field when `url` is passed separately and the URL
-    // generates a Link Presentation card — sometimes you get card +
-    // message, sometimes just the card. Embedding the URL inside
-    // `text` (and not passing a separate `url` to Web Share) sidesteps
-    // that: iMessage detects the URL, renders the card, and keeps the
-    // surrounding message. Farcaster keeps the split because its SDK
-    // takes the embed URL separately to render a playable frame.
+    // Inline the URL in the share body for non-Farcaster surfaces.
+    // iMessage inconsistently drops the `text` field when `url` is
+    // passed separately and the URL generates a Link Presentation card.
+    // Embedding the URL inside `text` (and not passing a separate `url`
+    // to Web Share) sidesteps that: iMessage detects the URL, renders
+    // the card, and keeps the surrounding message. Farcaster's SDK
+    // takes message + embed separately for the cast composer.
     const shareBody = `${message}\n${embedUrl}`;
+    return { message, embedUrl, shareBody };
+  };
 
-    // Priority 1: Farcaster cast composer when we're inside a Farcaster
-    // mini-app container. The embed becomes a playable Griddle frame in
-    // the cast, so recipients can tap and play without leaving Farcaster.
-    if (inMiniApp) {
-      const result = await composeCast(message, embedUrl);
-      if (result === 'cast') { awardMegaphone(); return; }
-      if (result === 'cancelled') return;
-      // result === 'failed' → SDK threw or unavailable. Fall through to
-      // the Web Share / clipboard chain so there's still a share surface.
-    }
+  // Farcaster-only share path. Triggered by the "Share to Farcaster"
+  // button inside a mini-app — no fall-through. If the SDK throws or
+  // the user cancels, we don't silently redirect to clipboard; that
+  // would surprise the user who explicitly picked the Farcaster button.
+  const handleShareToFarcaster = async () => {
+    const { message, embedUrl } = buildShare();
+    const result = await composeCast(message, embedUrl);
+    if (result === 'cast') awardMegaphone();
+    // 'cancelled' / 'failed' → no-op. The user already saw the composer
+    // (or will see the button not respond if the SDK is broken); the
+    // sibling "Share elsewhere" button is right there if they want one.
+  };
 
-    // Priority 2: Web Share API — OS handles the UX, no status needed.
+  // Everything-else share path — Web Share API first, clipboard
+  // fallback. Used both by the dedicated "Share elsewhere" button in
+  // miniapp and as the single Share button on plain web.
+  const handleShareElsewhere = async () => {
+    const { shareBody } = buildShare();
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({ title: `Griddle #${dayNumber}`, text: shareBody });
@@ -168,8 +180,8 @@ export function SolveModal({
     setShareStatus('error');
   };
 
-  const shareLabel =
-    shareStatus === 'copied' ? 'Copied!' : shareStatus === 'error' ? 'Copy failed' : 'Share your score';
+  const elsewhereLabel =
+    shareStatus === 'copied' ? 'Copied!' : shareStatus === 'error' ? 'Copy failed' : (inMiniApp ? 'Share elsewhere' : 'Share your score');
 
   // Average comparison: only meaningful when there's *another* solve to
   // compare against. A single-solve average equals this solve's time, so
@@ -316,15 +328,36 @@ export function SolveModal({
           </div>
         </button>
 
-        <button
-          type="button"
-          onClick={handleShare}
-          className="btn-primary mt-5 w-full relative inline-flex items-center justify-center gap-2"
-          aria-live="polite"
-        >
-          <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
-          {shareLabel}
-        </button>
+        {inMiniApp ? (
+          <>
+            <button
+              type="button"
+              onClick={handleShareToFarcaster}
+              className="btn-primary mt-5 w-full relative inline-flex items-center justify-center gap-2"
+            >
+              <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
+              Share to Farcaster
+            </button>
+            <button
+              type="button"
+              onClick={handleShareElsewhere}
+              className="btn-secondary mt-2 w-full relative inline-flex items-center justify-center gap-2"
+              aria-live="polite"
+            >
+              {elsewhereLabel}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={handleShareElsewhere}
+            className="btn-primary mt-5 w-full relative inline-flex items-center justify-center gap-2"
+            aria-live="polite"
+          >
+            <ShareNetwork className="w-4 h-4" weight="bold" aria-hidden />
+            {elsewhereLabel}
+          </button>
+        )}
 
         <button
           type="button"
