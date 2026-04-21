@@ -2439,6 +2439,47 @@ export async function mergeProfiles(
 }
 
 /**
+ * UPDATE the profiles row with the given patch, retrying without
+ * `handle` if Postgres rejects the first attempt with a unique-
+ * violation on the handle index.
+ *
+ * Why this exists: `resolveHandleForFarcaster` does a SELECT to check
+ * for collisions, then the caller issues an UPDATE — between those
+ * two statements another request can claim the same handle, and the
+ * UPDATE then throws SQLSTATE 23505 which would surface as a 500 from
+ * the /api/profile/farcaster route. Dropping the handle field on
+ * retry lets the profile row still get the FC fid/username/avatar/
+ * wallet patch applied; the user just lands on the onboarding step
+ * once to pick a different handle (rare race, not a regression).
+ *
+ * Only 23505 on the handle index is swallowed. Any other error (or
+ * a 23505 without `handle` in the patch) propagates.
+ */
+async function updateProfileRowRetryingHandle(
+  id: number,
+  patch: Record<string, unknown>,
+): Promise<ProfileRow> {
+  try {
+    const rows = await db
+      .update(profiles)
+      .set(patch)
+      .where(eq(profiles.id, id))
+      .returning();
+    return toProfileRow(rows[0]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes('23505') || !('handle' in patch)) throw err;
+    const { handle: _drop, ...rest } = patch;
+    const rows = await db
+      .update(profiles)
+      .set(rest)
+      .where(eq(profiles.id, id))
+      .returning();
+    return toProfileRow(rows[0]);
+  }
+}
+
+/**
  * Pick a handle to claim for a Farcaster-sourced profile.
  *
  * Preserves any existing handle on the row — a user who's already
@@ -2587,12 +2628,7 @@ export async function upsertProfileForFarcaster(input: {
     // owns. Authoritative source here is the wallet the user is
     // actively connecting with.
     if (wallet) freshPatch.wallet = wallet;
-    const rows = await db
-      .update(profiles)
-      .set(freshPatch)
-      .where(eq(profiles.id, merged.id))
-      .returning();
-    return toProfileRow(rows[0]);
+    return await updateProfileRowRetryingHandle(merged.id, freshPatch);
   }
 
   const existing = fidRow ?? walletRow ?? null;
@@ -2634,12 +2670,7 @@ export async function upsertProfileForFarcaster(input: {
   };
 
   if (existing) {
-    const rows = await db
-      .update(profiles)
-      .set(patch)
-      .where(eq(profiles.id, existing.id))
-      .returning();
-    return toProfileRow(rows[0]);
+    return await updateProfileRowRetryingHandle(existing.id, patch);
   }
 
   // New profile. `seededHandle` (computed above) is either the FC
