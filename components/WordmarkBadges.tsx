@@ -92,7 +92,7 @@ export function WordmarkBadges({
             onFocus={() => setActiveId(id)}
             onBlur={() => setActiveId((prev) => (prev === id ? null : prev))}
             aria-label={w.name}
-            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} outline outline-2 outline-white ${outlineDarkClass} flex items-center justify-center text-[10px] leading-none ${
+            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} outline outline-2 outline-offset-0 outline-white ${outlineDarkClass} focus-visible:outline-brand focus-visible:outline-offset-2 flex items-center justify-center text-[10px] leading-none ${
               i > 0 ? '-ml-1.5' : ''
             }`}
           >
