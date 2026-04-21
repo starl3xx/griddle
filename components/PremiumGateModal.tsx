@@ -100,6 +100,12 @@ export function PremiumGateModal({
   const [step, setStep] = useState<Step>('tiles');
   const [fiatSubmitting, setFiatSubmitting] = useState(false);
   const [fiatError, setFiatError] = useState<string | null>(null);
+  // Set to true after onUnlockFiat resolves in hosted mode. In a Farcaster
+  // mini-app, onUnlockFiat calls sdk.actions.openUrl to break out of the
+  // iframe into the device's browser — the mini-app page stays put, so
+  // the spinner would hang. Flip this to swap the CTA copy into a
+  // "we opened Stripe in your browser" confirmation.
+  const [externalCheckoutOpened, setExternalCheckoutOpened] = useState(false);
 
   const headline =
     feature === 'leaderboard' ? 'See the leaderboard'
@@ -121,10 +127,16 @@ export function PremiumGateModal({
       } catch (err) {
         setFiatError(err instanceof Error ? err.message : 'Checkout failed');
         setFiatSubmitting(false);
+        return;
       }
-      // Hosted-mode success is a full-page redirect — leave the
-      // spinner spinning. Conditional mounting clears it if the
-      // redirect fails.
+      // In a mini-app, onUnlockFiat uses sdk.actions.openUrl and the
+      // page stays put, so the spinner needs to stop. On plain web
+      // (not applicable here — forceHostedFiat is currently miniapp-
+      // only) window.location.href would navigate away before this
+      // line ran. Clear both states and flip the banner so the user
+      // knows where Stripe went.
+      setFiatSubmitting(false);
+      setExternalCheckoutOpened(true);
       return;
     }
     // Embedded mode: swap to the embed step. `checkout_started` fires
@@ -302,6 +314,14 @@ export function PremiumGateModal({
 
             {fiatError && (
               <p className="text-[11px] font-semibold text-error-700 mt-2">{fiatError}</p>
+            )}
+
+            {externalCheckoutOpened && (
+              <div className="mt-3 rounded-md bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-800 px-3 py-2.5 text-[12px] leading-relaxed text-gray-700 dark:text-gray-200">
+                We’ve opened Stripe in your browser. Complete payment there,
+                then reopen Griddle — Premium unlocks as soon as the payment
+                confirms.
+              </div>
             )}
 
             <p className="text-[11px] font-medium text-gray-400 text-center mt-3">

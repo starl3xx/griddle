@@ -23,7 +23,7 @@ import { SettingsButton } from '@/components/SettingsButton';
 import { pickAvatarSeed } from '@/lib/default-avatar';
 import { NextPuzzleCountdown } from '@/components/NextPuzzleCountdown';
 import { useGriddle, type CellState, type SolveVerdict } from '@/lib/useGriddle';
-import { useFarcaster } from '@/lib/farcaster';
+import { useFarcaster, openExternalUrl } from '@/lib/farcaster';
 import { trackEvent } from '@/lib/funnel/client';
 import type { SolvePayload } from '@/lib/telemetry';
 
@@ -1074,6 +1074,16 @@ export default function GameClient({
    * mini app Frame, where cross-origin iframe payment flows are
    * blocked. The embedded path is the default for every other context
    * and is driven by PremiumCheckoutEmbed inside the modal itself.
+   *
+   * Inside a mini-app, a plain `window.location.href` navigates the
+   * embedded iframe to `checkout.stripe.com`, which sets
+   * `X-Frame-Options: DENY`. The Farcaster client then refuses to paint
+   * and the user sees a frozen skeleton. The SDK's `openUrl` action
+   * breaks out of the iframe into the device's browser, where checkout
+   * renders normally; Stripe's success_url lands the user back on
+   * griddle.fun in the browser and they manually return to the
+   * mini-app. Outside a mini-app we stay on `window.location.href` —
+   * no behavior change for plain web.
    */
   const handleUnlockFiatHosted = useCallback(async () => {
     let failedReasonEmitted = false;
@@ -1099,6 +1109,16 @@ export default function GameClient({
         throw new Error('Checkout did not return a URL');
       }
       trackEvent({ name: 'checkout_started', method: 'fiat' });
+      if (inMiniAppRef.current) {
+        const result = await openExternalUrl(data.url);
+        if (result === 'failed') {
+          // SDK path unavailable — fall back to the plain redirect.
+          // Matches pre-miniapp behavior and avoids a silent dead-end
+          // if the host client refuses openUrl.
+          window.location.href = data.url;
+        }
+        return;
+      }
       window.location.href = data.url;
     } catch (err) {
       emitFailure('exception');
