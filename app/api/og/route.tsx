@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { getCurrentDayNumber } from '@/lib/scheduler';
 import { formatSeconds } from '@/lib/format';
 import { SITE_HOST } from '@/lib/site';
+import { BRAND, GRAY_500, GRAY_900, TILE_PATTERN, TileCell } from '@/lib/og-tiles';
 
 export const runtime = 'edge';
 
@@ -28,27 +29,7 @@ export const runtime = 'edge';
  */
 
 const SIZE = { width: 1200, height: 630 } as const;
-const BRAND = '#2D68C7';
-const GRAY_500 = '#6b7280';
-const GRAY_900 = '#111827';
-// Tile colors mirror the app icon's palette (public/icon.svg) so the OG
-// card reads as the same "brand stamp" as the home-screen icon.
-const TILE_MINT_FILL = '#D1FAE5';
-const TILE_MINT_STROKE = '#86EFAC';
-const TILE_EDGE_FILL = '#F1F3F5';
-const TILE_EDGE_STROKE = '#D9D9D9';
-
-type CellState = 'available' | 'blocked' | 'current';
-
-// Mirrors the TinyGridIllustration in TutorialModal: center is the
-// "current" cell, the four orthogonal neighbors are "blocked" (off-
-// limits), and the four diagonal corners are "available" (go). Same
-// visual story as the real game grid — recognizable without letters.
-const TILE_PATTERN: readonly CellState[] = [
-  'available', 'blocked',  'available',
-  'blocked',   'current',  'blocked',
-  'available', 'blocked',  'available',
-];
+const TILE_SIZE = 100;
 
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url);
@@ -124,7 +105,7 @@ export async function GET(req: Request): Promise<Response> {
               style={{ display: 'flex', flexDirection: 'row', gap: '12px' }}
             >
               {[0, 1, 2].map((col) => (
-                <TileCell key={col} state={TILE_PATTERN[rowStart + col]} />
+                <TileCell key={col} state={TILE_PATTERN[rowStart + col]} size={TILE_SIZE} />
               ))}
             </div>
           ))}
@@ -192,27 +173,6 @@ export async function GET(req: Request): Promise<Response> {
     },
   );
 }
-
-function TileCell({ state }: { state: CellState }) {
-  const { bg, border } = TILE_STYLES[state];
-  return (
-    <div
-      style={{
-        width: '100px',
-        height: '100px',
-        backgroundColor: bg,
-        border: `4px solid ${border}`,
-        borderRadius: '12px',
-      }}
-    />
-  );
-}
-
-const TILE_STYLES: Record<CellState, { bg: string; border: string }> = {
-  available: { bg: TILE_MINT_FILL, border: TILE_MINT_STROKE },
-  blocked: { bg: TILE_EDGE_FILL, border: TILE_EDGE_STROKE },
-  current: { bg: BRAND, border: BRAND },
-};
 
 function clampDayNumber(raw: string | null): number {
   const today = getCurrentDayNumber();
