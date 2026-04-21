@@ -3,6 +3,7 @@ import { getSessionId } from '@/lib/session';
 import { getSessionWallet } from '@/lib/wallet-session';
 import { setSessionProfileOrThrow } from '@/lib/session-profile';
 import { upsertProfileForFarcaster } from '@/lib/db/queries';
+import { isSessionPremium } from '@/lib/premium-check';
 
 /**
  * POST /api/profile/farcaster
@@ -64,6 +65,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
+  // Premium gate for the Farcaster avatar. Non-premium users render a
+  // username-initial monogram; the Farcaster pfp only lands in
+  // avatar_url once they upgrade. isSessionPremium covers both the
+  // wallet-keyed and session-keyed premium paths. Fails closed.
+  const isPremium = await isSessionPremium(sessionId);
+
   // We still accept `displayName` in the request body for back-compat
   // with older client bundles, but it's ignored by upsertProfileForFarcaster
   // now that the profiles table no longer has a display_name column.
@@ -74,6 +81,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     username: body.username ?? null,
     avatarUrl: body.avatarUrl ?? null,
     wallet: requestWallet,
+    isPremium,
   });
   // Consistent with /api/profile/create and /api/auth/verify: use the
   // throwing variant so callers know for sure the binding landed.

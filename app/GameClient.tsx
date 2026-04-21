@@ -351,6 +351,14 @@ export default function GameClient({
    */
   const lastSyncedPfpUrlRef = useRef<string | null>(null);
 
+  // Tracks `premium` across renders so the pfp-sync effect can detect
+  // a false→true transition and bypass its dedup check on the first
+  // run after upgrade. The server's pfp gate only stores FC pfps for
+  // premium users, so the stored URL from the free-tier sync was a
+  // no-op on the server side — the dedup ref would otherwise block
+  // the post-upgrade resync that actually succeeds.
+  const prevPremiumRef = useRef(false);
+
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
@@ -889,16 +897,27 @@ export default function GameClient({
     if (!fid) return;
     if (!sessionWallet) return;
     if (!pfpUrl) return;
-    if (lastSyncedPfpUrlRef.current === pfpUrl) return;
-    // Capture the URL we're about to sync in a local so closure reads
-    // are stable across the async boundary. Do NOT mark the ref as
-    // synced yet — if the effect tears down before the fetch resolves
-    // (e.g. `username` or `displayName` changes and the cleanup aborts
-    // the in-flight request), an eagerly-set ref would record the URL
-    // as "already synced" and the retry-on-next-effect-run would be
-    // skipped, silently losing the pfp update. The ref only moves
+    // Detect a false→true transition on `premium`. When the user just
+    // upgraded, the prior free-tier sync stamped `lastSyncedPfpUrlRef`
+    // with the current pfpUrl — but the server declined to store it
+    // because the premium gate was closed. Bypass the dedup check this
+    // once so we actually push the pfp now that the gate is open.
+    // Inline (not a separate effect) to avoid effect-ordering hazards
+    // where the dedup check runs first and skips before a sibling
+    // effect clears the ref.
+    const premiumJustUnlocked = premium && !prevPremiumRef.current;
+    if (!premiumJustUnlocked && lastSyncedPfpUrlRef.current === pfpUrl) return;
+    // Capture both the URL and the premium state we're syncing against
+    // in locals so the .then() success handler advances the refs based
+    // on the values this effect was acting on (not whatever has changed
+    // since). Do NOT mark either ref as synced yet — if the effect
+    // tears down before the fetch resolves (e.g. `username` changes and
+    // the cleanup aborts the in-flight request), eagerly-advanced refs
+    // would record state as "already synced" and the retry-on-next-run
+    // would be skipped, silently losing the sync. Refs only move
     // forward after a confirmed server response.
     const targetPfpUrl = pfpUrl;
+    const targetPremium = premium;
     const controller = new AbortController();
     fetch('/api/profile/farcaster', {
       method: 'POST',
@@ -915,11 +934,12 @@ export default function GameClient({
       .then((r) => {
         if (!r.ok) return;
         lastSyncedPfpUrlRef.current = targetPfpUrl;
+        prevPremiumRef.current = targetPremium;
         void refetchProfile();
       })
-      .catch(() => {/* best-effort; silent — ref stays unset so a later run retries */});
+      .catch(() => {/* best-effort; silent — refs stay unset so a later run retries */});
     return () => controller.abort();
-  }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile]);
+  }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile, premium]);
 
   // Reset premium state on disconnect AND clear the server-side
   // session→wallet binding so subsequent solves aren’t silently
@@ -927,6 +947,15 @@ export default function GameClient({
   const handleWalletDisconnect = useCallback(() => {
     setSessionWallet(null);
     setPremium(false);
+    // Reset the pfp-sync session state so a subsequent reconnect
+    // (same tab, new wallet / upgrade status) starts fresh. Without
+    // this, prevPremiumRef stays stuck at its last "active session"
+    // value and a disconnect→reconnect with premium already true
+    // would miss the transition (premiumJustUnlocked = true && !true
+    // = false), and the dedup ref would block the re-POST that stores
+    // the avatar server-side. Both refs are session-lifecycle state.
+    prevPremiumRef.current = false;
+    lastSyncedPfpUrlRef.current = null;
     fetch('/api/wallet/link', { method: 'DELETE' }).catch(() => {
       // Best-effort: the client UI is already in disconnect state,
       // a failed delete just means the binding lingers in KV until
@@ -1153,7 +1182,11 @@ export default function GameClient({
       <SettingsButton
         onClick={() => setShowSettings(true)}
         avatarUrl={profile?.avatarUrl ?? null}
-        pfpUrl={pfpUrl}
+        // Free tier renders a username-initial monogram; the Farcaster
+        // pfp only unlocks on premium. The server-side gate keeps
+        // `avatar_url` null for non-premium, so this null-out here is
+        // the matching client-side gate for the live SDK pfpUrl.
+        pfpUrl={premium ? pfpUrl : null}
         seed={pickAvatarSeed({
           handle: profile?.handle,
           wallet: sessionWallet,
@@ -1380,7 +1413,7 @@ export default function GameClient({
         premium={premium}
         hasSessionProfile={hasSessionProfile}
         profileLoaded={profileLoaded}
-        pfpUrl={profile?.avatarUrl ?? pfpUrl}
+        pfpUrl={profile?.avatarUrl ?? (premium ? pfpUrl : null)}
         username={profile?.handle ?? username}
         email={profile?.email ?? null}
         onCreateProfile={() => { setBrowseTab(null); setShowCreateProfile(true); }}
