@@ -149,3 +149,33 @@ export async function composeCast(
     return 'failed';
   }
 }
+
+/**
+ * Open an external URL from inside a Farcaster mini-app.
+ *
+ * Background: Stripe's hosted checkout (and similar third-party payment
+ * surfaces) set `X-Frame-Options: DENY`, which means a plain
+ * `window.location.href = url` inside the mini-app iframe navigates to
+ * a page that the Farcaster client then refuses to paint. The user sees
+ * a frozen skeleton or a blank screen.
+ *
+ * The SDK's `openUrl` action tells the host Farcaster client to break
+ * out of the embedded frame and open the URL in the device's browser.
+ * The user completes checkout there; Stripe's success_url lands them
+ * on griddle.fun in the browser (not back in the mini-app), and they
+ * manually return to the mini-app afterwards.
+ *
+ * Returns `'opened'` on success, `'failed'` if the SDK isn't available
+ * (dynamic import failure / outside a mini-app container / host client
+ * refused the action). The caller decides the fallback — typically
+ * `window.location.href` for plain-web paths.
+ */
+export async function openExternalUrl(url: string): Promise<'opened' | 'failed'> {
+  try {
+    const { sdk } = await import('@farcaster/miniapp-sdk');
+    await sdk.actions.openUrl(url);
+    return 'opened';
+  } catch {
+    return 'failed';
+  }
+}
