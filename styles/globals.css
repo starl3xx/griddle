@@ -74,17 +74,25 @@
     @apply outline-2 outline-offset-2 outline-brand;
   }
 
-  /* Recharts' SVG elements (paths, layers, surface) pick up the global
-     focus-visible outline when tapped on touch devices — iOS Safari in
-     particular flags the chart as focused on the first tap, which
-     paints a brand-colored rectangle around the whole graph. Charts
-     aren't meant to be focusable UI, so suppress the outline on any
-     descendant of a .recharts-wrapper. */
-  .recharts-wrapper :focus,
-  .recharts-wrapper :focus-visible,
-  .recharts-surface:focus,
-  .recharts-surface:focus-visible {
-    outline: none;
+  /* Recharts paints its charts inside three nested containers —
+     .recharts-responsive-container → .recharts-wrapper → .recharts-surface
+     (SVG). Any of them can pick up :focus on tap (varies by browser and
+     by which specific sector the tap lands on), and the global
+     :focus-visible rule above would then draw a brand rectangle around
+     the whole chart. The previous fix only targeted DESCENDANTS of
+     .recharts-wrapper, which missed the wrapper itself and the outer
+     responsive container — the tap on an iOS PWA lands on the wrapper
+     div, not an SVG child, so the outline still appeared.
+     Charts aren't keyboard-navigable UI (tooltip cursor handles
+     interaction), so suppress the outline on the whole chart subtree
+     unconditionally. */
+  .recharts-responsive-container,
+  .recharts-responsive-container *,
+  .recharts-wrapper,
+  .recharts-wrapper *,
+  .recharts-surface,
+  .recharts-surface * {
+    outline: none !important;
   }
 
   * {
