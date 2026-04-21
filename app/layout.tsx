@@ -10,6 +10,35 @@ import {
 
 const TITLE_DEFAULT = `${SITE_NAME} | Daily 3×3 word puzzle`;
 
+// Farcaster Mini App embed — rendered when griddle.fun is cast as a URL.
+// The <meta name="fc:miniapp"> tag is what Farcaster clients scrape to show
+// an inline launch card; the farcaster.json manifest only drives the app
+// directory listing, not in-cast embeds. We also emit the legacy `fc:frame`
+// alias for clients that haven't migrated. Image must be 3:2, hence the
+// dedicated /api/og/embed endpoint (the default /api/og is 1200x630).
+const MINI_APP_EMBED = {
+  version: '1',
+  imageUrl: `${SITE_URL}/api/og/embed`,
+  button: {
+    title: "Play today's Griddle",
+    action: {
+      type: 'launch_miniapp',
+      name: SITE_NAME,
+      url: SITE_URL,
+      splashImageUrl: `${SITE_URL}/icon.svg`,
+      splashBackgroundColor: '#FFFFFF',
+    },
+  },
+} as const;
+
+const LEGACY_FRAME_EMBED = {
+  ...MINI_APP_EMBED,
+  button: {
+    ...MINI_APP_EMBED.button,
+    action: { ...MINI_APP_EMBED.button.action, type: 'launch_frame' as const },
+  },
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
@@ -57,6 +86,10 @@ export const metadata: Metadata = {
   robots: {
     index: true,
     follow: true,
+  },
+  other: {
+    'fc:miniapp': JSON.stringify(MINI_APP_EMBED),
+    'fc:frame': JSON.stringify(LEGACY_FRAME_EMBED),
   },
 };
 
