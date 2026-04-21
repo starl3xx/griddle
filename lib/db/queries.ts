@@ -2439,6 +2439,58 @@ export async function mergeProfiles(
 }
 
 /**
+ * Pick a handle to claim for a Farcaster-sourced profile.
+ *
+ * Preserves any existing handle on the row — a user who's already
+ * customized their handle shouldn't have it reverted to their current
+ * FC @username on the next auto-connect.
+ *
+ * Otherwise tries the FC @username slugified directly; if that collides
+ * with a *different* profile, falls back to `<slug>_<hex4>` where hex4
+ * is the last four hex chars of the user's wallet. Readable, stable,
+ * and specific to this user. Returns null if nothing safe can be seeded
+ * (no FC username, invalid slug, or the fallback also collides).
+ *
+ * Note: the SELECT/INSERT isn't transactional, so a narrow race can
+ * still land two profiles on the same handle. The insert path guards
+ * against that with onConflictDoNothing + retry-without-handle, so the
+ * worst case is a legitimately-racing new user ends up with no seeded
+ * handle and has to pick one in Settings — no data corruption.
+ */
+async function resolveHandleForFarcaster(args: {
+  username: string | null;
+  wallet: string | null;
+  /** The profile this handle would be applied to; null for brand-new inserts. */
+  ownerProfileId: number | null;
+  /** Current handle on the row (if any) — always preserved. */
+  existingHandle: string | null;
+}): Promise<string | null> {
+  if (args.existingHandle) return args.existingHandle;
+  if (!args.username) return null;
+
+  const slug = slugifyUsername(args.username);
+  if (!validateUsername(slug).valid) return null;
+
+  const primaryConflict = await getProfileByHandle(slug);
+  if (!primaryConflict || primaryConflict.id === args.ownerProfileId) {
+    return slug;
+  }
+
+  if (!args.wallet) return null;
+  const hex = args.wallet.toLowerCase().replace(/[^a-f0-9]/g, '').slice(-4);
+  if (!hex) return null;
+
+  const fallback = slugifyUsername(`${slug}_${hex}`);
+  if (!validateUsername(fallback).valid) return null;
+
+  const fallbackConflict = await getProfileByHandle(fallback);
+  if (!fallbackConflict || fallbackConflict.id === args.ownerProfileId) {
+    return fallback;
+  }
+  return null;
+}
+
+/**
  * Upsert a profile for a Farcaster miniapp user. Called from GameClient
  * when a wallet connects and `inMiniApp === true`.
  *
@@ -2447,6 +2499,10 @@ export async function mergeProfiles(
  *   2. Look up by wallet — if found, add FID/username/pfp and return.
  *   3. If both exist as different rows → auto-merge.
  *   4. If neither exists → create a new profile with all Farcaster data.
+ *
+ * Seeds `handle` from the FC @username on any of the four paths when
+ * the profile row doesn't already have one, so Farcaster users skip the
+ * "pick a username" onboarding step on first sign-in.
  */
 export async function upsertProfileForFarcaster(input: {
   fid: number;
@@ -2504,6 +2560,17 @@ export async function upsertProfileForFarcaster(input: {
       updatedAt: new Date(),
     };
     if (input.username) freshPatch.farcasterUsername = input.username;
+    // If the merged survivor has no handle yet, seed from FC username
+    // so onboarding is skipped on first sign-in.
+    if (!merged.handle) {
+      const seed = await resolveHandleForFarcaster({
+        username: input.username,
+        wallet,
+        ownerProfileId: merged.id,
+        existingHandle: null,
+      });
+      if (seed) freshPatch.handle = seed;
+    }
     // Avatar policy on the merged survivor: protect 'custom' uploads
     // (merged inherits avatarSource via mergeProfiles COALESCE); for
     // anything else, apply the incoming Farcaster pfp if provided.
@@ -2546,9 +2613,20 @@ export async function upsertProfileForFarcaster(input: {
       ? 'farcaster'
       : existing?.avatarSource ?? (input.avatarUrl ? 'farcaster' : null);
 
+  // Seed a handle from the FC @username if the row is either new or
+  // a pre-existing wallet-only row that never got one. resolveHandle-
+  // ForFarcaster preserves any existing non-null handle.
+  const seededHandle = await resolveHandleForFarcaster({
+    username: input.username,
+    wallet,
+    ownerProfileId: existing?.id ?? null,
+    existingHandle: existing?.handle ?? null,
+  });
+
   const patch = {
     farcasterFid:      input.fid,
     farcasterUsername: input.username ?? existing?.farcasterUsername ?? null,
+    handle:            seededHandle ?? existing?.handle ?? null,
     avatarUrl:         nextAvatarUrl,
     avatarSource:      nextAvatarSource,
     wallet:            wallet ?? existing?.wallet ?? null,
@@ -2564,23 +2642,16 @@ export async function upsertProfileForFarcaster(input: {
     return toProfileRow(rows[0]);
   }
 
-  // New profile. Seed a handle from the Farcaster @username — but run
-  // it through the profanity check and null it out if it fails (user
-  // can pick a clean one from Settings later). If the slugified handle
-  // collides with an existing unique-index entry, drop it (null handle)
-  // and let the insert succeed on fid/wallet instead. The user can set
-  // their handle from Settings — better than crashing the first connect.
-  let seedHandle: string | null = null;
-  if (input.username) {
-    const slug = slugifyUsername(input.username);
-    const { valid } = validateUsername(slug);
-    if (valid) seedHandle = slug;
-  }
-
+  // New profile. `seededHandle` (computed above) is either the FC
+  // @username slug, a `<slug>_<hex4>` fallback if the primary was
+  // taken, or null (no username / invalid / fallback also taken).
+  // If the insert still collides on handle (narrow race between our
+  // SELECT and INSERT), we retry below with null handle so the user
+  // lands on the onboarding step instead of erroring out.
   const inserted = await db.insert(profiles).values({
     farcasterFid: input.fid,
     farcasterUsername: input.username ?? null,
-    handle: seedHandle,
+    handle: seededHandle,
     avatarUrl: input.avatarUrl ?? null,
     avatarSource: input.avatarUrl ? 'farcaster' : null,
     wallet,
@@ -2592,7 +2663,7 @@ export async function upsertProfileForFarcaster(input: {
     // onConflictDoNothing returned empty — could be fid, wallet, OR
     // handle collision. If it was a handle collision on a new FID/wallet,
     // retry without the handle so the profile still gets created.
-    if (seedHandle) {
+    if (seededHandle) {
       const retry = await db.insert(profiles).values({
         farcasterFid: input.fid,
         farcasterUsername: input.username ?? null,
