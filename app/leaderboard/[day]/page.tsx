@@ -74,7 +74,7 @@ export default async function LeaderboardPage({
                   >
                     {formatPlayerName(e)}
                   </span>
-                  <WordmarkBadges ids={e.topWordmarks} />
+                  <WordmarkBadges ids={e.topWordmarks} surface="page" />
                 </div>
                 {e.unassisted && (
                   <span
