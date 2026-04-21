@@ -11,7 +11,7 @@
     "description": "A daily 3×3 word puzzle. Find the hidden 9-letter word using every cell exactly once. Consecutive letters can’t be neighbors.",
     "tagline": "Nine letters. No neighbors.",
     "buttonTitle": "Play today's Griddle",
-    "iconUrl": "https://griddle.fun/icon.svg",
+    "iconUrl": "https://griddle.fun/icons/icon-1024.png",
     "imageUrl": "https://griddle.fun/api/og",
     "heroImageUrl": "https://griddle.fun/api/og",
     "ogTitle": "Griddle: Daily 3×3 word puzzle",
