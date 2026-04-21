@@ -2558,6 +2558,13 @@ export async function upsertProfileForFarcaster(input: {
   displayName?: string | null;
   avatarUrl: string | null;
   wallet: string | null;
+  /**
+   * Whether this profile is currently premium. Gates whether the FC
+   * pfp gets stored into `avatar_url`. Free-tier users render a
+   * username-initial monogram instead; the Farcaster pfp only unlocks
+   * on premium upgrade. Caller computes via `isSessionPremium`.
+   */
+  isPremium: boolean;
 }): Promise<ProfileRow> {
   const wallet = input.wallet ? input.wallet.toLowerCase() : null;
 
@@ -2574,17 +2581,38 @@ export async function upsertProfileForFarcaster(input: {
   const fidRow  = byFid[0]   ?? null;
   const walletRow = byWallet ?? null;
 
-  // Decide whether a Farcaster sync is allowed to overwrite an
-  // existing avatarUrl on a row. Custom uploads are protected — once
-  // a user has uploaded their own photo, subsequent Farcaster syncs
-  // must NOT clobber it. Farcaster-sourced avatars and null rows are
-  // both fair game: we treat `null` avatar_source as "unknown, but
-  // since no one has ever uploaded, it's safe to replace with the
-  // current Farcaster pfp". This is the QoL fix that lets a user's
-  // updated Farcaster pfp propagate into Griddle without requiring
-  // a re-connect.
-  const canOverwriteAvatar = (row: { avatarSource: string | null } | null): boolean =>
-    !row || row.avatarSource !== 'custom';
+  /**
+   * Resolve the next (avatar_url, avatar_source) pair for a Farcaster
+   * sync, factoring in the premium gate.
+   *
+   * Rules:
+   *   - `avatarSource === 'custom'` wins unconditionally. Custom uploads
+   *     were an explicit user action; we never clobber them, and free-
+   *     tier users who previously uploaded keep their photo even if
+   *     they lose premium later.
+   *   - Premium + fresh FC pfp in the payload → store as 'farcaster'.
+   *   - Premium + no fresh pfp → keep whatever's already there.
+   *   - Non-premium → null out any FC-sourced value. The free tier
+   *     renders a username-initial monogram; we don't want stale pfp
+   *     data from a prior storage regime lingering in the column.
+   */
+  const resolveFarcasterAvatar = (
+    row: { avatarUrl: string | null; avatarSource: string | null } | null,
+  ): { avatarUrl: string | null; avatarSource: 'farcaster' | 'custom' | null } => {
+    if (row?.avatarSource === 'custom') {
+      return { avatarUrl: row.avatarUrl, avatarSource: 'custom' };
+    }
+    if (input.isPremium) {
+      if (input.avatarUrl) {
+        return { avatarUrl: input.avatarUrl, avatarSource: 'farcaster' };
+      }
+      return {
+        avatarUrl: row?.avatarUrl ?? null,
+        avatarSource: (row?.avatarSource as 'farcaster' | 'custom' | null) ?? null,
+      };
+    }
+    return { avatarUrl: null, avatarSource: null };
+  };
 
   // Auto-merge if two different rows, then apply fresh Farcaster input
   // on top of the merged survivor so the latest username/avatar/wallet
@@ -2612,12 +2640,16 @@ export async function upsertProfileForFarcaster(input: {
       });
       if (seed) freshPatch.handle = seed;
     }
-    // Avatar policy on the merged survivor: protect 'custom' uploads
-    // (merged inherits avatarSource via mergeProfiles COALESCE); for
-    // anything else, apply the incoming Farcaster pfp if provided.
-    if (input.avatarUrl && canOverwriteAvatar(merged)) {
-      freshPatch.avatarUrl = input.avatarUrl;
-      freshPatch.avatarSource = 'farcaster';
+    // Avatar policy on the merged survivor: premium + non-custom →
+    // store FC pfp; non-premium → null out any FC-sourced pfp;
+    // custom uploads always stay. Only write the column(s) whose
+    // value actually differs, to preserve idempotent behavior.
+    const mergedAvatar = resolveFarcasterAvatar(merged);
+    if (mergedAvatar.avatarUrl !== merged.avatarUrl) {
+      freshPatch.avatarUrl = mergedAvatar.avatarUrl;
+    }
+    if (mergedAvatar.avatarSource !== merged.avatarSource) {
+      freshPatch.avatarSource = mergedAvatar.avatarSource;
     }
     // Always overwrite the merged wallet with the user's current one
     // when supplied. mergeProfiles picks `older.wallet ?? newer.wallet`,
@@ -2633,21 +2665,15 @@ export async function upsertProfileForFarcaster(input: {
 
   const existing = fidRow ?? walletRow ?? null;
 
-  // Avatar policy for the single-row update path: protect custom
-  // uploads, otherwise adopt the incoming Farcaster pfp. This is the
-  // QoL fix — previously this line was
-  //   `existing?.avatarUrl ?? input.avatarUrl ?? null`
-  // which pinned the avatar to whatever was set on first-ever sync
-  // and never refreshed it afterwards, so a user who updated their
-  // Farcaster pfp would see the stale image in Griddle forever.
-  const nextAvatarUrl =
-    canOverwriteAvatar(existing) && input.avatarUrl
-      ? input.avatarUrl
-      : existing?.avatarUrl ?? input.avatarUrl ?? null;
-  const nextAvatarSource =
-    canOverwriteAvatar(existing) && input.avatarUrl
-      ? 'farcaster'
-      : existing?.avatarSource ?? (input.avatarUrl ? 'farcaster' : null);
+  // Avatar policy for the single-row update / new-insert path:
+  // premium users with a fresh FC pfp store it; non-premium users
+  // store nothing FC-sourced (monogram in the UI); custom uploads
+  // are preserved. Same rule for update + insert — for a brand-new
+  // row (existing=null) we skip straight to the free-tier branch
+  // since a brand-new user can't be premium yet.
+  const resolvedAvatar = resolveFarcasterAvatar(existing);
+  const nextAvatarUrl = resolvedAvatar.avatarUrl;
+  const nextAvatarSource = resolvedAvatar.avatarSource;
 
   // Seed a handle from the FC @username if the row is either new or
   // a pre-existing wallet-only row that never got one. resolveHandle-
@@ -2683,8 +2709,8 @@ export async function upsertProfileForFarcaster(input: {
     farcasterFid: input.fid,
     farcasterUsername: input.username ?? null,
     handle: seededHandle,
-    avatarUrl: input.avatarUrl ?? null,
-    avatarSource: input.avatarUrl ? 'farcaster' : null,
+    avatarUrl: nextAvatarUrl,
+    avatarSource: nextAvatarSource,
     wallet,
     updatedAt: new Date(),
   }).onConflictDoNothing().returning();
@@ -2699,8 +2725,8 @@ export async function upsertProfileForFarcaster(input: {
         farcasterFid: input.fid,
         farcasterUsername: input.username ?? null,
         handle: null,
-        avatarUrl: input.avatarUrl ?? null,
-        avatarSource: input.avatarUrl ? 'farcaster' : null,
+        avatarUrl: nextAvatarUrl,
+        avatarSource: nextAvatarSource,
         wallet,
         updatedAt: new Date(),
       }).onConflictDoNothing().returning();

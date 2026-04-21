@@ -919,7 +919,27 @@ export default function GameClient({
       })
       .catch(() => {/* best-effort; silent — ref stays unset so a later run retries */});
     return () => controller.abort();
-  }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile]);
+  }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile, premium]);
+
+  /**
+   * Re-sync the Farcaster pfp when premium flips on.
+   *
+   * The server only stores the FC pfp into `avatar_url` for premium
+   * users — free-tier users render a username-initial monogram.
+   * Once a user upgrades (Stripe, crypto, admin grant), we need to
+   * push their current pfpUrl so the DB column reflects the new tier.
+   * The sibling pfp-sync effect dedups on `lastSyncedPfpUrlRef` and
+   * would otherwise skip this POST (the URL hasn't changed, only the
+   * tier has). Clear the ref on the false→true transition so the
+   * sibling effect re-runs and actually POSTs.
+   */
+  const prevPremiumRef = useRef(premium);
+  useEffect(() => {
+    if (premium && !prevPremiumRef.current) {
+      lastSyncedPfpUrlRef.current = null;
+    }
+    prevPremiumRef.current = premium;
+  }, [premium]);
 
   // Reset premium state on disconnect AND clear the server-side
   // session→wallet binding so subsequent solves aren’t silently
@@ -1153,7 +1173,11 @@ export default function GameClient({
       <SettingsButton
         onClick={() => setShowSettings(true)}
         avatarUrl={profile?.avatarUrl ?? null}
-        pfpUrl={pfpUrl}
+        // Free tier renders a username-initial monogram; the Farcaster
+        // pfp only unlocks on premium. The server-side gate keeps
+        // `avatar_url` null for non-premium, so this null-out here is
+        // the matching client-side gate for the live SDK pfpUrl.
+        pfpUrl={premium ? pfpUrl : null}
         seed={pickAvatarSeed({
           handle: profile?.handle,
           wallet: sessionWallet,
@@ -1380,7 +1404,7 @@ export default function GameClient({
         premium={premium}
         hasSessionProfile={hasSessionProfile}
         profileLoaded={profileLoaded}
-        pfpUrl={profile?.avatarUrl ?? pfpUrl}
+        pfpUrl={profile?.avatarUrl ?? (premium ? pfpUrl : null)}
         username={profile?.handle ?? username}
         email={profile?.email ?? null}
         onCreateProfile={() => { setBrowseTab(null); setShowCreateProfile(true); }}
