@@ -9,14 +9,23 @@ import {
 } from '@/lib/wordmarks/catalog';
 
 /**
- * Circular-badge row for a leaderboard entry's top wordmarks. Small
- * ring-1 treatment, with a 2px gap between badges so the page
- * background shows between them (previously badges stacked with
- * `-ml-1.5` overlap; users read the overlap as "touching" rather than
- * "stacked" on the narrow leaderboard row). The heavier ring-2 +
- * outline-white variant still lives on the Stats grid where each
- * badge stands alone and needs the extra visual weight. Leaderboard
- * rows are tight; subtle reads better here.
+ * Overlapping circular-badge row for a leaderboard entry's top
+ * wordmarks. Avatar-stack pattern: each badge carries the colored
+ * theme accent via `ring-1` (inner) plus a modal-bg-matching
+ * `outline` (outer). When badges overlap, the front badge's outline
+ * paints over the back badge's ring, creating the visual illusion of
+ * gap between them without widening the cluster horizontally.
+ *
+ * The outline color follows the leaderboard modal sheet
+ * (`bg-white` / `dark:bg-gray-800` via the `.modal-sheet` component
+ * class in globals.css). If that ever changes, the outline color
+ * here must track it or the separator will go out of sync.
+ *
+ * Outline-follows-border-radius needs Safari 16.4+ (March 2023);
+ * older iOS renders a square outline around the circle. We treat
+ * that as acceptable degradation — the bulk of iOS traffic is on
+ * 17+ and the visual impact is minor (a slightly boxy separator,
+ * not a broken layout).
  *
  * Hover (desktop) or tap (mobile) surfaces the wordmark name as a
  * dark pill tooltip below the stack. Tapping does NOT re-order the
@@ -52,10 +61,10 @@ export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
   return (
     <div
       ref={containerRef}
-      className="relative inline-flex items-center flex-shrink-0 gap-0.5"
+      className="relative inline-flex items-center flex-shrink-0"
       onMouseLeave={() => setActiveId(null)}
     >
-      {valid.map((id) => {
+      {valid.map((id, i) => {
         const w = WORDMARK_BY_ID[id];
         const theme = WORDMARK_THEMES[id];
         return (
@@ -70,7 +79,9 @@ export function WordmarkBadges({ ids }: { ids: readonly string[] }) {
             onFocus={() => setActiveId(id)}
             onBlur={() => setActiveId((prev) => (prev === id ? null : prev))}
             aria-label={w.name}
-            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} flex items-center justify-center text-[10px] leading-none`}
+            className={`w-4 h-4 rounded-full ${theme.bg} ring-1 ${theme.ring} outline outline-2 outline-white dark:outline-gray-800 flex items-center justify-center text-[10px] leading-none ${
+              i > 0 ? '-ml-1.5' : ''
+            }`}
           >
             <span aria-hidden>{w.emoji}</span>
           </button>
