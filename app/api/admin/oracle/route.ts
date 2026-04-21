@@ -103,12 +103,22 @@ export async function GET(): Promise<NextResponse> {
         }),
       ]);
       const [price, updatedAt] = priceData;
-      onChain.price = price.toString();
-      onChain.updatedAt = Number(updatedAt);
-      onChain.stalenessSec = Math.max(
-        0,
-        Math.floor(Date.now() / 1000) - Number(updatedAt),
-      );
+      // price=0 && updatedAt=0 means setPrice has never been called.
+      // Returning null for both lets the client render a clear
+      // "never set" state rather than "$0 (0 wei), 0s ago" which
+      // would mislead the operator into thinking the feed is live.
+      if (price === 0n && updatedAt === 0n) {
+        onChain.price = null;
+        onChain.updatedAt = null;
+        onChain.stalenessSec = null;
+      } else {
+        onChain.price = price.toString();
+        onChain.updatedAt = Number(updatedAt);
+        onChain.stalenessSec = Math.max(
+          0,
+          Math.floor(Date.now() / 1000) - Number(updatedAt),
+        );
+      }
       onChain.expectedUpdater = expectedUpdater;
       if (updaterAddress) {
         const balance = await client.getBalance({ address: updaterAddress });

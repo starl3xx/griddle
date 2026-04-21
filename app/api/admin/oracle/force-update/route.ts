@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAdminWallet } from '@/lib/admin';
-import { runOraclePush } from '@/app/api/cron/oracle-update/route';
+import { runOraclePush } from '@/lib/oracle-push';
 
 /**
  * Admin one-shot oracle push.
