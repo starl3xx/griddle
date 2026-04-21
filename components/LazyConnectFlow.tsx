@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import WalletProvider from './WalletProvider';
 import { ConnectButton } from './ConnectButton';
-import { useConnect } from 'wagmi';
+import { connectorKind } from './WalletIcon';
+import { useAccount, useConnect } from 'wagmi';
 
 interface LazyConnectFlowProps {
   onConnect?: (address: string) => void;
@@ -47,8 +48,50 @@ export default function LazyConnectFlow({
     <WalletProvider>
       <ConnectButton onConnect={onConnect} onDisconnect={onDisconnect} inMiniApp={inMiniApp} />
       <AutoOpener openKey={openKey} />
+      <AutoConnectMiniapp inMiniApp={inMiniApp} />
     </WalletProvider>
   );
+}
+
+/**
+ * Inside a Farcaster mini-app, automatically fire the Farcaster
+ * connector on mount so the user doesn't have to open the picker.
+ * Their wallet + @username + pfp come from the miniapp context —
+ * there's no meaningful choice to make at the picker, and requiring
+ * a tap breaks the "just works" expectation of a mini app.
+ *
+ * Safeguards:
+ *   - No-op when inMiniApp=false. Plain-web users still see the picker.
+ *   - Waits for wagmi's own rehydration (`isReconnecting`) so we don't
+ *     race a persisted connect and end up with two in-flight attempts.
+ *   - If rehydration lands us already connected (any wallet — maybe
+ *     the user connected via a different method earlier), we respect
+ *     that state and don't force Farcaster over it.
+ *   - Fires at most once per mount via `hasFired`. Further connects
+ *     go through the normal picker path.
+ *   - Skips entirely if the Farcaster connector isn't registered yet
+ *     (wagmi connectors array can be empty on first render).
+ */
+function AutoConnectMiniapp({ inMiniApp }: { inMiniApp: boolean }) {
+  const { isConnected, isReconnecting } = useAccount();
+  const { connectors, connect, status } = useConnect();
+  const hasFired = useRef(false);
+
+  useEffect(() => {
+    if (!inMiniApp) return;
+    if (isReconnecting) return;
+    if (isConnected) return;
+    if (status === 'pending') return;
+    if (hasFired.current) return;
+
+    const farcaster = connectors.find((c) => connectorKind(c) === 'farcaster');
+    if (!farcaster) return;
+
+    hasFired.current = true;
+    connect({ connector: farcaster });
+  }, [inMiniApp, isConnected, isReconnecting, connectors, connect, status]);
+
+  return null;
 }
 
 /**
