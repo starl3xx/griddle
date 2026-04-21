@@ -351,6 +351,14 @@ export default function GameClient({
    */
   const lastSyncedPfpUrlRef = useRef<string | null>(null);
 
+  // Tracks `premium` across renders so the pfp-sync effect can detect
+  // a false→true transition and bypass its dedup check on the first
+  // run after upgrade. The server's pfp gate only stores FC pfps for
+  // premium users, so the stored URL from the free-tier sync was a
+  // no-op on the server side — the dedup ref would otherwise block
+  // the post-upgrade resync that actually succeeds.
+  const prevPremiumRef = useRef(false);
+
   const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
@@ -889,7 +897,17 @@ export default function GameClient({
     if (!fid) return;
     if (!sessionWallet) return;
     if (!pfpUrl) return;
-    if (lastSyncedPfpUrlRef.current === pfpUrl) return;
+    // Detect a false→true transition on `premium`. When the user just
+    // upgraded, the prior free-tier sync stamped `lastSyncedPfpUrlRef`
+    // with the current pfpUrl — but the server declined to store it
+    // because the premium gate was closed. Bypass the dedup check this
+    // once so we actually push the pfp now that the gate is open.
+    // Inline (not a separate effect) to avoid effect-ordering hazards
+    // where the dedup check runs first and skips before a sibling
+    // effect clears the ref.
+    const premiumJustUnlocked = premium && !prevPremiumRef.current;
+    prevPremiumRef.current = premium;
+    if (!premiumJustUnlocked && lastSyncedPfpUrlRef.current === pfpUrl) return;
     // Capture the URL we're about to sync in a local so closure reads
     // are stable across the async boundary. Do NOT mark the ref as
     // synced yet — if the effect tears down before the fetch resolves
@@ -920,26 +938,6 @@ export default function GameClient({
       .catch(() => {/* best-effort; silent — ref stays unset so a later run retries */});
     return () => controller.abort();
   }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile, premium]);
-
-  /**
-   * Re-sync the Farcaster pfp when premium flips on.
-   *
-   * The server only stores the FC pfp into `avatar_url` for premium
-   * users — free-tier users render a username-initial monogram.
-   * Once a user upgrades (Stripe, crypto, admin grant), we need to
-   * push their current pfpUrl so the DB column reflects the new tier.
-   * The sibling pfp-sync effect dedups on `lastSyncedPfpUrlRef` and
-   * would otherwise skip this POST (the URL hasn't changed, only the
-   * tier has). Clear the ref on the false→true transition so the
-   * sibling effect re-runs and actually POSTs.
-   */
-  const prevPremiumRef = useRef(premium);
-  useEffect(() => {
-    if (premium && !prevPremiumRef.current) {
-      lastSyncedPfpUrlRef.current = null;
-    }
-    prevPremiumRef.current = premium;
-  }, [premium]);
 
   // Reset premium state on disconnect AND clear the server-side
   // session→wallet binding so subsequent solves aren’t silently
