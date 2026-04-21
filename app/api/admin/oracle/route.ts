@@ -55,7 +55,10 @@ export async function GET(): Promise<NextResponse> {
     .limit(1);
   const cfg = rows[0];
 
-  const oracleAddress = process.env.WORD_ORACLE_ADDRESS as Address | undefined;
+  // DB-first oracle address; env fallback preserves pre-UI deploys.
+  const oracleAddress = (cfg?.oracleAddress ?? process.env.WORD_ORACLE_ADDRESS) as
+    | Address
+    | undefined;
   const rpcUrl = process.env.BASE_RPC_URL;
   const updaterKey = process.env.ORACLE_UPDATER_PRIVATE_KEY;
 

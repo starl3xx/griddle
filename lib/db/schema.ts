@@ -600,6 +600,13 @@ export const oracleConfig = pgTable('oracle_config', {
   id: integer('id').primaryKey(),
   poolId: varchar('pool_id', { length: 80 }).notNull(),
   cronEnabled: boolean('cron_enabled').notNull().default(true),
+  /**
+   * Deployed PushedWordOracle address. Set by /api/admin/oracle/deploy
+   * after a successful contract deploy; read by the cron + force-update
+   * paths as the source of truth. Falls back to the
+   * `WORD_ORACLE_ADDRESS` env var when null so pre-UI deploys still work.
+   */
+  oracleAddress: varchar('oracle_address', { length: 42 }),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   updatedBy: varchar('updated_by', { length: 42 }),
 });

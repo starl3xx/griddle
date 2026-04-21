@@ -46,16 +46,9 @@ const ORACLE_ABI = [
 export async function runOraclePush(
   opts: { forced: boolean },
 ): Promise<NextResponse<OracleUpdateResult>> {
-  const oracleAddress = process.env.WORD_ORACLE_ADDRESS as Address | undefined;
   const updaterKey = process.env.ORACLE_UPDATER_PRIVATE_KEY;
   const rpcUrl = process.env.BASE_RPC_URL;
 
-  if (!oracleAddress || !/^0x[a-fA-F0-9]{40}$/.test(oracleAddress)) {
-    return NextResponse.json(
-      { ok: false, error: 'WORD_ORACLE_ADDRESS not set or invalid' },
-      { status: 503 },
-    );
-  }
   if (!updaterKey || !/^0x[a-fA-F0-9]{64}$/.test(updaterKey)) {
     return NextResponse.json(
       { ok: false, error: 'ORACLE_UPDATER_PRIVATE_KEY not set or invalid' },
@@ -81,6 +74,19 @@ export async function runOraclePush(
     return NextResponse.json(
       { ok: false, error: 'oracle_config row missing (expected id=1 from 0022 migration)' },
       { status: 500 },
+    );
+  }
+
+  // DB is the source of truth for the deployed oracle address. Falls
+  // back to WORD_ORACLE_ADDRESS env var so a pre-UI manual deploy still
+  // works. Admin UI's deploy route writes oracle_config.oracleAddress.
+  const oracleAddress = (cfg.oracleAddress ?? process.env.WORD_ORACLE_ADDRESS) as
+    | Address
+    | undefined;
+  if (!oracleAddress || !/^0x[a-fA-F0-9]{40}$/.test(oracleAddress)) {
+    return NextResponse.json(
+      { ok: false, error: 'oracle address not set (deploy from /admin → Oracle)' },
+      { status: 503 },
     );
   }
 

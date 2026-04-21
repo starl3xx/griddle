@@ -13,6 +13,7 @@ CREATE TABLE "oracle_config" (
     "id" integer PRIMARY KEY NOT NULL,
     "pool_id" varchar(80) NOT NULL,
     "cron_enabled" boolean DEFAULT true NOT NULL,
+    "oracle_address" varchar(42),
     "updated_at" timestamp DEFAULT now() NOT NULL,
     "updated_by" varchar(42)
 );

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CircleNotch, ArrowClockwise, CheckCircle, Warning, Copy } from '@phosphor-icons/react';
+import { CircleNotch, ArrowClockwise, CheckCircle, Warning, Copy, Rocket } from '@phosphor-icons/react';
 
 interface OracleStatus {
   config: {
@@ -49,6 +49,11 @@ export function OracleTab() {
   const [cronEnabledDraft, setCronEnabledDraft] = useState(true);
   const [saving, setSaving] = useState(false);
   const [forcing, setForcing] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+  const [deployResult, setDeployResult] = useState<
+    { oracleAddress: string; txHash: string } | null
+  >(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<string | null>(null);
 
   const fetchStatus = async () => {
@@ -93,6 +98,33 @@ export function OracleTab() {
       setActionResult(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deployOracle = async () => {
+    if (deploying) return;
+    setDeploying(true);
+    setDeployError(null);
+    setDeployResult(null);
+    try {
+      const res = await fetch('/api/admin/oracle/deploy', { method: 'POST' });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        oracleAddress?: string;
+        txHash?: string;
+        error?: string;
+      };
+      if (!res.ok || !body.ok || !body.oracleAddress || !body.txHash) {
+        throw new Error(body.error ?? `Deploy failed (${res.status})`);
+      }
+      setDeployResult({ oracleAddress: body.oracleAddress, txHash: body.txHash });
+      // Address is live in DB now; refetch so the status card shows it
+      // and the cron path picks it up immediately.
+      setTimeout(() => void fetchStatus(), 1500);
+    } catch (err) {
+      setDeployError(err instanceof Error ? err.message : 'Deploy failed');
+    } finally {
+      setDeploying(false);
     }
   };
 
@@ -156,8 +188,103 @@ export function OracleTab() {
     onChain.expectedUpdater && updaterAddress &&
     onChain.expectedUpdater.toLowerCase() !== updaterAddress.toLowerCase();
 
+  // Premium contract address for the setOracle command — shown after
+  // a successful deploy. Read from the same public env the wallet-side
+  // code uses; the admin dashboard isn't surfacing other contract
+  // addresses yet so there's no shared helper to reuse.
+  const premiumAddress = process.env.NEXT_PUBLIC_GRIDDLE_PREMIUM_ADDRESS ?? '$GRIDDLE_PREMIUM_ADDRESS';
+  const castCommand = deployResult
+    ? `cast send ${premiumAddress} "setOracle(address)" ${deployResult.oracleAddress} --rpc-url $BASE_RPC_URL --private-key $PRIVATE_KEY`
+    : '';
+
   return (
     <div className="space-y-6">
+      {/* Deploy */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-gray-500">
+            Deploy PushedWordOracle
+          </h3>
+          <p className="text-[12px] text-gray-600 dark:text-gray-400 leading-relaxed">
+            {oracleAddress ? (
+              <>
+                Already deployed at <code className="font-mono">{oracleAddress}</code>. Redeploy only
+                if the contract source has changed or you need to rotate the updater EOA —
+                you'd have to rerun <code>setOracle</code> on GriddlePremium after.
+              </>
+            ) : (
+              <>
+                Deploys the oracle contract from the server using the
+                funded updater EOA. No CLI or local Foundry needed. After
+                the tx lands you'll get a <code>cast send setOracle(…)</code> command
+                to run from your owner wallet — that last step can't be
+                server-side because GriddlePremium's owner gate requires
+                your signature.
+              </>
+            )}
+          </p>
+
+          <Button variant="default" size="sm" onClick={deployOracle} disabled={deploying}>
+            {deploying ? <CircleNotch className="w-4 h-4 animate-spin" weight="bold" /> : <Rocket className="w-4 h-4" weight="bold" />}
+            {oracleAddress ? 'Redeploy oracle' : 'Deploy oracle'}
+          </Button>
+
+          {deployError && (
+            <div className="flex items-start gap-2 rounded-md bg-error-50 dark:bg-error-900/30 border border-error-200 dark:border-error-800 px-3 py-2 text-[12px] text-error-700 dark:text-error-300">
+              <Warning className="w-4 h-4 mt-0.5 shrink-0" weight="bold" />
+              <div>{deployError}</div>
+            </div>
+          )}
+
+          {deployResult && (
+            <div className="space-y-2 rounded-md bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-3 py-2.5">
+              <div className="flex items-start gap-2 text-[12px] text-emerald-800 dark:text-emerald-200">
+                <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" weight="fill" />
+                <div>
+                  Deployed to{' '}
+                  <a
+                    href={`https://basescan.org/address/${deployResult.oracleAddress}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono underline"
+                  >
+                    {deployResult.oracleAddress}
+                  </a>
+                  {' '}(tx{' '}
+                  <a
+                    href={`https://basescan.org/tx/${deployResult.txHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono underline"
+                  >
+                    {deployResult.txHash.slice(0, 10)}…
+                  </a>
+                  ). Now run this from your owner wallet to point GriddlePremium at it:
+                </div>
+              </div>
+              <div className="relative">
+                <pre className="overflow-x-auto rounded bg-gray-900 text-gray-100 text-[11px] font-mono p-2.5 pr-9">
+                  {castCommand}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => { void navigator.clipboard.writeText(castCommand); }}
+                  title="Copy"
+                  className="absolute top-2 right-2 text-gray-400 hover:text-white"
+                >
+                  <Copy className="w-3.5 h-3.5" weight="bold" />
+                </button>
+              </div>
+              {premiumAddress.startsWith('$') && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  <code>NEXT_PUBLIC_GRIDDLE_PREMIUM_ADDRESS</code> isn't set in env — replace the placeholder in the command with your deployed GriddlePremium address.
+                </p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Live status */}
       <Card>
         <CardContent className="p-4 space-y-3">
