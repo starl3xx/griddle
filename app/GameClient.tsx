@@ -906,17 +906,18 @@ export default function GameClient({
     // where the dedup check runs first and skips before a sibling
     // effect clears the ref.
     const premiumJustUnlocked = premium && !prevPremiumRef.current;
-    prevPremiumRef.current = premium;
     if (!premiumJustUnlocked && lastSyncedPfpUrlRef.current === pfpUrl) return;
-    // Capture the URL we're about to sync in a local so closure reads
-    // are stable across the async boundary. Do NOT mark the ref as
-    // synced yet — if the effect tears down before the fetch resolves
-    // (e.g. `username` or `displayName` changes and the cleanup aborts
-    // the in-flight request), an eagerly-set ref would record the URL
-    // as "already synced" and the retry-on-next-effect-run would be
-    // skipped, silently losing the pfp update. The ref only moves
+    // Capture both the URL and the premium state we're syncing against
+    // in locals so the .then() success handler advances the refs based
+    // on the values this effect was acting on (not whatever has changed
+    // since). Do NOT mark either ref as synced yet — if the effect
+    // tears down before the fetch resolves (e.g. `username` changes and
+    // the cleanup aborts the in-flight request), eagerly-advanced refs
+    // would record state as "already synced" and the retry-on-next-run
+    // would be skipped, silently losing the sync. Refs only move
     // forward after a confirmed server response.
     const targetPfpUrl = pfpUrl;
+    const targetPremium = premium;
     const controller = new AbortController();
     fetch('/api/profile/farcaster', {
       method: 'POST',
@@ -933,9 +934,10 @@ export default function GameClient({
       .then((r) => {
         if (!r.ok) return;
         lastSyncedPfpUrlRef.current = targetPfpUrl;
+        prevPremiumRef.current = targetPremium;
         void refetchProfile();
       })
-      .catch(() => {/* best-effort; silent — ref stays unset so a later run retries */});
+      .catch(() => {/* best-effort; silent — refs stay unset so a later run retries */});
     return () => controller.abort();
   }, [inMiniApp, fid, pfpUrl, sessionWallet, username, displayName, refetchProfile, premium]);
 
