@@ -945,6 +945,15 @@ export default function GameClient({
   const handleWalletDisconnect = useCallback(() => {
     setSessionWallet(null);
     setPremium(false);
+    // Reset the pfp-sync session state so a subsequent reconnect
+    // (same tab, new wallet / upgrade status) starts fresh. Without
+    // this, prevPremiumRef stays stuck at its last "active session"
+    // value and a disconnect→reconnect with premium already true
+    // would miss the transition (premiumJustUnlocked = true && !true
+    // = false), and the dedup ref would block the re-POST that stores
+    // the avatar server-side. Both refs are session-lifecycle state.
+    prevPremiumRef.current = false;
+    lastSyncedPfpUrlRef.current = null;
     fetch('/api/wallet/link', { method: 'DELETE' }).catch(() => {
       // Best-effort: the client UI is already in disconnect state,
       // a failed delete just means the binding lingers in KV until
