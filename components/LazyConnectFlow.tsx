@@ -111,9 +111,24 @@ function AutoConnectMiniapp({ inMiniApp }: { inMiniApp: boolean }) {
         typeof activeConnector?.getAccounts === 'function';
       const isFarcaster =
         activeConnector && connectorKind(activeConnector) === 'farcaster';
-      if (!hasMethods || !isFarcaster) {
+
+      // Zombie connector (stripped methods after cookie rehydration).
+      // Bounded by MAX_ZOMBIE_RECOVERIES so a persistently-broken SDK
+      // can't pin the effect in a disconnect→reconnect loop.
+      if (!hasMethods) {
         if (zombieRecoveries.current >= MAX_ZOMBIE_RECOVERIES) return;
         zombieRecoveries.current += 1;
+        disconnect();
+        hasFired.current = false;
+        return;
+      }
+
+      // Healthy but wrong connector for a miniapp context (e.g. a
+      // MetaMask cookie from an earlier plain-web session). One-time
+      // re-route to Farcaster — doesn't consume zombieRecoveries, since
+      // there's no zombie involved. `hasFired` prevents a loop: after
+      // the fresh connect, `isFarcaster` will be true.
+      if (!isFarcaster) {
         disconnect();
         hasFired.current = false;
       }
