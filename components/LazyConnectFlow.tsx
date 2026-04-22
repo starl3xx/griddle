@@ -83,11 +83,19 @@ export default function LazyConnectFlow({
  * probing for expected methods, nuke it, and let the effect re-fire
  * with a real Farcaster connect.
  */
+// Cap on zombie-connector recovery attempts. A fresh `connect()` with
+// a full connector should always produce a healthy connection; if two
+// cycles in a row land us on another zombie, something deeper is
+// broken (SDK unavailable, provider wedged) and retrying harder just
+// burns cycles. Bail out so React doesn't churn renders forever.
+const MAX_ZOMBIE_RECOVERIES = 2;
+
 function AutoConnectMiniapp({ inMiniApp }: { inMiniApp: boolean }) {
   const { isConnected, isReconnecting, connector: activeConnector } = useAccount();
   const { connectors, connect, status } = useConnect();
   const { disconnect } = useDisconnect();
   const hasFired = useRef(false);
+  const zombieRecoveries = useRef(0);
 
   useEffect(() => {
     if (!inMiniApp) return;
@@ -104,6 +112,8 @@ function AutoConnectMiniapp({ inMiniApp }: { inMiniApp: boolean }) {
       const isFarcaster =
         activeConnector && connectorKind(activeConnector) === 'farcaster';
       if (!hasMethods || !isFarcaster) {
+        if (zombieRecoveries.current >= MAX_ZOMBIE_RECOVERIES) return;
+        zombieRecoveries.current += 1;
         disconnect();
         hasFired.current = false;
       }
