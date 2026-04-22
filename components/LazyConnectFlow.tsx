@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import WalletProvider from './WalletProvider';
 import { ConnectButton } from './ConnectButton';
 import { connectorKind } from './WalletIcon';
-import { useAccount, useConnect } from 'wagmi';
+import { useAccount, useConnect, useDisconnect } from 'wagmi';
 
 interface LazyConnectFlowProps {
   onConnect?: (address: string) => void;
@@ -64,32 +64,90 @@ export default function LazyConnectFlow({
  *   - No-op when inMiniApp=false. Plain-web users still see the picker.
  *   - Waits for wagmi's own rehydration (`isReconnecting`) so we don't
  *     race a persisted connect and end up with two in-flight attempts.
- *   - If rehydration lands us already connected (any wallet — maybe
- *     the user connected via a different method earlier), we respect
- *     that state and don't force Farcaster over it.
+ *   - Zombie-connector detection (see below) — if rehydration left a
+ *     partial/stale connector in state, force a disconnect + reconnect.
  *   - Fires at most once per mount via `hasFired`. Further connects
  *     go through the normal picker path.
  *   - Skips entirely if the Farcaster connector isn't registered yet
  *     (wagmi connectors array can be empty on first render).
+ *
+ * Zombie connector rationale: wagmi persists connections to cookie/
+ * localStorage by stripping the connector to `{ id, name, type, uid }`
+ * (see @wagmi/core createConfig.js:166). On hydration it relies on
+ * `reconnect()` to re-attach the methods from the matching registered
+ * connector. If that reconnect silently fails — e.g. the Farcaster SDK
+ * provider wasn't ready yet — the stripped stub stays in state and
+ * `isConnected` reads `true`. The next `useWriteContract()` call then
+ * crashes inside `getConnectorClient` with
+ * "connector.getChainId is not a function". We spot the stub by
+ * probing for expected methods, nuke it, and let the effect re-fire
+ * with a real Farcaster connect.
  */
+// Cap on zombie-connector recovery attempts. A fresh `connect()` with
+// a full connector should always produce a healthy connection; if two
+// cycles in a row land us on another zombie, something deeper is
+// broken (SDK unavailable, provider wedged) and retrying harder just
+// burns cycles. Bail out so React doesn't churn renders forever.
+const MAX_ZOMBIE_RECOVERIES = 2;
+
 function AutoConnectMiniapp({ inMiniApp }: { inMiniApp: boolean }) {
-  const { isConnected, isReconnecting } = useAccount();
+  const { isConnected, isReconnecting, connector: activeConnector } = useAccount();
   const { connectors, connect, status } = useConnect();
+  const { disconnect } = useDisconnect();
   const hasFired = useRef(false);
+  const zombieRecoveries = useRef(0);
 
   useEffect(() => {
     if (!inMiniApp) return;
     if (isReconnecting) return;
-    if (isConnected) return;
     if (status === 'pending') return;
-    if (hasFired.current) return;
 
     const farcaster = connectors.find((c) => connectorKind(c) === 'farcaster');
     if (!farcaster) return;
 
+    if (isConnected) {
+      const hasMethods =
+        typeof activeConnector?.getChainId === 'function' &&
+        typeof activeConnector?.getAccounts === 'function';
+      const isFarcaster =
+        activeConnector && connectorKind(activeConnector) === 'farcaster';
+
+      // Zombie connector (stripped methods after cookie rehydration).
+      // Bounded by MAX_ZOMBIE_RECOVERIES so a persistently-broken SDK
+      // can't pin the effect in a disconnect→reconnect loop.
+      if (!hasMethods) {
+        if (zombieRecoveries.current >= MAX_ZOMBIE_RECOVERIES) return;
+        zombieRecoveries.current += 1;
+        disconnect();
+        hasFired.current = false;
+        return;
+      }
+
+      // Healthy but wrong connector for a miniapp context (e.g. a
+      // MetaMask cookie from an earlier plain-web session). One-time
+      // re-route to Farcaster — doesn't consume zombieRecoveries, since
+      // there's no zombie involved. `hasFired` prevents a loop: after
+      // the fresh connect, `isFarcaster` will be true.
+      if (!isFarcaster) {
+        disconnect();
+        hasFired.current = false;
+      }
+      return;
+    }
+
+    if (hasFired.current) return;
     hasFired.current = true;
     connect({ connector: farcaster });
-  }, [inMiniApp, isConnected, isReconnecting, connectors, connect, status]);
+  }, [
+    inMiniApp,
+    isConnected,
+    isReconnecting,
+    activeConnector,
+    connectors,
+    connect,
+    disconnect,
+    status,
+  ]);
 
   return null;
 }
