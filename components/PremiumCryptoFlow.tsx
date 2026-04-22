@@ -1,7 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAccount, usePublicClient, useSignTypedData, useWriteContract } from 'wagmi';
+import {
+  useAccount,
+  useDisconnect,
+  usePublicClient,
+  useSignTypedData,
+  useWriteContract,
+} from 'wagmi';
 import { Crown, CircleNotch } from '@phosphor-icons/react';
 import { griddlePremiumAbi, usdcAbi, wordOracleAbi } from '@/lib/contracts/griddlePremiumAbi';
 import {
@@ -94,6 +100,7 @@ interface IdentityDraft {
  */
 export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowProps) {
   const { address, isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
   const publicClient = usePublicClient();
   const { signTypedDataAsync } = useSignTypedData();
   const { writeContractAsync } = useWriteContract();
@@ -465,21 +472,34 @@ export function PremiumCryptoFlow({ onUnlocked, onCancel }: PremiumCryptoFlowPro
         reason = 'stale_oracle';
       } else {
         const message = err instanceof Error ? err.message : 'unlock failed';
+        // Zombie wagmi connector from stale cookie storage — see the
+        // rationale in AutoConnectMiniapp. Forcing disconnect here lets
+        // the auto-reconnect effect re-fire with a real Farcaster
+        // connector on next tick; showing a targeted "try again"
+        // message instead of the raw stack keeps the user moving.
+        const isZombieConnector =
+          err instanceof Error && /getChainId is not a function/i.test(err.message);
         setErrorKind('generic');
-        setErrorMessage(message);
-        const isUserReject =
-          err instanceof Error &&
-          (err.name === 'UserRejectedRequestError' || /rejected|denied|user rejected/i.test(err.message));
-        if (isUserReject) reason = 'user_rejected';
-        else if (currentPhase === 'quoting') reason = 'quote_failed';
-        else if (currentPhase === 'signing') reason = 'sign_failed';
-        else if (currentPhase === 'submitting') reason = 'submit_failed';
-        else if (currentPhase === 'verifying') reason = 'verify_failed';
+        if (isZombieConnector) {
+          disconnect();
+          setErrorMessage('Wallet connection hiccup — tap Unlock again in a moment.');
+          reason = 'zombie_connector';
+        } else {
+          setErrorMessage(message);
+          const isUserReject =
+            err instanceof Error &&
+            (err.name === 'UserRejectedRequestError' || /rejected|denied|user rejected/i.test(err.message));
+          if (isUserReject) reason = 'user_rejected';
+          else if (currentPhase === 'quoting') reason = 'quote_failed';
+          else if (currentPhase === 'signing') reason = 'sign_failed';
+          else if (currentPhase === 'submitting') reason = 'submit_failed';
+          else if (currentPhase === 'verifying') reason = 'verify_failed';
+        }
       }
       trackEvent({ name: 'checkout_failed', method: 'crypto', reason });
       setPhase('error');
     }
-  }, [address, isConnected, onUnlocked, premiumAddress, publicClient, signTypedDataAsync, usdcAddress, writeContractAsync, callVerify]);
+  }, [address, disconnect, isConnected, onUnlocked, premiumAddress, publicClient, signTypedDataAsync, usdcAddress, writeContractAsync, callVerify]);
 
   // Effect that reacts to phase='idle' with an identity draft:
   //
