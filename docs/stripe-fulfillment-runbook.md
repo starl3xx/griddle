@@ -34,9 +34,27 @@ Outcomes per gap:
 | --- | --- | --- |
 | `healed` | Row written, escrow opened. | None. |
 | `healed_escrow_deferred` | Row written, buyer has premium, escrow queued for retry. | None; the queue drains next hour. |
+| `healed_escrow_unqueued` | Row written, buyer has premium, but the escrow neither opened nor reached the retry queue. | Open the escrow by hand. Nothing will retry this on its own. |
 | `heal_failed` | Nothing written. Buyer still has nothing. | Investigate now. |
+| `heal_deferred` | Not attempted this run — heal budget spent, or Stripe could not be read. | None; the next run retries it. |
 | `needs_manual_refund` | Wallet already premium from another purchase or grant. | Refund the duplicate charge in Stripe. |
 | `no_wallet_anchor` | Anonymous buyer, nothing durable to attach premium to. | Contact the buyer; grant by hand once they connect a wallet. |
+
+Two states are deliberately **not** gaps and never appear in the list:
+
+- **Charged within the last 15 minutes.** The window is measured from
+  the charge, not from the checkout session, because a buyer can hold
+  an open session for an hour and pay seconds before the cron runs.
+  Judging by session age would race a webhook still in flight and
+  could put two `unlockForUser` calls on the chain at once.
+- **Refunded or disputed.** A Checkout Session reports
+  `payment_status: 'paid'` forever, including after a full refund, so
+  the charge behind it is what gets checked. Money that went back is
+  not a delivery gap.
+
+A **truncated** run alerts on its own, even when it found no gaps: it
+stopped before examining everything, so "no gaps" is an unfinished
+check rather than a result.
 
 `no_wallet_anchor` is never healed automatically. The only anchor
 available is the email Stripe collected, which is unverified, and

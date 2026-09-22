@@ -41,11 +41,12 @@ import type { Address, Hex } from 'viem';
  *  cron that has been failing, plus a weekend of not looking. */
 export const RECONCILE_LOOKBACK_DAYS = 7;
 
-/** Sessions younger than this are skipped. The webhook fires within
- *  seconds, but a retry storm or a slow on-chain open can leave a
- *  legitimate purchase briefly unrecorded, and racing it would only
- *  produce noise — the outcome is identical either way, since both
- *  paths are idempotent. */
+/** Payments charged more recently than this are skipped. Measured from
+ *  the charge, not from the checkout session, which is created when
+ *  the buyer opens the page. The webhook fires within seconds, but a
+ *  retry storm or a slow on-chain open can leave a legitimate purchase
+ *  briefly unrecorded, and racing it risks two concurrent
+ *  `unlockForUser` calls. */
 export const RECONCILE_GRACE_MINUTES = 15;
 
 /** Heals per run. Each one sends a transaction and waits for it, so
@@ -64,8 +65,17 @@ export type GapOutcome =
   /** Row written, but the on-chain escrow did not open; queued for the
    *  existing retry drain. The buyer HAS premium. */
   | 'healed_escrow_deferred'
+  /** Row written and the buyer HAS premium, but the escrow neither
+   *  opened nor reached the retry queue. Nothing will pick this up on
+   *  its own: the row makes the session look recorded to the next run,
+   *  and the drain never saw the job. Needs a person. */
+  | 'healed_escrow_unqueued'
   /** Could not write the row. The buyer still has nothing. */
   | 'heal_failed'
+  /** Not attempted this run — the per-run heal budget was spent, or the
+   *  payment state could not be read from Stripe. The next run retries
+   *  it automatically. No action needed. */
+  | 'heal_deferred'
   /** The wallet already holds premium from a different purchase or
    *  grant. Healing would pull stockpile $WORD for nothing; a human
    *  should refund the duplicate charge. */
@@ -89,6 +99,12 @@ export interface ReconcileSummary {
   sessionsChecked: number;
   gapsFound: number;
   gapsHealed: number;
+  /** Unrecorded sessions whose payment was charged too recently to
+   *  judge — the webhook may still be in flight. Not gaps. */
+  skippedInFlight: number;
+  /** Unrecorded sessions whose payment was refunded or disputed. There
+   *  is nothing to deliver, so these are not gaps. */
+  skippedRefunded: number;
   gaps: ReconcileGap[];
   /** True when the lookback held more sessions than we walked, or more
    *  gaps than we were willing to heal in one run. */
@@ -111,6 +127,12 @@ async function listPaidSessions(
     const batch: Stripe.ApiList<Stripe.Checkout.Session> =
       await stripe.checkout.sessions.list({
         created: { gte: sinceUnix },
+        // Without this filter the window fills with abandoned and
+        // expired sessions — which vastly outnumber completed ones —
+        // and Stripe returns newest first, so real paid sessions fall
+        // off the end of the page budget unseen. That would silently
+        // defeat the whole job.
+        status: 'complete',
         limit: 100,
         ...(startingAfter ? { starting_after: startingAfter } : {}),
       });
@@ -125,6 +147,62 @@ async function listPaidSessions(
   }
 
   return { sessions, truncated };
+}
+
+interface PaymentFacts {
+  /** When the card was actually charged. A checkout session's own
+   *  `created` is when the buyer OPENED the page, which can be long
+   *  before they pay. */
+  paidAt: number | null;
+  refunded: boolean;
+  disputed: boolean;
+  /** True when Stripe could not be read. The caller must not treat
+   *  unknown as clean. */
+  unknown: boolean;
+}
+
+/**
+ * Read the payment behind a session: when it was charged, and whether
+ * the money is still ours.
+ *
+ * A Checkout Session stays `payment_status: 'paid'` forever, including
+ * after a full refund or a lost dispute, so the session alone cannot
+ * answer either question. Only fetched for sessions that already look
+ * like gaps, which are rare — this costs one API call per gap, not per
+ * session.
+ */
+async function loadPaymentFacts(session: Stripe.Checkout.Session): Promise<PaymentFacts> {
+  const paymentIntentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : (session.payment_intent?.id ?? null);
+
+  if (!paymentIntentId) {
+    return { paidAt: null, refunded: false, disputed: false, unknown: false };
+  }
+
+  try {
+    const intent = await getStripe().paymentIntents.retrieve(paymentIntentId, {
+      expand: ['latest_charge'],
+    });
+    const charge =
+      typeof intent.latest_charge === 'string' ? null : (intent.latest_charge ?? null);
+    if (!charge) {
+      return { paidAt: null, refunded: false, disputed: false, unknown: false };
+    }
+    return {
+      paidAt: charge.created,
+      refunded: charge.refunded || charge.amount_refunded > 0,
+      disputed: charge.disputed,
+      unknown: false,
+    };
+  } catch (err) {
+    console.error('[reconcile] could not read payment state', {
+      stripeSessionId: session.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { paidAt: null, refunded: false, disputed: false, unknown: true };
+  }
 }
 
 /**
@@ -199,8 +277,15 @@ async function healWalletSession(
   if (escrowStatus === null) {
     // Row exists now, so the existing retry drain (which UPDATEs by
     // wallet) can finish the on-chain half on its next pass.
-    await kv
-      .lpush(
+    //
+    // This enqueue is the ONLY thing that will ever reopen the escrow.
+    // The row we just wrote makes the session look recorded, so the
+    // next reconcile run skips it, and the drain only ever sees jobs
+    // that reached the queue. A swallowed failure here would strand
+    // the escrow forever behind a reassuring 'deferred' label, so the
+    // failure is surfaced as its own outcome instead.
+    try {
+      await kv.lpush(
         ESCROW_RETRY_KEY,
         JSON.stringify({
           stripeSessionId: session.id,
@@ -209,10 +294,20 @@ async function healWalletSession(
           enqueuedAt: Date.now(),
           reason: `reconcile: ${escrowDetail ?? 'escrow open failed'}`,
         }),
-      )
-      .catch((err) => {
-        console.error('[reconcile] retry enqueue failed', err);
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[reconcile] retry enqueue failed — escrow stranded', {
+        stripeSessionId: session.id,
+        wallet,
+        message,
       });
+      return {
+        outcome: 'healed_escrow_unqueued',
+        detail: `escrow open failed (${escrowDetail ?? 'unknown'}) and retry enqueue failed (${message})`,
+        escrowOpenTx: null,
+      };
+    }
     return { outcome: 'healed_escrow_deferred', detail: escrowDetail, escrowOpenTx: null };
   }
 
@@ -245,20 +340,21 @@ export async function reconcileStripeSessions(options?: {
   const graceCutoff = nowSeconds - RECONCILE_GRACE_MINUTES * 60;
 
   const { sessions, truncated: pagesTruncated } = await listPaidSessions(sinceUnix);
-  const settled = sessions.filter((s) => s.created <= graceCutoff);
 
-  const keys = settled.map((s) => ({
+  const keys = sessions.map((s) => ({
     sessionId: s.id,
     externalId: externalIdForStripe(s.id) as string,
   }));
   const recorded = await findRecordedStripeSessions(keys);
-  const missing = settled.filter((s) => !recorded.has(s.id));
+  const candidates = sessions.filter((s) => !recorded.has(s.id));
 
   const gaps: ReconcileGap[] = [];
   let gapsHealed = 0;
   let healsSpent = 0;
+  let skippedInFlight = 0;
+  let skippedRefunded = 0;
 
-  for (const session of missing) {
+  for (const session of candidates) {
     const rawWallet = session.metadata?.wallet;
     const wallet =
       typeof rawWallet === 'string' && isValidAddress(rawWallet)
@@ -275,6 +371,44 @@ export async function reconcileStripeSessions(options?: {
       amountTotal: session.amount_total,
     };
 
+    // What the payment itself says. Checked per candidate rather than
+    // per session: gaps are rare, so this is a handful of API calls.
+    const facts = await loadPaymentFacts(session);
+
+    if (facts.unknown) {
+      // Stripe was unreachable for this one. Do NOT heal on an unknown
+      // refund state, and do not call it a gap either — the session
+      // stays unrecorded, so the next run judges it again.
+      gaps.push({
+        ...base,
+        outcome: 'heal_deferred',
+        detail: 'could not read payment state from Stripe; retried next run',
+      });
+      continue;
+    }
+
+    // The grace window belongs on the moment of payment, not on the
+    // moment the checkout page opened. A buyer can sit on an open
+    // session for an hour and pay ten seconds before this cron runs;
+    // judged by `created` that purchase looks long settled, and we
+    // would race a webhook that is still in flight — two concurrent
+    // `unlockForUser` calls, one of which reverts after broadcast and
+    // leaves a dead tx hash on the row.
+    const paidAt = facts.paidAt ?? session.created;
+    if (paidAt > graceCutoff) {
+      skippedInFlight += 1;
+      continue;
+    }
+
+    // Money already returned. There is nothing to deliver, and healing
+    // would grant premium for a charge that ops reversed. A Checkout
+    // Session keeps reporting `payment_status: 'paid'` after a full
+    // refund, so only the charge can answer this.
+    if (facts.refunded || facts.disputed) {
+      skippedRefunded += 1;
+      continue;
+    }
+
     if (!wallet) {
       gaps.push({ ...base, outcome: 'no_wallet_anchor' });
       continue;
@@ -283,7 +417,7 @@ export async function reconcileStripeSessions(options?: {
     if (healsSpent >= maxHeals) {
       gaps.push({
         ...base,
-        outcome: 'heal_failed',
+        outcome: 'heal_deferred',
         detail: 'heal budget for this run exhausted; retried next run',
       });
       continue;
@@ -293,7 +427,11 @@ export async function reconcileStripeSessions(options?: {
     try {
       const result = await healWalletSession(session, wallet, email);
       gaps.push({ ...base, ...result });
-      if (result.outcome === 'healed' || result.outcome === 'healed_escrow_deferred') {
+      if (
+        result.outcome === 'healed' ||
+        result.outcome === 'healed_escrow_deferred' ||
+        result.outcome === 'healed_escrow_unqueued'
+      ) {
         gapsHealed += 1;
       }
     } catch (err) {
@@ -304,9 +442,11 @@ export async function reconcileStripeSessions(options?: {
   }
 
   return {
-    sessionsChecked: settled.length,
+    sessionsChecked: sessions.length,
     gapsFound: gaps.length,
     gapsHealed,
+    skippedInFlight,
+    skippedRefunded,
     gaps,
     truncated: pagesTruncated || healsSpent >= maxHeals,
   };
@@ -316,7 +456,8 @@ export async function reconcileStripeSessions(options?: {
 export function formatReconcileAlert(summary: ReconcileSummary): string {
   const lines = [
     `${summary.gapsFound} paid Stripe session(s) had no record in the database.`,
-    `${summary.gapsHealed} healed automatically. Checked ${summary.sessionsChecked} paid session(s) from the last ${RECONCILE_LOOKBACK_DAYS} days.`,
+    `${summary.gapsHealed} healed automatically. Checked ${summary.sessionsChecked} completed session(s) from the last ${RECONCILE_LOOKBACK_DAYS} days.`,
+    `Skipped: ${summary.skippedInFlight} charged too recently to judge, ${summary.skippedRefunded} refunded or disputed.`,
     '',
   ];
   for (const gap of summary.gaps) {
@@ -335,7 +476,12 @@ export function formatReconcileAlert(summary: ReconcileSummary): string {
     );
   }
   if (summary.truncated) {
-    lines.push('', 'Run was truncated — more sessions or gaps remain for the next run.');
+    lines.push(
+      '',
+      'RUN WAS TRUNCATED — the page or heal budget ran out, so sessions',
+      'beyond it were never examined. A gap may be hiding past the end of',
+      'this list. Raise the budget or widen the scan if this repeats.',
+    );
   }
   return lines.join('\n');
 }

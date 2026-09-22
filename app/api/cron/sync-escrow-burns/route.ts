@@ -110,6 +110,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       sessionsChecked: number;
       gapsFound: number;
       gapsHealed: number;
+      skippedInFlight: number;
+      skippedRefunded: number;
+      truncated: boolean;
       alerted: boolean;
       alertSkipReason?: string;
       error?: string;
@@ -354,16 +357,22 @@ export async function GET(req: Request): Promise<NextResponse> {
     let alerted = false;
     let alertSkipReason: string | undefined;
 
-    if (reconcile.gapsFound > 0) {
-      console.error('[escrow-sync] paid Stripe sessions with no DB record', {
+    // Truncation alerts on its own, with no gaps found. A run that
+    // stopped early did not examine every session, so "no gaps" is not
+    // a result — it is an unfinished check, and staying quiet about it
+    // would recreate exactly the silence this job exists to break.
+    if (reconcile.gapsFound > 0 || reconcile.truncated) {
+      console.error('[escrow-sync] stripe reconcile needs attention', {
         gapsFound: reconcile.gapsFound,
         gapsHealed: reconcile.gapsHealed,
+        truncated: reconcile.truncated,
         gaps: reconcile.gaps,
       });
-      const result = await sendOpsAlert(
-        `Griddle: ${reconcile.gapsFound} paid session(s) unrecorded, ${reconcile.gapsHealed} healed`,
-        formatReconcileAlert(reconcile),
-      );
+      const subject =
+        reconcile.gapsFound > 0
+          ? `Griddle: ${reconcile.gapsFound} paid session(s) unrecorded, ${reconcile.gapsHealed} healed`
+          : 'Griddle: Stripe reconcile run was truncated';
+      const result = await sendOpsAlert(subject, formatReconcileAlert(reconcile));
       alerted = result.sent;
       alertSkipReason = result.reason;
     }
@@ -372,6 +381,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       sessionsChecked: reconcile.sessionsChecked,
       gapsFound: reconcile.gapsFound,
       gapsHealed: reconcile.gapsHealed,
+      skippedInFlight: reconcile.skippedInFlight,
+      skippedRefunded: reconcile.skippedRefunded,
+      truncated: reconcile.truncated,
       alerted,
       ...(alertSkipReason ? { alertSkipReason } : {}),
     };
@@ -382,6 +394,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       sessionsChecked: 0,
       gapsFound: 0,
       gapsHealed: 0,
+      skippedInFlight: 0,
+      skippedRefunded: 0,
+      truncated: false,
       alerted: false,
       error: message,
     };
