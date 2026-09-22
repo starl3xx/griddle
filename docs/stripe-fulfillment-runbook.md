@@ -36,7 +36,7 @@ Outcomes per gap:
 | `healed_escrow_deferred` | Row written, buyer has premium, escrow queued for retry. | None; the queue drains next hour. |
 | `healed_escrow_unqueued` | Row written, buyer has premium, but the escrow neither opened nor reached the retry queue. | Open the escrow by hand. Nothing will retry this on its own. |
 | `heal_failed` | Nothing written. Buyer still has nothing. | Investigate now. |
-| `heal_deferred` | Not attempted this run — heal budget spent, or Stripe could not be read. | None; the next run retries it. |
+| `heal_deferred` | Not attempted this run — heal budget spent, or the charge could not be read. | None; the next run retries it. A gap that stays `heal_deferred` across several runs is not transient: read its detail line. |
 | `needs_manual_refund` | Wallet already premium from another purchase or grant. | Refund the duplicate charge in Stripe. |
 | `no_wallet_anchor` | Anonymous buyer, nothing durable to attach premium to. | Contact the buyer; grant by hand once they connect a wallet. |
 

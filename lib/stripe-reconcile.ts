@@ -149,17 +149,30 @@ async function listPaidSessions(
   return { sessions, truncated };
 }
 
-interface PaymentFacts {
-  /** When the card was actually charged. A checkout session's own
-   *  `created` is when the buyer OPENED the page, which can be long
-   *  before they pay. */
-  paidAt: number | null;
-  refunded: boolean;
-  disputed: boolean;
-  /** True when Stripe could not be read. The caller must not treat
-   *  unknown as clean. */
-  unknown: boolean;
-}
+/**
+ * What the payment behind a session says. A discriminated union, so
+ * the compiler enforces the rule the code depends on: nothing reads a
+ * charge time or a refund flag without first ruling out `unknown`.
+ * Unknown is NOT clean — refusing to heal is the only safe reading of
+ * a charge we never saw.
+ */
+type PaymentFacts =
+  | {
+      unknown: true;
+      /** Why it is unknown, for the alert line. */
+      detail: string;
+    }
+  | {
+      unknown: false;
+      /** When the card was actually charged. A checkout session's own
+       *  `created` is when the buyer OPENED the page, which can be
+       *  long before they pay. */
+      paidAt: number;
+      refunded: boolean;
+      disputed: boolean;
+    };
+
+const UNKNOWN_FACTS = (detail: string): PaymentFacts => ({ unknown: true, detail });
 
 /**
  * Read the payment behind a session: when it was charged, and whether
@@ -170,6 +183,12 @@ interface PaymentFacts {
  * answer either question. Only fetched for sessions that already look
  * like gaps, which are rare — this costs one API call per gap, not per
  * session.
+ *
+ * Every path that cannot produce a charge returns `unknown`. A
+ * completed session without one is not a normal state for a one-time
+ * payment, and guessing in either direction is worse than deferring:
+ * assume it is clean and we can heal a refund or race a live webhook;
+ * the deferred gap stays in the alert every hour until a person looks.
  */
 async function loadPaymentFacts(session: Stripe.Checkout.Session): Promise<PaymentFacts> {
   const paymentIntentId =
@@ -178,30 +197,40 @@ async function loadPaymentFacts(session: Stripe.Checkout.Session): Promise<Payme
       : (session.payment_intent?.id ?? null);
 
   if (!paymentIntentId) {
-    return { paidAt: null, refunded: false, disputed: false, unknown: false };
+    return UNKNOWN_FACTS('completed session carries no payment intent');
   }
 
   try {
     const intent = await getStripe().paymentIntents.retrieve(paymentIntentId, {
       expand: ['latest_charge'],
     });
-    const charge =
-      typeof intent.latest_charge === 'string' ? null : (intent.latest_charge ?? null);
-    if (!charge) {
-      return { paidAt: null, refunded: false, disputed: false, unknown: false };
+
+    // `expand` should always inflate this, but a string here means we
+    // hold an id and no facts — fetch it rather than discard it.
+    let charge: Stripe.Charge | null = null;
+    if (typeof intent.latest_charge === 'string') {
+      charge = await getStripe().charges.retrieve(intent.latest_charge);
+    } else {
+      charge = intent.latest_charge ?? null;
     }
+
+    if (!charge) {
+      return UNKNOWN_FACTS(`payment intent ${paymentIntentId} has no charge`);
+    }
+
     return {
+      unknown: false,
       paidAt: charge.created,
       refunded: charge.refunded || charge.amount_refunded > 0,
       disputed: charge.disputed,
-      unknown: false,
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('[reconcile] could not read payment state', {
       stripeSessionId: session.id,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     });
-    return { paidAt: null, refunded: false, disputed: false, unknown: true };
+    return UNKNOWN_FACTS(`could not read payment state from Stripe: ${message}`);
   }
 }
 
@@ -376,13 +405,17 @@ export async function reconcileStripeSessions(options?: {
     const facts = await loadPaymentFacts(session);
 
     if (facts.unknown) {
-      // Stripe was unreachable for this one. Do NOT heal on an unknown
-      // refund state, and do not call it a gap either — the session
-      // stays unrecorded, so the next run judges it again.
+      // The charge could not be read — Stripe was unreachable, or the
+      // completed session carries no payment intent or no charge at
+      // all. Never heal on that: an unseen charge could be refunded,
+      // or seconds old with its webhook still in flight. The session
+      // stays unrecorded, so the next run judges it again, and the
+      // gap keeps appearing in the alert until it resolves or a
+      // person looks.
       gaps.push({
         ...base,
         outcome: 'heal_deferred',
-        detail: 'could not read payment state from Stripe; retried next run',
+        detail: `${facts.detail}; not healed, retried next run`,
       });
       continue;
     }
@@ -394,7 +427,7 @@ export async function reconcileStripeSessions(options?: {
     // would race a webhook that is still in flight — two concurrent
     // `unlockForUser` calls, one of which reverts after broadcast and
     // leaves a dead tx hash on the row.
-    const paidAt = facts.paidAt ?? session.created;
+    const paidAt = facts.paidAt;
     if (paidAt > graceCutoff) {
       skippedInFlight += 1;
       continue;
