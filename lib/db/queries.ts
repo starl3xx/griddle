@@ -4992,3 +4992,68 @@ export async function deleteOpCost(id: number): Promise<boolean> {
   const result = await db.delete(adminCosts).where(eq(adminCosts.id, id)).returning({ id: adminCosts.id });
   return result.length > 0;
 }
+
+/**
+ * A paid Stripe checkout session, reduced to the two keys the DB uses
+ * to record it. `externalId` is `keccak256(sessionId)` — the same key
+ * the GriddlePremium contract uses for escrow idempotency.
+ */
+export interface StripeSessionKey {
+  sessionId: string;
+  externalId: string;
+}
+
+/**
+ * Reconcile support: of the given paid Stripe sessions, which ones
+ * already have a durable record?
+ *
+ * A fiat purchase lands in ONE of two shapes, so a single-table check
+ * would report false gaps:
+ *
+ *   - **Wallet path** — `premium_users` row keyed by wallet, carrying
+ *     `external_id`. This row is what actually grants premium.
+ *   - **Email-only path** — no `premium_users` row at all (premium is
+ *     granted through the session KV key); the durable trace is a
+ *     `profiles` row carrying `stripe_session_id`.
+ *
+ * The wallet path ALSO writes `profiles.stripe_session_id`, but that
+ * write is deliberately non-fatal in `recordFiatUnlock`, so it can be
+ * missing on a row that is otherwise healthy. Checking both tables and
+ * unioning the result is therefore the only test that neither
+ * over-reports nor under-reports.
+ *
+ * Returns the set of session ids that ARE recorded. Anything absent
+ * from the set is a gap: money taken, nothing delivered.
+ */
+export async function findRecordedStripeSessions(
+  sessions: StripeSessionKey[],
+): Promise<Set<string>> {
+  const recorded = new Set<string>();
+  if (sessions.length === 0) return recorded;
+
+  const sessionIds = sessions.map((s) => s.sessionId);
+  const externalIds = sessions.map((s) => s.externalId);
+
+  const [premiumRows, profileRows] = await Promise.all([
+    db
+      .select({ externalId: premiumUsers.externalId })
+      .from(premiumUsers)
+      .where(inArray(premiumUsers.externalId, externalIds)),
+    db
+      .select({ stripeSessionId: profiles.stripeSessionId })
+      .from(profiles)
+      .where(inArray(profiles.stripeSessionId, sessionIds)),
+  ]);
+
+  const recordedExternalIds = new Set(
+    premiumRows.map((r) => r.externalId).filter((id): id is string => !!id),
+  );
+  for (const row of profileRows) {
+    if (row.stripeSessionId) recorded.add(row.stripeSessionId);
+  }
+  for (const s of sessions) {
+    if (recordedExternalIds.has(s.externalId)) recorded.add(s.sessionId);
+  }
+
+  return recorded;
+}
