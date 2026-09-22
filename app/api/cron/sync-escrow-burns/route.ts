@@ -11,6 +11,8 @@ import {
 } from '@/lib/contracts/escrowSigner';
 import { quoteWordForUsd } from '@/lib/contracts/quoteWord';
 import { getPremiumRowByWallet } from '@/lib/db/queries';
+import { reconcileStripeSessions, formatReconcileAlert } from '@/lib/stripe-reconcile';
+import { sendOpsAlert } from '@/lib/resend';
 import { kv } from '@/lib/kv';
 import { db } from '@/lib/db/client';
 import { premiumUsers } from '@/lib/db/schema';
@@ -34,6 +36,14 @@ import { and, eq, isNotNull } from 'drizzle-orm';
  *     corresponding `premium_users.escrow_status` to 'burned' or
  *     'refunded', with the settling tx hash in `escrow_burn_tx`. Uses
  *     the `external_id` unique index so the join is O(1).
+ *
+ *  3. **Reconcile Stripe against the DB** — ask Stripe for every paid
+ *     checkout session in the last week and check each one has a
+ *     record. This is the only check that survives the webhook never
+ *     firing at all: responsibilities 1 and 2 both start from a row
+ *     the webhook wrote, so neither can see a payment that produced
+ *     nothing. Wallet-path gaps are healed in place; anything else is
+ *     reported by email to `OPS_ALERT_EMAIL`.
  *
  * Authorized via the shared `CRON_SECRET` header (Vercel Cron sets
  * this automatically from the env var).
@@ -96,6 +106,14 @@ export async function GET(req: Request): Promise<NextResponse> {
     scanFromBlock?: string;
     scanToBlock?: string;
     caughtUp?: boolean;
+    reconcile?: {
+      sessionsChecked: number;
+      gapsFound: number;
+      gapsHealed: number;
+      alerted: boolean;
+      alertSkipReason?: string;
+      error?: string;
+    };
   } = {
     retriesProcessed: 0,
     retriesSucceeded: 0,
@@ -325,6 +343,49 @@ export async function GET(req: Request): Promise<NextResponse> {
   const nextCursor =
     toBlock > CURSOR_OVERLAP_BLOCKS ? toBlock - CURSOR_OVERLAP_BLOCKS : 0n;
   await kv.set(CURSOR_KEY, nextCursor.toString());
+
+  // --- 3. Reconcile Stripe against the DB -------------------------------
+  // Runs last: the two steps above have already committed their work,
+  // so a slow or failing reconcile cannot cost us a settled burn. Any
+  // failure here is caught and reported rather than thrown — a broken
+  // reconcile must not make the cron look failed and mask steps 1-2.
+  try {
+    const reconcile = await reconcileStripeSessions();
+    let alerted = false;
+    let alertSkipReason: string | undefined;
+
+    if (reconcile.gapsFound > 0) {
+      console.error('[escrow-sync] paid Stripe sessions with no DB record', {
+        gapsFound: reconcile.gapsFound,
+        gapsHealed: reconcile.gapsHealed,
+        gaps: reconcile.gaps,
+      });
+      const result = await sendOpsAlert(
+        `Griddle: ${reconcile.gapsFound} paid session(s) unrecorded, ${reconcile.gapsHealed} healed`,
+        formatReconcileAlert(reconcile),
+      );
+      alerted = result.sent;
+      alertSkipReason = result.reason;
+    }
+
+    summary.reconcile = {
+      sessionsChecked: reconcile.sessionsChecked,
+      gapsFound: reconcile.gapsFound,
+      gapsHealed: reconcile.gapsHealed,
+      alerted,
+      ...(alertSkipReason ? { alertSkipReason } : {}),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[escrow-sync] reconcile step failed', err);
+    summary.reconcile = {
+      sessionsChecked: 0,
+      gapsFound: 0,
+      gapsHealed: 0,
+      alerted: false,
+      error: message,
+    };
+  }
 
   return NextResponse.json({ ok: true, summary });
 }

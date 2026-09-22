@@ -96,3 +96,38 @@ function magicLinkText(link: string, code?: string): string {
   const boundCodeLine = code ? `\n@${SITE_HOST} #${code}\n` : '';
   return `Sign in to Griddle\n\nClick the link below (expires in 15 minutes):\n\n${link}\n${codeLine}\nIf you didn't request this, ignore this email.${boundCodeLine}`;
 }
+
+/**
+ * Where operational alerts go. Unset in dev and on preview deploys,
+ * where an alert would be noise rather than signal.
+ */
+export const OPS_ALERT_EMAIL = process.env.OPS_ALERT_EMAIL ?? '';
+
+/**
+ * Send an operational alert to the address in `OPS_ALERT_EMAIL`.
+ *
+ * Never throws. An alert that fails must not take down the cron run
+ * that produced it — the summary is also returned in the cron's JSON
+ * response and written to the log, so the alert is the convenience
+ * copy, not the only record.
+ */
+export async function sendOpsAlert(
+  subject: string,
+  text: string,
+): Promise<{ sent: boolean; reason?: string }> {
+  if (!isEmailConfigured()) return { sent: false, reason: 'RESEND_API_KEY not set' };
+  if (!OPS_ALERT_EMAIL) return { sent: false, reason: 'OPS_ALERT_EMAIL not set' };
+  try {
+    const { error } = await getResend().emails.send({
+      from: FROM,
+      to: OPS_ALERT_EMAIL,
+      subject,
+      text,
+    });
+    if (error) return { sent: false, reason: error.message };
+    return { sent: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return { sent: false, reason: message };
+  }
+}
