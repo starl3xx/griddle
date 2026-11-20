@@ -22,3 +22,5 @@ See `README.md` → "Milestone Status" → "Conventions" for the authoritative r
 
 - Every change after M1 goes through a feature branch + PR. Never commit directly to `main`.
 - Cursor Bugbot reviews PRs automatically; address its comments and push fixes before merging.
+
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
